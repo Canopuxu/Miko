@@ -45,6 +45,7 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 | typing-inspection | [0.4.4](https://pypi.org/project/typing-inspection/0.4.4/) | MIT |
 | typing_extensions | [4.16.0](https://pypi.org/project/typing_extensions/4.16.0/) | PSF-2.0 |
 | uvicorn | [0.54.0](https://pypi.org/project/uvicorn/0.54.0/) | BSD-3-Clause |
+| websockets | [15.0.1](https://pypi.org/project/websockets/15.0.1/) | BSD-3-Clause；[许可副本](licenses/python/websockets/LICENSE) |
 
 ## 第二阶段 Web 依赖
 

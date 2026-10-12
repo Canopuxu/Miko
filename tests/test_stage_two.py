@@ -222,6 +222,17 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.service.turns)
         self.assertEqual(self.store.history(events[0]['conversation_id']), [])
 
+    async def test_qq_uses_approved_identity_and_author_records(self):
+        records = [{'author': {'kind': 'owner', 'name': '你'}, 'text': '我稍后回来'},
+                   {'author': {'kind': 'contact', 'name': '测试好友'}, 'text': '你好'}]
+        turn = self.service.begin_qq('qq:test', records)
+        await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed')
+        payload = self.requests[-1]
+        self.assertEqual(payload['messages'][0]['content'], '你是Miko，是号主形影不离的朋友，请你以自己的身份帮号主回应好友消息。')
+        self.assertEqual(json.loads(payload['messages'][1]['content'])['chat_records'], records)
+        self.assertNotIn('tools', payload)
+
 
 if __name__ == "__main__":
     unittest.main()

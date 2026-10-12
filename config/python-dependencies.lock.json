@@ -190,6 +190,15 @@
       "licenseFiles": [
         "licenses/python/uvicorn/LICENSE.md"
       ]
+    },
+    {
+      "name": "websockets",
+      "version": "15.0.1",
+      "source": "https://pypi.org/project/websockets/15.0.1/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/websockets/LICENSE"
+      ]
     }
   ],
   "dshArtifacts": [

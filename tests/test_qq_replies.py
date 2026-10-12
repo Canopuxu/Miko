@@ -1,0 +1,317 @@
+import asyncio
+from pathlib import Path
+import tempfile
+import sqlite3
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import httpx
+from websockets.asyncio.server import serve
+
+from miko.adapters.qq.onebot import EventReceiver, OneBot, QqConfig, SendError, SendUncertain
+from miko.domain.conversation.qq import QqService
+from miko.storage.chat import ChatStore
+from miko.storage.qq import QqStore
+
+
+class FakeChat:
+    def __init__(self, store):
+        self.store, self.calls = store, []
+        self.gate = None
+        self.text = '你好，我是 Miko。'
+
+    def begin_qq(self, cid, records):
+        self.calls.append(records)
+        turn = SimpleNamespace(text=self.text, status='completed', error=None)
+        async def run():
+            if self.gate:
+                await self.gate.wait()
+        turn.task = asyncio.create_task(run())
+        return turn
+
+    async def cancel(self, turn):
+        turn.status = 'cancelled'
+        if not turn.task.done():
+            self.gate.set()
+            await asyncio.gather(turn.task, return_exceptions=True)
+
+
+class FakeClient:
+    def __init__(self):
+        self.sent = []
+        self.gate = None
+        self.uncertain = False
+        self.on_send = None
+
+    async def target(self, account, friend):
+        return '测试好友'
+
+    async def send(self, account, friend, text, guard):
+        if self.gate:
+            await self.gate.wait()
+        guard()
+        self.sent.append((friend, text))
+        if self.on_send:
+            await self.on_send()
+        if self.uncertain:
+            raise SendUncertain('发送结果未知；不会重发')
+        return {'message_id': 900, 'timestamp': 1120}
+
+
+class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = ChatStore(Path(self.temp.name)/'chat.sqlite3')
+        self.chat, self.client = FakeChat(self.store), FakeClient()
+        self.now = 1000
+        self.service = QqService(self.chat, None, client=self.client, clock=lambda: self.now)
+        self.service.receiver.state.update(state='connected', account='123')
+        self.key = ('123','456')
+        self.service.store.add_friend(*self.key, '测试好友')
+        await self.service.configure(self.key, True)
+
+    async def asyncTearDown(self):
+        await self.service.close()
+        self.temp.cleanup()
+
+    def event(self, mid, text='你好', *, own=False, friend='456', media=False):
+        return {'post_type': 'message_sent' if own else 'message', 'message_type': 'private',
+            'self_id': 123, 'user_id': 123 if own else int(friend), 'target_id': int(friend),
+            'time': self.now, 'message_id': mid,
+            'message': [{'type': 'image' if media else 'text', 'data': {'text': text}}]}
+
+    async def receive(self, mid, text='你好', **kwargs):
+        await self.service.receive(self.event(mid,text,**kwargs))
+
+    async def due(self):
+        await self.service.tick()
+        tasks = [w.task for w in self.service.workers.values()]
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks), 2)
+
+    async def test_two_minute_wait_batches_then_continuous_chat(self):
+        await self.receive(1, '第一句')
+        self.now = 1020
+        await self.receive(2, '第二句')
+        self.now = 1119
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        self.now = 1120
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertEqual([r['text'] for r in self.chat.calls[0]], ['第一句','第二句'])
+        self.now = 1121
+        await self.receive(3, '继续聊')
+        self.now = 1122
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+        self.now = 1123
+        await self.due()
+        self.assertEqual(len(self.client.sent), 2)
+        self.assertIn('miko', [r['author']['kind'] for r in self.chat.calls[-1]])
+
+    async def test_owner_reply_clears_pending_then_next_message_waits_again(self):
+        await self.receive(1)
+        self.now = 1005
+        await self.receive(2, '我来回复', own=True)
+        self.now = 1200
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        await self.receive(3, '下一条')
+        self.now = 1319
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        self.now = 1320
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+
+    async def test_new_message_invalidates_generating_reply_and_rebuilds_context(self):
+        self.chat.gate = asyncio.Event()
+        await self.receive(1, '旧消息')
+        self.now = 1120
+        await self.service.tick()
+        await asyncio.sleep(.01)
+        await self.receive(2, '补充消息')
+        await asyncio.sleep(.01)
+        self.assertEqual(self.client.sent, [])
+        self.assertEqual(self.service.store.runs()[0]['state'], 'stale')
+        self.chat.gate.set()
+        self.now = 1122
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertEqual([r['text'] for r in self.chat.calls[-1]], ['旧消息','补充消息'])
+
+    async def test_owner_intervention_during_target_check_prevents_send(self):
+        self.client.gate = asyncio.Event()
+        await self.receive(1)
+        self.now = 1120
+        await self.service.tick()
+        await asyncio.sleep(.01)
+        await self.receive(2, '我在', own=True)
+        self.client.gate.set()
+        await asyncio.gather(*(w.task for w in list(self.service.workers.values())))
+        self.assertEqual(self.client.sent, [])
+
+    async def test_echo_before_receipt_is_miko_but_other_own_message_is_owner(self):
+        async def echo():
+            await self.receive(900, self.chat.text, own=True)
+            await self.receive(901, '我也在', own=True)
+        self.client.on_send = echo
+        await self.receive(1)
+        self.now = 1120
+        await self.due()
+        messages = self.store.messages(self.service.store.friend(self.key)['conversation_id'])
+        self.assertEqual([m['author']['kind'] for m in messages], ['contact','miko','owner'])
+        self.assertEqual(self.service.store.friend(self.key)['mode'], 'owner')
+        await self.receive(900, self.chat.text, own=True)
+        self.assertEqual(len(self.store.messages(self.service.store.friend(self.key)['conversation_id'])),3)
+
+    async def test_unknown_send_pauses_without_retry_then_explicit_restore(self):
+        self.client.uncertain = True
+        await self.receive(1)
+        self.now = 1120
+        await self.due()
+        self.now = 1400
+        await self.receive(2)
+        await self.due()
+        self.assertEqual(len(self.client.sent),1)
+        self.assertTrue(self.service.store.friend(self.key)['blocked'])
+        await self.service.configure(self.key,True)
+        await self.due()
+        self.assertEqual(len(self.client.sent),1)
+
+    async def test_length_check_blocks_overlong_reply(self):
+        self.chat.text = '字'*81
+        await self.receive(1)
+        self.now = 1120
+        await self.due()
+        self.assertEqual(self.client.sent,[])
+        self.assertEqual(self.service.store.runs()[0]['state'],'error')
+
+    async def test_disconnect_and_restart_do_not_send_stale_pending_or_unknown_run(self):
+        await self.receive(1)
+        await self.service.source_changed('disconnected')
+        self.now = 1300
+        await self.due()
+        self.assertEqual(self.client.sent,[])
+        run = self.service.store.new_run(self.key,self.now)
+        self.service.store.update_run(run,state='sending',text='尚无回执')
+        reopened = QqStore(ChatStore(self.store.path))
+        reopened.recover()
+        self.assertTrue(reopened.friend(self.key)['blocked'])
+        self.assertEqual(reopened.runs()[0]['state'],'unknown')
+        self.assertIsNone(reopened.friend(self.key)['due_at'])
+
+    async def test_friends_have_independent_switches_and_contexts(self):
+        other = ('123','789')
+        self.service.store.add_friend(*other,'另一位好友')
+        await self.receive(1,'不接话',friend='789')
+        await self.receive(2,'需要接话')
+        self.now = 1120
+        await self.due()
+        self.assertEqual(self.client.sent,[('456',self.chat.text)])
+        self.assertNotIn('不接话',[r['text'] for r in self.chat.calls[0]])
+
+    async def test_continuous_messages_are_collected_for_at_most_eight_seconds(self):
+        self.service.store.update_friend(self.key,mode='miko')
+        for mid in range(1,10):
+            self.now = 1000 + mid - 1
+            await self.receive(mid,str(mid))
+            await self.due()
+        self.assertEqual(len(self.client.sent),1)
+        self.assertEqual(len(self.chat.calls[0]),9)
+
+    async def test_nontext_message_invalidates_text_reply_and_is_saved(self):
+        await self.receive(1)
+        await self.receive(2,media=True)
+        self.now = 1200
+        await self.due()
+        self.assertEqual(self.client.sent,[])
+        messages=self.store.messages(self.service.store.friend(self.key)['conversation_id'])
+        self.assertEqual(messages[-1]['text'],'[图片]')
+
+    async def test_receipt_storage_failure_blocks_next_send_and_releases_worker(self):
+        await self.receive(1)
+        self.now = 1120
+        original=self.service.store.update_run
+        def failing(rid,**fields):
+            if fields.get('state') in ('sent','unknown'):
+                raise sqlite3.OperationalError('database read-only')
+            return original(rid,**fields)
+        with patch.object(self.service.store,'update_run',side_effect=failing):
+            with self.assertLogs('miko.domain.conversation.qq',level='ERROR'):
+                await self.due()
+        self.assertFalse(self.service.workers)
+        self.assertEqual(self.service.status()['friends'][0]['state'],'blocked')
+        self.now = 1400
+        await self.receive(2)
+        await self.due()
+        self.assertEqual(len(self.client.sent),1)
+
+    async def test_restart_recovers_confirmed_receipt_without_resending(self):
+        run = self.service.store.new_run(self.key,self.now)
+        self.service.store.update_run(run,state='sent',text='已发送的回复',receipt_id=750)
+        reopened = QqStore(ChatStore(self.store.path))
+        reopened.recover()
+        messages=self.store.messages(reopened.friend(self.key)['conversation_id'])
+        self.assertEqual([(r['author']['kind'],r['text']) for r in messages],[('miko','已发送的回复')])
+        reopened.recover()
+        self.assertEqual(len(self.store.messages(reopened.friend(self.key)['conversation_id'])),1)
+        self.assertEqual(self.client.sent,[])
+
+
+class OneBotTests(unittest.IsolatedAsyncioTestCase):
+    def config(self,ws='ws://127.0.0.1:3001'):
+        return QqConfig(http_url='http://127.0.0.1:3000',ws_url=ws,account='123')
+
+    async def test_identity_literal_text_and_uncertain_receipt_without_retry(self):
+        calls=[]
+        def transport(request):
+            import json
+            calls.append((request.url.path,json.loads(request.content)))
+            data = {'user_id':123} if request.url.path.endswith('get_login_info') else [{'user_id':456}]
+            if request.url.path.endswith('send_private_msg'):
+                return httpx.Response(200,json={'status':'async','retcode':1})
+            return httpx.Response(200,json={'status':'ok','retcode':0,'data':data})
+        client=OneBot(self.config(),httpx.MockTransport(transport))
+        with self.assertRaises(SendError):
+            await client.target('999','456')
+        with self.assertRaises(SendUncertain):
+            await client.send('123','456','[CQ:image,file=x]',lambda:None)
+        sends=[payload for path,payload in calls if path.endswith('send_private_msg')]
+        self.assertEqual(sends,[{'user_id':456,'message':[{'type':'text','data':{'text':'[CQ:image,file=x]'}}]}])
+
+    async def test_websocket_verifies_identity_and_rejects_other_account(self):
+        import json
+        allow_bad = asyncio.Event()
+        async def ws_handler(ws):
+            await ws.send(json.dumps({'post_type':'meta_event','meta_event_type':'lifecycle','self_id':123}))
+            await allow_bad.wait()
+            await ws.send(json.dumps({'post_type':'message','self_id':999,'message_type':'private'}))
+            await ws.wait_closed()
+        def transport(request):
+            return httpx.Response(200,json={'status':'ok','retcode':0,'data':{'user_id':123}})
+        connected, mismatch = asyncio.Event(), asyncio.Event()
+        events=[]
+        async def on_event(event): events.append(event)
+        async def on_change(state):
+            if state=='connected': connected.set()
+            if state=='account_mismatch': mismatch.set()
+        async with serve(ws_handler,'127.0.0.1',0) as server:
+            port=server.sockets[0].getsockname()[1]
+            client=OneBot(self.config(f'ws://127.0.0.1:{port}'),httpx.MockTransport(transport))
+            receiver=EventReceiver(client,on_event,on_change)
+            receiver.start()
+            try:
+                await asyncio.wait_for(connected.wait(),2)
+                allow_bad.set()
+                await asyncio.wait_for(mismatch.wait(),2)
+                self.assertEqual(len(events),1)
+                self.assertEqual(receiver.status()['state'],'account_mismatch')
+            finally:
+                await receiver.close()
+
+
+if __name__=='__main__':
+    unittest.main()

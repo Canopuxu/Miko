@@ -35,6 +35,9 @@ class Turn:
     error: str | None = None
     provider_requests: int = 0
     last_checkpoint: float = 0
+    context: list[dict] | None = None
+    system_prompt: str | None = None
+    status: str = 'running'
 
     def close_runtime(self):
         with self.lifecycle:
@@ -89,7 +92,7 @@ class ChatService:
             turn.runtime = DshRuntime(
                 self.settings, base_url=f"{self.settings.url}/_runtime/llm/{turn.id}",
                 token=self.bridge_token, model=self.provider.model,
-                patches=(str(self.patch),), system_prompt=self.system_prompt,
+                patches=(str(self.patch),), system_prompt=turn.system_prompt or self.system_prompt,
             )
 
             def generate():
@@ -118,14 +121,28 @@ class ChatService:
         finally:
             await asyncio.to_thread(turn.close_runtime)
             try:
-                self.store.finish(turn.id, turn.text, status, turn.error)
+                if turn.user_message_id:
+                    self.store.finish(turn.id, turn.text, status, turn.error)
             except sqlite3.Error:
                 logging.getLogger(__name__).exception("Unable to save completed chat turn")
                 status = 'error'
                 turn.error = '回复未能完整保存，请检查本机存储后重试'
             self.turns.pop(turn.id, None)
+            turn.status = status
             turn.events.put_nowait({"type": "done", "status": status,
                                     "text": turn.text, "error": turn.error})
+
+    def begin_qq(self, conversation_id: str, records: list[dict]) -> Turn:
+        prompt_path = REPO_ROOT / 'config/defaults/qq-system-prompt.txt'
+        if self.provider is None or not prompt_path.exists():
+            raise ValueError('QQ 模型或已审核提示词尚未就绪')
+        message = json.dumps({'chat_records': records}, ensure_ascii=False)
+        turn = Turn(uuid.uuid4().hex, conversation_id, message,
+                    context=[{'role': 'user', 'content': message}],
+                    system_prompt=prompt_path.read_text(encoding='utf-8').strip())
+        self.turns[turn.id] = turn
+        turn.task = asyncio.create_task(self.run(turn))
+        return turn
 
     def conversation_detail(self, conversation_id: str) -> dict:
         conversation = self.store.conversation(conversation_id)
@@ -157,9 +174,9 @@ class ChatService:
         # Miko owns the cloud context. No default coding instructions or tools are forwarded.
         payload = {
             "model": self.provider.model,
-            "messages": [{"role": "system", "content": self.system_prompt}]
-                        + self.store.history(turn.conversation_id)
-                        + [{"role": "user", "content": turn.message}],
+            "messages": [{"role": "system", "content": turn.system_prompt or self.system_prompt}]
+                        + (turn.context if turn.context is not None else self.store.history(turn.conversation_id)
+                           + [{"role": "user", "content": turn.message}]),
             "stream": True, "max_tokens": 2048,
         }
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
@@ -197,7 +214,7 @@ class ChatService:
                             if choice.get("index", 0) == 0 and isinstance(text, str) and text:
                                 turn.text += text
                                 now = time.monotonic()
-                                if now - turn.last_checkpoint >= .5:
+                                if turn.user_message_id and now - turn.last_checkpoint >= .5:
                                     self.store.checkpoint(turn.id, turn.text)
                                     turn.last_checkpoint = now
                                 turn.events.put_nowait({"type": "delta", "text": text})

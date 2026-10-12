@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import sqlite3
 import unittest
 
 from miko.storage.chat import ChatStore
@@ -22,7 +23,7 @@ class ChatStorageTests(unittest.TestCase):
             {'role': 'user', 'content': '你好'}, {'role': 'assistant', 'content': '你好呀'},
         ])
         with reopened.connect() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
 
     def test_interrupted_partial_reply_is_kept_but_excluded_from_context(self):
         self.store.begin_turn('conversation', 'finished', '第一轮')
@@ -51,6 +52,19 @@ class ChatStorageTests(unittest.TestCase):
         messages = self.store.messages('qq-conversation')
         self.assertEqual([m['author']['kind'] for m in messages], ['owner', 'miko', 'contact'])
         self.assertTrue(all(m['source'] == 'qq' for m in messages))
+
+    def test_upgrade_from_chat_only_database_preserves_existing_history(self):
+        old_path=Path(self.temporary.name)/'old.sqlite3'
+        sql=(Path(__file__).parents[1]/'apps/backend/src/miko/storage/migrations/001_chat.sql').read_text(encoding='utf-8')
+        with sqlite3.connect(old_path) as db:
+            db.executescript(sql+'\nPRAGMA user_version=1;')
+            db.execute("INSERT INTO conversations VALUES ('saved','原来的对话','web',1,1)")
+        db.close()
+        upgraded=ChatStore(old_path)
+        self.assertEqual(upgraded.list_conversations()[0]['title'],'原来的对话')
+        with upgraded.connect() as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],2)
+            self.assertEqual(db.execute('SELECT count(*) FROM qq_friends').fetchone()[0],0)
 
 
 if __name__ == '__main__':

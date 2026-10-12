@@ -16,11 +16,14 @@ class ChatStore:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 1:
+            if version > 2:
                 raise RuntimeError("聊天数据库版本较新，请使用对应版本的 Miko")
             if version == 0:
                 sql = (Path(__file__).parent / "migrations/001_chat.sql").read_text(encoding="utf-8")
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=1;\nCOMMIT;")
+            if version < 2:
+                sql = (Path(__file__).parent / 'migrations/002_qq.sql').read_text(encoding='utf-8')
+                db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=2;\nCOMMIT;')
 
     @contextmanager
     def connect(self):

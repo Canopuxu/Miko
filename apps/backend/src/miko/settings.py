@@ -90,6 +90,11 @@ class Settings:
             return None
         return ProviderConfig.model_validate_json(path.read_text(encoding="utf-8-sig"))
 
+    def load_qq(self):
+        from miko.adapters.qq.onebot import QqConfig
+        path = self.local_root / 'config/qq.local.json'
+        return QqConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
+
 
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(".tmp")
