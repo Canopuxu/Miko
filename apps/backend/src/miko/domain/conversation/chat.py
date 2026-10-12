@@ -1,8 +1,11 @@
 import asyncio
 from dataclasses import dataclass, field
 import json
+import logging
 import secrets
+import sqlite3
 import threading
+import time
 import uuid
 
 from deepseek_harness.api import Session
@@ -12,6 +15,7 @@ import httpx
 
 from miko.adapters.dsh.runtime import DshRuntime
 from miko.settings import REPO_ROOT, Settings
+from miko.storage.chat import ChatStore
 
 
 @dataclass
@@ -19,6 +23,7 @@ class Turn:
     id: str
     conversation_id: str
     message: str
+    user_message_id: str = ""
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
     cancelled: bool = False
     runtime: DshRuntime | None = None
@@ -29,6 +34,7 @@ class Turn:
     text: str = ""
     error: str | None = None
     provider_requests: int = 0
+    last_checkpoint: float = 0
 
     def close_runtime(self):
         with self.lifecycle:
@@ -37,12 +43,13 @@ class Turn:
 
 
 class ChatService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, store: ChatStore | None = None):
         self.settings = settings
         self.provider = settings.load_provider()
         self.system_prompt = (REPO_ROOT / "config/defaults/system-prompt.txt").read_text(encoding="utf-8").strip()
         self.bridge_token = secrets.token_urlsafe(32)
-        self.conversations: dict[str, list[dict]] = {}
+        self.store = store or ChatStore(settings.database_path)
+        self.store.recover_interrupted()
         self.turns: dict[str, Turn] = {}
         # SDK carrier includes coding tools by default. Chat has no tool calls in this stage.
         self.patch = settings.local_root / "runtime/dsh/chat.patch.json"
@@ -63,13 +70,15 @@ class ChatService:
             raise HTTPException(503, "尚未配置模型，请填写 MikoLocal/config/provider.local.json")
         if not message.strip():
             raise HTTPException(422, "消息不能为空")
-        if conversation_id is not None and conversation_id not in self.conversations:
-            raise HTTPException(404, "对话已结束，请开启新对话")
+        if conversation_id is not None:
+            existing = self.store.conversation(conversation_id)
+            if existing is None or existing['source'] != 'web':
+                raise HTTPException(404, "找不到这条对话，请开启新对话")
         conversation_id = conversation_id or uuid.uuid4().hex
         if any(t.conversation_id == conversation_id for t in self.turns.values()):
             raise HTTPException(409, "当前对话仍在生成，请先停止或等待结束")
-        self.conversations.setdefault(conversation_id, [])
         turn = Turn(uuid.uuid4().hex, conversation_id, message.strip())
+        turn.user_message_id = self.store.begin_turn(conversation_id, turn.id, turn.message)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         return turn
@@ -99,10 +108,6 @@ class ChatService:
                 status = "error"
             elif result is not None and result.finish_reason == "completed":
                 turn.text = result.final_response
-                self.conversations[turn.conversation_id].extend([
-                    {"role": "user", "content": turn.message},
-                    {"role": "assistant", "content": turn.text},
-                ])
                 status = "completed"
             else:
                 turn.error = "生成未正常完成，请重试"
@@ -112,9 +117,22 @@ class ChatService:
                 turn.error = "生成连接中断，请重试"
         finally:
             await asyncio.to_thread(turn.close_runtime)
+            try:
+                self.store.finish(turn.id, turn.text, status, turn.error)
+            except sqlite3.Error:
+                logging.getLogger(__name__).exception("Unable to save completed chat turn")
+                status = 'error'
+                turn.error = '回复未能完整保存，请检查本机存储后重试'
             self.turns.pop(turn.id, None)
             turn.events.put_nowait({"type": "done", "status": status,
                                     "text": turn.text, "error": turn.error})
+
+    def conversation_detail(self, conversation_id: str) -> dict:
+        conversation = self.store.conversation(conversation_id)
+        if conversation is None or conversation['source'] != 'web':
+            raise HTTPException(404, "找不到这条对话")
+        active = next((t.id for t in self.turns.values() if t.conversation_id == conversation_id), None)
+        return {**conversation, 'messages': self.store.messages(conversation_id), 'active_turn_id': active}
 
     async def cancel(self, turn: Turn):
         turn.cancelled = True
@@ -140,7 +158,7 @@ class ChatService:
         payload = {
             "model": self.provider.model,
             "messages": [{"role": "system", "content": self.system_prompt}]
-                        + self.conversations[turn.conversation_id]
+                        + self.store.history(turn.conversation_id)
                         + [{"role": "user", "content": turn.message}],
             "stream": True, "max_tokens": 2048,
         }
@@ -178,6 +196,10 @@ class ChatService:
                             text = (choice.get("delta") or {}).get("content")
                             if choice.get("index", 0) == 0 and isinstance(text, str) and text:
                                 turn.text += text
+                                now = time.monotonic()
+                                if now - turn.last_checkpoint >= .5:
+                                    self.store.checkpoint(turn.id, turn.text)
+                                    turn.last_checkpoint = now
                                 turn.events.put_nowait({"type": "delta", "text": text})
                     yield (line + "\n").encode("utf-8")
             except (httpx.HTTPError, ValueError):

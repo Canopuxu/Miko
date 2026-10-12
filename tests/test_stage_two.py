@@ -2,6 +2,8 @@ import asyncio
 import json
 from pathlib import Path
 import socket
+import sqlite3
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ import uvicorn
 from miko.api.chat import chat_router
 from miko.domain.conversation.chat import ChatService
 from miko.settings import ProviderConfig, Settings
+from miko.storage.chat import ChatStore
 
 
 LOCAL_ROOT = Path(__file__).resolve().parents[2] / "MikoLocal"
@@ -28,9 +31,11 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.requests = []
         self.remote_closed = asyncio.Event()
         self.waiting_headers = asyncio.Event()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.store = ChatStore(Path(self.temporary.name) / 'chat.sqlite3')
         config = ProviderConfig(api_base=settings.url + "/fake", api_key="fake-private-key", model="fake-model")
         with patch.object(Settings, "load_provider", return_value=config):
-            self.service = ChatService(settings)
+            self.service = ChatService(settings, self.store)
         app = FastAPI()
         app.include_router(chat_router(self.service))
 
@@ -75,6 +80,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         self.server.should_exit = True
         await asyncio.wait_for(self.server_task, 10)
+        self.temporary.cleanup()
 
     @staticmethod
     def chunk(text, finish=None):
@@ -128,7 +134,10 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(remainder[-1]["status"], "cancelled", remainder)
         await asyncio.wait_for(self.remote_closed.wait(), 3)
         self.assertFalse(psutil.pid_exists(pid))
-        self.assertEqual(self.service.conversations[first["conversation_id"]], [])
+        self.assertEqual(self.store.history(first["conversation_id"]), [])
+        saved = self.store.messages(first['conversation_id'])
+        self.assertEqual(saved[-1]['status'], 'cancelled')
+        self.assertEqual(saved[-1]['text'], '你好')
         followup = await self.collect("after stop", first["conversation_id"])
         self.assertEqual(followup[-1]["status"], "completed", followup)
         self.assertEqual(len(self.requests[-1]["messages"]), 2)
@@ -175,6 +184,43 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(remainder[-1]["status"], "cancelled", remainder)
         await asyncio.wait_for(self.remote_closed.wait(), 3)
         self.assertFalse(self.service.turns)
+
+    async def test_history_api_and_continuation_after_service_restart(self):
+        first = await self.collect('saved first conversation')
+        first_id = first[0]['conversation_id']
+        second = await self.collect('another conversation')
+        listing = (await self.client.get('/api/conversations')).json()['conversations']
+        self.assertEqual([row['id'] for row in listing], [second[0]['conversation_id'], first_id])
+        detail = (await self.client.get(f'/api/conversations/{first_id}')).json()
+        self.assertEqual([m['author']['kind'] for m in detail['messages']], ['owner', 'miko'])
+        self.assertTrue(all(m['source'] == 'web' for m in detail['messages']))
+        self.assertIsNone(detail['active_turn_id'])
+        await self.service.close()
+        with patch.object(Settings, 'load_provider', return_value=self.service.provider):
+            restarted = ChatService(self.service.settings, ChatStore(self.store.path))
+        # Keep the running test HTTP listener; replace its service state as a process restart would.
+        self.service.__dict__.update(restarted.__dict__)
+        continued = await self.collect('continue after restart', first_id)
+        self.assertEqual(continued[-1]['status'], 'completed', continued)
+        self.assertEqual([m['content'] for m in self.requests[-1]['messages'][1:]],
+                         ['saved first conversation', '你好，Miko', 'continue after restart'])
+        self.assertEqual((await self.client.get('/api/conversations/not-found')).status_code, 404)
+
+    async def test_failure_is_kept_in_history_with_error(self):
+        failed = await self.collect('fail')
+        detail = (await self.client.get(f'/api/conversations/{failed[0]["conversation_id"]}')).json()
+        self.assertEqual(detail['messages'][-1]['status'], 'error')
+        self.assertIn('503', detail['messages'][-1]['error'])
+        self.assertNotIn('fake-private-key', json.dumps(detail))
+
+    async def test_failed_database_write_ends_stream_and_releases_turn(self):
+        with patch.object(self.store, 'finish', side_effect=sqlite3.OperationalError('database is read-only')):
+            with self.assertLogs('miko.domain.conversation.chat', level='ERROR'):
+                events = await self.collect('hello')
+        self.assertEqual(events[-1]['status'], 'error')
+        self.assertIn('保存', events[-1]['error'])
+        self.assertFalse(self.service.turns)
+        self.assertEqual(self.store.history(events[0]['conversation_id']), [])
 
 
 if __name__ == "__main__":

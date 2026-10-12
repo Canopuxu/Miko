@@ -63,6 +63,10 @@ class Settings:
         return self.local_root / "runtime/pids/backend.json"
 
     @property
+    def database_path(self) -> Path:
+        return self.local_root / "data/database/miko.sqlite3"
+
+    @property
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
