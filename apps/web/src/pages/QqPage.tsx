@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { getJson, responseError, type Message } from '../api/chat';
+import { StickerLibrary } from './StickerLibrary';
+import { FriendRelationships } from './FriendRelationships';
 
 type Friend = { account: string; friend: string; name: string; enabled: number; blocked: number;
-  state: string; mode: string; note: string; due_at: number | null };
-type Run = { id: string; state: string; text: string; error: string | null; created_at: number };
+  state: string; mode: string; note: string; due_at: number | null;
+  owner_relationship: string; miko_relationship: string; miko_introduced: number; intro_receipt_id: number | null };
+type Run = { id: string; state: string; text: string; error: string | null; created_at: number;
+  bubbles: { position: number; text: string; state: string; receipt_id: number | null; error: string | null }[] };
+type QqMessage = Message & { message_id: number; recalled: boolean;
+  segments: { type: string; message_id?: number; sticker_id?: string }[];
+  quoted_message?: { text?: string; message_id: number } };
 type QqStatus = { receiver: { state: string; account: string; note: string }; friends: Friend[] };
-type Detail = { messages: Message[]; runs: Run[] };
+type Detail = { messages: QqMessage[]; runs: Run[] };
 const states: Record<string, string> = { disabled: '已关闭', blocked: '等待核对', waiting: '等待接话',
   generating: '正在生成', sending: '正在发送', chatting: 'Miko 接话中', listening: '等待新消息',
-  sent: '已发送', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断' };
+  sent: '已发送', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断',
+  pending: '待发送', preparing: '准备发送', cancelled: '已取消', between_bubbles: '接话中' };
 const timeLabel = (stamp: number) => new Date(stamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function QqPage() {
@@ -64,6 +72,7 @@ export function QqPage() {
     <aside className="sidebar">
       <a className="brand" href="/" aria-label="Miko 首页"><span className="brand-mark">m</span><span>Miko</span></a>
       <a className="section-link" href="/">← 和 Miko 聊天</a>
+      <a className="section-link" href="/?view=profiles">设定与资料 →</a>
       <div className="history-label">QQ 好友</div>
       <nav className="conversation-list" aria-label="QQ 好友">
         {status?.friends.map(item => <button key={`${item.account}:${item.friend}`}
@@ -99,12 +108,24 @@ export function QqPage() {
               {detail.messages.map(message => <article key={message.id} className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'}`}>
                 <div className="message-avatar">{message.author.kind === 'miko' ? 'm' : message.author.name.slice(0, 1)}</div>
                 <div className="message-content"><div className="message-name">{message.author.name}
-                  <time>{timeLabel(message.created_at)}</time></div><div className="message-text">{message.text}</div></div>
+                  <time>{timeLabel(message.created_at)}</time></div>
+                  {message.segments.filter(s => s.type === 'reply').map((s, i) => <blockquote key={i} className="qq-quote">
+                    {detail.messages.find(m => m.message_id === s.message_id)?.text ?? message.quoted_message?.text ?? '引用消息'}
+                  </blockquote>)}
+                  <div className="message-text">{message.recalled ? '这条消息已撤回' : message.text}</div>
+                  {!message.recalled && message.segments.filter(s => s.sticker_id).map((s, i) => <img key={i} className="chat-sticker"
+                    src={`/api/qq/stickers/${friend.account}/${s.sticker_id}/image`} alt={message.text} />)}
+                </div>
               </article>)}
               {!!detail.runs.length && <details className="reply-runs"><summary>接话记录 · {detail.runs.length}</summary>
                 {detail.runs.map(run => <div key={run.id} className="reply-run"><small>{timeLabel(run.created_at*1000)} · {states[run.state] ?? run.state}</small>
-                  {run.text && <p>{run.text}</p>}{run.error && <p className="message-note">{run.error}</p>}</div>)}
+                  {run.bubbles.length ? run.bubbles.map(b => <p key={b.position}>{b.text}
+                    <small className="bubble-state">{states[b.state] ?? b.state}{b.receipt_id !== null ? ` · ${b.receipt_id}` : ''}</small>
+                    {b.error && <span className="message-note">{b.error}</span>}</p>) : run.text && <p>{run.text}</p>}
+                  {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
+              <StickerLibrary key={friend.account} account={friend.account} />
+              <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} />
               <div ref={bottom} />
             </div>}
         </section>

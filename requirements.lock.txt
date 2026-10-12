@@ -12,6 +12,7 @@ httpx==0.28.1
 idna==3.20
 opentelemetry-api==1.45.1
 psutil==7.2.2
+Pillow==12.3.0
 pydantic==2.14.1
 pydantic_core==2.50.1
 setuptools==82.0.1

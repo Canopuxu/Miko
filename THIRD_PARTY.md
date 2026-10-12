@@ -1,7 +1,7 @@
 # 开源来源
 
 本清单记录 Miko 开发准备阶段下载的源码。具体提交、模块路径与本地位置见
-[`config/upstream.lock.json`](config/upstream.lock.json)。这些调研源码尚未直接接入应用；第一阶段使用的发行包记录在下表。
+[`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包已接入应用，Tulpa 的相关 QQ 流程已适配；memU、Memobase 和 jieba 保留供后续接入。实际使用的发行包记录在下表。
 
 | 项目 | 来源 | 许可 | 选用部分 |
 | --- | --- | --- | --- |
@@ -9,11 +9,12 @@
 | memU | [NevaMind-AI/memU](https://github.com/NevaMind-AI/memU) | Apache-2.0；[许可副本](licenses/memU-LICENSE.txt) | MemoryService、记忆提交与检索、SQLite 存储、Embedding 接口 |
 | Memobase | [memodb-io/memobase](https://github.com/memodb-io/memobase) | Apache-2.0；[许可副本](licenses/memobase-LICENSE.txt) | 中文记忆提炼、合并与事件整理流程 |
 | jieba | [fxsjy/jieba](https://github.com/fxsjy/jieba) | MIT；[许可副本](licenses/jieba-LICENSE.txt) | 中文分词 |
-| Tulpa 本地 QQ 基线 | [fumingyang2004/Tulpa](https://github.com/fumingyang2004/Tulpa)；本地提交 `7b603d3` | MIT；[许可副本](licenses/tulpa-qq-baseline-LICENSE.txt) | 已验证的 QQ 接收、调度、发送确认及 DSH 桥接流程 |
+| Tulpa 本地 QQ 基线 | [fumingyang2004/Tulpa](https://github.com/fumingyang2004/Tulpa)；本地提交 `7b603d3` | MIT；[许可副本](licenses/tulpa-qq-baseline-LICENSE.txt) | QQ 接收、调度、发送确认；适配 MCP Chat 的消息段解析、原生引用校验、ChatTurns 气泡队列/节奏/回执恢复，以及 ChatMedia/StickerLibrary 的原图校验、中文匹配和表情笔记 |
 | SQLite | [sqlite.org](https://sqlite.org/) | Public Domain；[版权说明](https://sqlite.org/copyright.html) | 通过现有 Python 标准库 sqlite3 保存会话、消息与作者 |
 
 上游根目录许可不替代仓库内其他组件或后续安装依赖各自的许可。
-源码中的提示词保留供审阅，尚未采用或启用。
+上游角色提示词保留供审阅；当前身份及 QQ 输出格式使用用户审核后的项目文件。
+第五阶段设定库复用 Tulpa 的中文双字匹配、全文检索查询与相关片段筛选方法；手动资料不作为模仿主人表达的范本。角色资料、主人资料与好友关系经项目接口组装后通过现有独立 DSH 执行。memU 的自动记忆整理仍留待后续接入。
 
 ## Python 依赖
 
@@ -38,6 +39,7 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 | idna | [3.20](https://pypi.org/project/idna/3.20/) | BSD-3-Clause |
 | opentelemetry-api | [1.45.1](https://pypi.org/project/opentelemetry-api/1.45.1/) | Apache-2.0 |
 | psutil | [7.2.2](https://pypi.org/project/psutil/7.2.2/) | BSD-3-Clause |
+| Pillow | [12.3.0](https://pypi.org/project/Pillow/12.3.0/) | MIT-CMU；[许可副本](licenses/python/Pillow/LICENSE)及随包第三方声明 |
 | pydantic | [2.14.1](https://pypi.org/project/pydantic/2.14.1/) | MIT |
 | pydantic_core | [2.50.1](https://pypi.org/project/pydantic_core/2.50.1/) | MIT |
 | setuptools | [82.0.1](https://pypi.org/project/setuptools/82.0.1/) | MIT |

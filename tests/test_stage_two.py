@@ -17,6 +17,8 @@ from miko.api.chat import chat_router
 from miko.domain.conversation.chat import ChatService
 from miko.settings import ProviderConfig, Settings
 from miko.storage.chat import ChatStore
+from miko.storage.qq import QqStore
+from miko.api.profiles import ProfileInput
 
 
 LOCAL_ROOT = Path(__file__).resolve().parents[2] / "MikoLocal"
@@ -108,8 +110,8 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         conversation = first[0]["conversation_id"]
         second = await self.collect("continue", conversation)
         self.assertEqual(second[-1]["status"], "completed", second)
-        self.assertEqual(self.requests[-1]["messages"], [
-            {"role": "system", "content": "你是 Miko，用中文自然地与用户交谈。"},
+        self.assertTrue(self.requests[-1]['messages'][0]['content'].startswith('你是 Miko，用中文自然地与用户交谈。\n\n'))
+        self.assertEqual(self.requests[-1]["messages"][1:], [
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "你好，Miko"},
             {"role": "user", "content": "continue"},
@@ -225,13 +227,39 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
     async def test_qq_uses_approved_identity_and_author_records(self):
         records = [{'author': {'kind': 'owner', 'name': '你'}, 'text': '我稍后回来'},
                    {'author': {'kind': 'contact', 'name': '测试好友'}, 'text': '你好'}]
-        turn = self.service.begin_qq('qq:test', records)
+        turn = self.service.begin_qq('qq:123:456', records)
         await asyncio.wait_for(turn.task, 10)
         self.assertEqual(turn.status, 'completed')
         payload = self.requests[-1]
-        self.assertEqual(payload['messages'][0]['content'], '你是Miko，是号主形影不离的朋友，请你以自己的身份帮号主回应好友消息。')
+        self.assertTrue(payload['messages'][0]['content'].startswith(
+            '你是Miko，是号主形影不离的朋友，请你以自己的身份帮号主回应好友消息。\n\n'))
+        self.assertTrue(payload['messages'][0]['content'].endswith(
+            '如果某个文字气泡介绍了你是 Miko，请在该气泡中添加 introduces_miko=true。'))
         self.assertEqual(json.loads(payload['messages'][1]['content'])['chat_records'], records)
         self.assertNotIn('tools', payload)
+        self.assertEqual(payload['response_format'], {'type': 'json_object'})
+
+    async def test_web_and_qq_share_reviewed_material_and_keep_relationships_separate(self):
+        self.service.profiles.save(ProfileInput(subject='miko', kind='overview', title='Miko', content='喜欢平面设计').record())
+        self.service.profiles.save(ProfileInput(subject='owner', kind='recent', title='近况', content='最近学习前端设计', as_of='2026-10-12').record())
+        qq = QqStore(self.store)
+        qq.add_friend('123','456','朋友甲')
+        qq.add_friend('123','789','朋友乙')
+        qq.update_friend(('123','456'), owner_relationship='多年同学', miko_relationship='刚认识', miko_introduced=1)
+        qq.update_friend(('123','789'), miko_relationship='另一段交往')
+        await self.collect('和朋友甲聊设计')
+        web_prompt = self.requests[-1]['messages'][0]['content']
+        web = json.loads(web_prompt.split('\n\n', 2)[2])
+        records = [{'author': {'kind':'contact','name':'朋友甲'}, 'text':'你们最近在学什么设计？'}]
+        turn = self.service.begin_qq('qq:123:456', records)
+        await asyncio.wait_for(turn.task, 10)
+        qq_prompt = self.requests[-1]['messages'][0]['content']
+        data = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
+        self.assertEqual(data['role_material'], web['role_material'])
+        relation = data['friend_relationships'][0]
+        self.assertEqual((relation['owner_relationship'], relation['miko_relationship']), ('多年同学', '刚认识'))
+        self.assertEqual(len(data['friend_relationships']), 1)
+        self.assertTrue(relation['miko_introduced'])
 
 
 if __name__ == "__main__":

@@ -199,6 +199,15 @@
       "licenseFiles": [
         "licenses/python/websockets/LICENSE"
       ]
+    },
+    {
+      "name": "Pillow",
+      "version": "12.3.0",
+      "source": "https://pypi.org/project/Pillow/12.3.0/",
+      "license": "MIT-CMU",
+      "licenseFiles": [
+        "licenses/python/Pillow/LICENSE"
+      ]
     }
   ],
   "dshArtifacts": [

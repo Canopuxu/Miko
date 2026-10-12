@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import io
+import json
 from pathlib import Path
 import tempfile
 import sqlite3
@@ -7,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import httpx
+from PIL import Image
 from websockets.asyncio.server import serve
 
 from miko.adapters.qq.onebot import EventReceiver, OneBot, QqConfig, SendError, SendUncertain
@@ -20,10 +24,11 @@ class FakeChat:
         self.store, self.calls = store, []
         self.gate = None
         self.text = '你好，我是 Miko。'
+        self.bubbles = None
 
-    def begin_qq(self, cid, records):
+    def begin_qq(self, cid, records, stickers=None):
         self.calls.append(records)
-        turn = SimpleNamespace(text=self.text, status='completed', error=None)
+        turn = SimpleNamespace(text=json.dumps({'bubbles': self.bubbles or [{'kind': 'text', 'text': self.text}]}, ensure_ascii=False), status='completed', error=None)
         async def run():
             if self.gate:
                 await self.gate.wait()
@@ -43,6 +48,11 @@ class FakeClient:
         self.gate = None
         self.uncertain = False
         self.on_send = None
+        self.payloads = []
+        self.quoted = []
+
+    async def quote(self, account, friend, event):
+        self.quoted.append(event['message_id'])
 
     async def target(self, account, friend):
         return '测试好友'
@@ -51,12 +61,14 @@ class FakeClient:
         if self.gate:
             await self.gate.wait()
         guard()
-        self.sent.append((friend, text))
+        self.payloads.append(text)
+        content = ''.join(s['data'].get('text', '') for s in text) if isinstance(text, list) else text
+        self.sent.append((friend, content))
         if self.on_send:
             await self.on_send()
         if self.uncertain:
             raise SendUncertain('发送结果未知；不会重发')
-        return {'message_id': 900, 'timestamp': 1120}
+        return {'message_id': 899 + len(self.sent), 'timestamp': 1120}
 
 
 class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
@@ -222,25 +234,26 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent),1)
         self.assertEqual(len(self.chat.calls[0]),9)
 
-    async def test_nontext_message_invalidates_text_reply_and_is_saved(self):
+    async def test_image_message_is_saved_as_unread_and_does_not_drop_batch(self):
         await self.receive(1)
         await self.receive(2,media=True)
         self.now = 1200
         await self.due()
-        self.assertEqual(self.client.sent,[])
+        self.assertEqual(len(self.client.sent),1)
         messages=self.store.messages(self.service.store.friend(self.key)['conversation_id'])
-        self.assertEqual(messages[-1]['text'],'[图片]')
+        self.assertEqual(messages[1]['text'],'[图片]')
+        self.assertEqual(self.chat.calls[-1][1]['segments'][0]['content_status'], 'not_read')
 
     async def test_receipt_storage_failure_blocks_next_send_and_releases_worker(self):
         await self.receive(1)
         self.now = 1120
-        original=self.service.store.update_run
-        def failing(rid,**fields):
+        original=self.service.store.update_bubble
+        def failing(rid,position,**fields):
             if fields.get('state') in ('sent','unknown'):
                 raise sqlite3.OperationalError('database read-only')
-            return original(rid,**fields)
-        with patch.object(self.service.store,'update_run',side_effect=failing):
-            with self.assertLogs('miko.domain.conversation.qq',level='ERROR'):
+            return original(rid,position,**fields)
+        with patch.object(self.service.store,'update_bubble',side_effect=failing):
+            with self.assertLogs('miko.domain.conversation.qq', level='ERROR'):
                 await self.due()
         self.assertFalse(self.service.workers)
         self.assertEqual(self.service.status()['friends'][0]['state'],'blocked')
@@ -260,10 +273,109 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.store.messages(reopened.friend(self.key)['conversation_id'])),1)
         self.assertEqual(self.client.sent,[])
 
+    async def test_mixed_input_quoted_text_face_and_original_sticker_queue(self):
+        picture = io.BytesIO()
+        Image.new('RGB', (8, 8), 'blue').save(picture, 'GIF')
+        raw = picture.getvalue()
+        digest = self.service.stickers.add('123', raw, '表示收到和赞同')
+        await self.receive(1, '原话')
+        event = self.event(2)
+        event['message'] = [{'type':'reply','data':{'id':'1'}},
+            {'type':'text','data':{'text':'这件事呢'}}, {'type':'face','data':{'id':'76'}}]
+        await self.service.receive(event)
+        self.chat.bubbles = [{'kind':'text','text':'这件事我记得','quote_message_id':1},
+                             {'kind':'face','face_id':'76'}, {'kind':'sticker','sticker_id':digest}]
+        async def no_delay(*args): pass
+        with patch.object(self.service, 'pause_between', side_effect=no_delay):
+            self.now = 1120
+            await self.due()
+        self.assertEqual(self.client.quoted, [1])
+        self.assertEqual(self.chat.calls[0][1]['quoted_message']['text'], '原话')
+        self.assertEqual([p[-1]['type'] for p in self.client.payloads], ['text','face','image'])
+        encoded = self.client.payloads[2][0]['data']['file'].removeprefix('base64://')
+        self.assertEqual(base64.b64decode(encoded), raw)
+        run = self.service.store.runs()[0]
+        self.assertEqual([b['state'] for b in run['bubbles']], ['sent']*3)
+        self.assertEqual([b['receipt_id'] for b in run['bubbles']], [900,901,902])
+        self.assertEqual([r['author']['kind'] for r in self.service.store.context(self.key)][-3:], ['miko']*3)
+
+    async def test_owner_intervention_cancels_unsent_tail(self):
+        self.chat.bubbles = [{'kind':'text','text':'第一句'}, {'kind':'text','text':'旧的第二句'}]
+        async def intervene(*args):
+            await self.receive(2, '我来回复', own=True)
+            self.service.check(self.key, self.service.workers[self.key])
+        await self.receive(1)
+        with patch.object(self.service, 'pause_between', side_effect=intervene):
+            self.now = 1120
+            await self.due()
+        self.assertEqual(self.client.sent, [('456','第一句')])
+        self.assertEqual([b['state'] for b in self.service.store.runs()[0]['bubbles']], ['sent','cancelled'])
+        self.assertEqual(self.service.store.friend(self.key)['mode'], 'owner')
+        # Next friend input still starts a fresh two-minute wait.
+        await self.receive(3)
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1240)
+
+    async def test_friend_new_message_cancels_tail_and_next_turn_keeps_sent_context(self):
+        self.chat.bubbles = [{'kind':'text','text':'第一句'}, {'kind':'text','text':'旧的尾部'}]
+        async def intervene(*args):
+            await self.receive(2, '补充一句')
+            self.service.check(self.key, self.service.workers[self.key])
+        await self.receive(1)
+        with patch.object(self.service, 'pause_between', side_effect=intervene):
+            self.now = 1120
+            await self.due()
+        self.assertEqual(self.client.sent, [('456','第一句')])
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1122)
+        self.chat.bubbles = None
+        self.chat.text = '回应补充'
+        self.now = 1122
+        await self.due()
+        self.assertEqual(self.client.sent[-1], ('456','回应补充'))
+        texts = [r['text'] for r in self.chat.calls[-1]]
+        self.assertIn('第一句', texts)
+        self.assertIn('补充一句', texts)
+        self.assertNotIn('旧的尾部', texts)
+
+    async def test_partial_queue_restart_recovers_receipts_and_never_resends_tail(self):
+        rid = self.service.store.new_run(self.key, self.now)
+        bubbles = [{'kind':'text','text':'已经发出'}, {'kind':'text','text':'未知'}, {'kind':'text','text':'尾部'}]
+        self.service.store.plan(rid, bubbles, ['已经发出','未知','尾部'])
+        self.service.store.update_run(rid, state='sending')
+        self.service.store.update_bubble(rid,0,state='sent',receipt_id=800,timestamp=self.now)
+        self.service.store.update_bubble(rid,1,state='sending')
+        reopened = QqStore(ChatStore(self.store.path))
+        reopened.recover()
+        reopened.recover()
+        self.assertEqual([b['state'] for b in reopened.runs()[0]['bubbles']], ['sent','unknown','cancelled'])
+        self.assertTrue(reopened.friend(self.key)['blocked'])
+        self.assertEqual([r['text'] for r in reopened.context(self.key)], ['已经发出'])
+        self.assertEqual(self.client.sent, [])
+
 
 class OneBotTests(unittest.IsolatedAsyncioTestCase):
     def config(self,ws='ws://127.0.0.1:3001'):
         return QqConfig(http_url='http://127.0.0.1:3000',ws_url=ws,account='123')
+
+    async def test_native_quote_and_face_use_verified_private_message_and_literal_segments(self):
+        calls = []
+        def transport(request):
+            calls.append((request.url.path, json.loads(request.content)))
+            data = {'user_id':123}
+            if request.url.path.endswith('get_friend_list'):
+                data = [{'user_id':456}]
+            elif request.url.path.endswith('get_msg'):
+                data = {'message_id':15,'message_type':'private','sender':{'user_id':456},'time':1120}
+            elif request.url.path.endswith('send_private_msg'):
+                data = {'message_id':16}
+            return httpx.Response(200,json={'status':'ok','retcode':0,'data':data})
+        client = OneBot(self.config(), httpx.MockTransport(transport))
+        await client.quote('123','456',{'message_id':15,'origin':'friend','timestamp':1120})
+        segments = [{'type':'reply','data':{'id':'15'}},
+                    {'type':'text','data':{'text':'[CQ:image,file=x]'}}, {'type':'face','data':{'id':'76'}}]
+        receipt = await client.send('123','456',segments,lambda:None)
+        self.assertEqual(receipt['message_id'],16)
+        self.assertIn(('/get_msg', {'message_id':15}), calls)
+        self.assertEqual(calls[-1], ('/send_private_msg', {'user_id':456,'message':segments}))
 
     async def test_identity_literal_text_and_uncertain_receipt_without_retry(self):
         calls=[]

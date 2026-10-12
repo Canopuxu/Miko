@@ -14,6 +14,7 @@ dependencies = [
   "deepseek-harness-runtime-bin==0.1.5rc1",
   "httpx==0.28.1",
   "websockets==15.0.1",
+  "Pillow==12.3.0",
 ]
 
 [tool.setuptools.packages.find]

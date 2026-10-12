@@ -14,8 +14,10 @@ from fastapi.responses import StreamingResponse
 import httpx
 
 from miko.adapters.dsh.runtime import DshRuntime
+from miko.adapters.qq.messages import FACES, OUTPUT_SCHEMA
 from miko.settings import REPO_ROOT, Settings
 from miko.storage.chat import ChatStore
+from miko.storage.profiles import ProfileStore
 
 
 @dataclass
@@ -38,6 +40,7 @@ class Turn:
     context: list[dict] | None = None
     system_prompt: str | None = None
     status: str = 'running'
+    json_output: bool = False
 
     def close_runtime(self):
         with self.lifecycle:
@@ -52,6 +55,7 @@ class ChatService:
         self.system_prompt = (REPO_ROOT / "config/defaults/system-prompt.txt").read_text(encoding="utf-8").strip()
         self.bridge_token = secrets.token_urlsafe(32)
         self.store = store or ChatStore(settings.database_path)
+        self.profiles = ProfileStore(self.store)
         self.store.recover_interrupted()
         self.turns: dict[str, Turn] = {}
         # SDK carrier includes coding tools by default. Chat has no tool calls in this stage.
@@ -81,10 +85,17 @@ class ChatService:
         if any(t.conversation_id == conversation_id for t in self.turns.values()):
             raise HTTPException(409, "当前对话仍在生成，请先停止或等待结束")
         turn = Turn(uuid.uuid4().hex, conversation_id, message.strip())
+        query = turn.message + '\n' + '\n'.join(r['content'] for r in self.store.history(conversation_id)[-6:][::-1])
+        turn.system_prompt = self.compose_prompt(self.system_prompt, query)
         turn.user_message_id = self.store.begin_turn(conversation_id, turn.id, turn.message)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         return turn
+
+    def compose_prompt(self, base, query, key=None):
+        instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
+        context = self.profiles.context(query, key)
+        return base + '\n\n' + instructions + '\n\n' + json.dumps(context, ensure_ascii=False)
 
     async def run(self, turn: Turn):
         status = "error"
@@ -132,14 +143,19 @@ class ChatService:
             turn.events.put_nowait({"type": "done", "status": status,
                                     "text": turn.text, "error": turn.error})
 
-    def begin_qq(self, conversation_id: str, records: list[dict]) -> Turn:
+    def begin_qq(self, conversation_id: str, records: list[dict], stickers: list[dict] | None = None) -> Turn:
         prompt_path = REPO_ROOT / 'config/defaults/qq-system-prompt.txt'
         if self.provider is None or not prompt_path.exists():
             raise ValueError('QQ 模型或已审核提示词尚未就绪')
-        message = json.dumps({'chat_records': records}, ensure_ascii=False)
+        message = json.dumps({'chat_records': records, 'available_faces': FACES,
+                              'available_stickers': stickers or [], 'output_format': OUTPUT_SCHEMA}, ensure_ascii=False)
+        output = (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
+        _, account, friend = conversation_id.split(':')
+        query = '\n'.join(r['text'] for r in records[-8:][::-1])
         turn = Turn(uuid.uuid4().hex, conversation_id, message,
                     context=[{'role': 'user', 'content': message}],
-                    system_prompt=prompt_path.read_text(encoding='utf-8').strip())
+                    system_prompt=self.compose_prompt(prompt_path.read_text(encoding='utf-8').strip(), query, (account, friend)) + '\n\n' + output,
+                    json_output=True)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         return turn
@@ -179,6 +195,8 @@ class ChatService:
                            + [{"role": "user", "content": turn.message}]),
             "stream": True, "max_tokens": 2048,
         }
+        if turn.json_output:
+            payload['response_format'] = {'type': 'json_object'}
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
         try:
             turn.provider_task = asyncio.create_task(client.send(client.build_request(

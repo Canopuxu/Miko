@@ -2,11 +2,15 @@
 import asyncio
 from dataclasses import dataclass
 import logging
+import json
+from pathlib import Path
 import sqlite3
 import time
 
 from miko.adapters.qq.onebot import EventReceiver, OneBot, SendError, SendUncertain
 from miko.storage.qq import QqStore
+from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay
+from miko.adapters.qq.media import StickerLibrary
 
 
 class StaleReply(ValueError):
@@ -20,6 +24,7 @@ class Worker:
     task: asyncio.Task | None = None
     turn: object | None = None
     phase: str = 'generating'
+    position: int | None = None
 
 
 class QqService:
@@ -32,6 +37,8 @@ class QqService:
         self.chat, self.clock = chat, clock
         self.store = QqStore(chat.store)
         self.store.recover()
+        local_root = getattr(getattr(chat, 'settings', None), 'local_root', chat.store.path.parent)
+        self.stickers = StickerLibrary(self.store, Path(local_root) / 'data/qq/stickers')
         self.client = client or (OneBot(config) if config else None)
         self.receiver = EventReceiver(self.client, self.receive, self.source_changed) if self.client else None
         if config:
@@ -72,7 +79,7 @@ class QqService:
             if key in self.storage_faults:
                 friend.update(state='blocked', blocked=1, note=self.storage_faults[key])
             friends.append(friend)
-        return {'receiver': receiver, 'friends': friends, 'runs': self.store.runs(),
+        return {'receiver': receiver, 'friends': friends, 'runs': self.store.runs(), 'faces': FACES,
                 'wait_seconds': self.wait_seconds, 'max_reply_chars': self.max_reply_chars}
 
     async def configure(self, key, enabled):
@@ -112,6 +119,12 @@ class QqService:
 
     async def receive(self, event):
         post = event.get('post_type')
+        if post == 'notice' and event.get('notice_type') == 'friend_recall':
+            key = (str(event.get('self_id', '')), str(event.get('user_id', '')))
+            if self.store.friend(key) and type(event.get('message_id')) is int:
+                self.store.recall(key, event['message_id'])
+                await self.invalidate(key)
+            return
         if post not in ('message', 'message_sent') or event.get('message_type') != 'private':
             return
         account, uid = str(event.get('self_id', '')), str(event.get('user_id', ''))
@@ -123,26 +136,14 @@ class QqService:
         if (not cfg or type(stamp) not in (int, float) or type(mid) is not int
                 or stamp < int(self.epoch) or stamp > self.clock() + 10):
             return
-        parts, text_only = [], True
-        segments = event.get('message')
-        if isinstance(segments, str):
-            parts = [segments]
-        elif isinstance(segments, list):
-            for segment in segments:
-                kind = segment.get('type')
-                data = segment.get('data') or {}
-                if kind == 'text':
-                    parts.append(str(data.get('text', '')))
-                else:
-                    parts.append('[' + {'image': '图片', 'record': '语音', 'face': '表情', 'reply': '引用'}.get(kind, '非文本消息') + ']')
-                    text_only = False
-        if not parts:
+        payload = parse_message(event.get('message'))
+        text = payload['text']
+        if not text:
             return
-        text = ''.join(parts)
         known = is_self and self.store.receipt(key, mid)
         sending = key in self.workers and self.workers[key].phase == 'sending'
         origin = 'miko' if known else 'pending' if is_self and sending else 'unknown' if is_self and cfg['blocked'] else 'manual' if is_self else 'friend'
-        if not self.store.event(key, mid, text, stamp, origin):
+        if not self.store.event(key, mid, text, stamp, origin, payload):
             return
         if origin in ('pending', 'unknown'):
             return
@@ -154,10 +155,6 @@ class QqService:
             return
         await self.invalidate(key)
         if not cfg['enabled'] or cfg['blocked'] or key in self.storage_faults or stamp < int(cfg['activated_at']):
-            return
-        if not text_only:
-            self.store.update_friend(key, pending_since=None, pending_last=None, due_at=None,
-                note='收到非纯文本消息，本阶段仅保存记录')
             return
         now = self.clock()
         first = cfg['pending_since'] if cfg['pending_since'] is not None else now
@@ -204,30 +201,104 @@ class QqService:
         if manual:
             await self.manual(key)
 
+    async def context(self, key):
+        records = self.store.context(key)
+        for record in records:
+            for segment in record['segments']:
+                if segment['type'] != 'reply':
+                    continue
+                quoted = self.store.get_event(key, segment['message_id'])
+                if quoted:
+                    record['quoted_message'] = {'message_id': quoted['message_id'], 'text': quoted['text'],
+                        'author': '好友' if quoted['origin'] == 'friend' else 'Miko' if quoted['origin'] == 'miko' else '账号主人',
+                        'recalled': bool(quoted['recalled'])}
+                elif not record.get('quoted_message') or record['quoted_message'].get('content_status') == 'unavailable':
+                    try:
+                        value = await self.client.message(*key, segment['message_id'])
+                        record['quoted_message'] = {'message_id': segment['message_id'],
+                            'text': parse_message(value.get('message'))['text'],
+                            'author': '好友' if str(value['sender']['user_id']) == key[1] else '账号主人'}
+                    except (SendError, AttributeError):
+                        record['quoted_message'] = {'message_id': segment['message_id'], 'content_status': 'unavailable'}
+                self.store.quote_snapshot(key, record['message_id'], record['quoted_message'])
+        return records
+
+    async def pause_between(self, key, worker, previous):
+        until = asyncio.get_running_loop().time() + bubble_delay(previous)
+        while asyncio.get_running_loop().time() < until:
+            self.check(key, worker)
+            await asyncio.sleep(min(.1, max(0, until - asyncio.get_running_loop().time())))
+
+    def bubble_text(self, bubble, candidates):
+        if bubble['kind'] == 'text':
+            return bubble['text']
+        if bubble['kind'] == 'face':
+            return '[' + next(f['name'] for f in FACES if f['face_id'] == bubble['face_id']) + ']'
+        return '[表情包：' + next(s['description'] for s in candidates if s['sticker_id'] == bubble['sticker_id']) + ']'
+
+    async def segments(self, key, worker, bubble):
+        self.check(key, worker)
+        if bubble['kind'] == 'text':
+            segments = [{'type': 'text', 'data': {'text': bubble['text']}}]
+        elif bubble['kind'] == 'face':
+            segments = [{'type': 'face', 'data': {'id': bubble['face_id']}}]
+        else:
+            segments = [self.stickers.segment(key[0], bubble['sticker_id'])]
+        if 'quote_message_id' in bubble:
+            event = self.store.get_event(key, bubble['quote_message_id'])
+            if not event or event['recalled'] or event['origin'] in ('pending', 'unknown'):
+                raise StaleReply('引用原消息已失效，未发送')
+            await self.client.quote(*key, event)
+            segments.insert(0, {'type': 'reply', 'data': {'id': str(event['message_id'])}})
+        self.check(key, worker)
+        return segments
+
     async def reply(self, key, worker):
         uncertain = False
         try:
             self.check(key, worker)
             cfg = self.store.friend(key)
-            worker.turn = self.chat.begin_qq(cfg['conversation_id'], self.store.context(key))
+            records = await self.context(key)
+            self.check(key, worker)
+            candidates = self.stickers.candidates(key[0], '\n'.join(r['text'] for r in records[-8:]))
+            worker.turn = self.chat.begin_qq(cfg['conversation_id'], records, candidates)
             await worker.turn.task
             self.check(key, worker)
-            text = worker.turn.text.strip()
-            if worker.turn.status != 'completed' or not text or len(text) > self.max_reply_chars:
-                raise ValueError(worker.turn.error or '本轮未生成可发送的 80 字以内回复')
-            self.store.update_run(worker.run_id, text=text)
-
-            def guard():
+            if worker.turn.status != 'completed':
+                raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
+            bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars)
+            texts = [self.bubble_text(b, candidates) for b in bubbles]
+            self.store.plan(worker.run_id, bubbles, texts)
+            self.store.update_run(worker.run_id, state='sending')
+            for i, bubble in enumerate(bubbles):
+                worker.position, worker.phase = i, 'between_bubbles'
+                if i:
+                    await self.pause_between(key, worker, bubbles[i-1])
                 self.check(key, worker)
-                self.store.update_run(worker.run_id, state='sending')
-                worker.phase = 'sending'
+                self.store.update_bubble(worker.run_id, i, state='preparing')
+                segments = await self.segments(key, worker, bubble)
+                payload = parse_message(segments)
+                if bubble['kind'] == 'sticker':
+                    payload['segments'][-1]['sticker_id'] = bubble['sticker_id']
+                    payload['text'] = texts[i]
 
-            receipt = await self.client.send(*key, text, guard)
-            # Persist the receipt before accepting its outgoing event as Miko's.
+                def guard():
+                    self.check(key, worker)
+                    self.store.update_bubble(worker.run_id, i, state='sending',
+                                             segments=json.dumps(payload['segments'], ensure_ascii=False))
+                    worker.phase = 'sending'
+
+                receipt = await self.client.send(*key, segments, guard)
+                # Each receipt is durable before echo classification or dispatch of the next bubble.
+                self.store.update_bubble(worker.run_id, i, state='sent', receipt_id=receipt['message_id'],
+                                         timestamp=receipt['timestamp'])
+                self.store.confirm_event(key, receipt['message_id'], texts[i], receipt['timestamp'], payload)
+                self.store.record(key, receipt['message_id'], 'miko')
+                worker.phase = 'between_bubbles'
+                await self.settle_echoes(key)
+                if bubble['kind'] == 'sticker':
+                    self.stickers.used(key[0], bubble['sticker_id'])
             self.store.update_run(worker.run_id, state='sent', receipt_id=receipt['message_id'])
-            self.store.event(key, receipt['message_id'], text, receipt['timestamp'], 'miko')
-            self.store.origin(key, receipt['message_id'], 'miko')
-            self.store.record(key, receipt['message_id'], 'miko')
             if self.versions.get(key, 0) == worker.version:
                 self.store.update_friend(key, mode='miko', note='Miko 正在接话',
                     pending_since=None, pending_last=None, due_at=None)
@@ -238,12 +309,16 @@ class QqService:
             uncertain = True
             self.fail_run(key, worker, 'unknown', str(exc))
         except Exception as exc:
+            if isinstance(exc, sqlite3.Error):
+                self.storage_faults[key] = '回复记录保存失败，请检查本机存储并到 QQ 核对后恢复'
+                logging.getLogger(__name__).exception('Unable to save QQ reply outcome')
             uncertain = worker.phase == 'sending'
             self.fail_run(key, worker, 'unknown' if uncertain else 'error',
                 '发送结果未知，请到 QQ 核对；不会重发' if uncertain else
                 str(exc) if isinstance(exc, (ValueError, SendError)) else '本轮生成未完成')
         finally:
             try:
+                self.store.cancel_tail(worker.run_id)
                 await self.settle_echoes(key, uncertain=uncertain)
             except sqlite3.Error:
                 self.storage_faults[key] = '消息保存失败，请检查本机存储并到 QQ 核对后恢复'
@@ -253,6 +328,12 @@ class QqService:
 
     def fail_run(self, key, worker, state, error):
         try:
+            if worker.position is not None:
+                with self.store.chat.connect() as db:
+                    db.execute("""UPDATE qq_bubbles SET state=?,error=? WHERE run_id=? AND position=?
+                        AND state IN ('pending','preparing','sending')""",
+                        ('unknown' if state == 'unknown' else 'cancelled' if state == 'stale' else 'error',
+                         error, worker.run_id, worker.position))
             self.store.update_run(worker.run_id, state=state, error=error)
             if state == 'unknown':
                 self.store.update_friend(key, blocked=1, note=error, due_at=None,

@@ -110,7 +110,11 @@
         "chatlocal/message_sender.py",
         "chatlocal/onebot.py",
         "chatlocal/onebot_events.py",
-        "chatlocal/agent.py"
+        "chatlocal/agent.py",
+        "chatlocal/mcp_chat.py",
+        "chatlocal/mcp_chat_turns.py",
+        "chatlocal/mcp_chat_media.py",
+        "chatlocal/mcp_sticker_library.py"
       ],
       "licenseSha256": "ef81f235949481abc167b306426521d9c60765116fe771f2fd2ea713f21f03b0",
       "licenseSnapshot": "licenses/tulpa-qq-baseline-LICENSE.txt"

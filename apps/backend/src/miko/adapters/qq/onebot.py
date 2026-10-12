@@ -53,7 +53,7 @@ class OneBot:
         self.transport = transport
 
     async def call(self, action, payload, *, sending=False):
-        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history'}
+        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history', 'get_msg'}
         if action not in allowed | ({'send_private_msg'} if sending else set()):
             raise SendError('接口不在 QQ 适配器允许范围内')
         try:
@@ -88,11 +88,32 @@ class OneBot:
             raise SendError('目标不是当前账号已核对的好友，未发送')
         return str(match.get('remark') or match.get('nickname') or friend)
 
+    async def message(self, account, friend, mid, *, known_own=False):
+        """Adapt Tulpa's native quote identity check to private messages."""
+        value = await self.call('get_msg', {'message_id': mid})
+        sender = value.get('sender') if isinstance(value, dict) else None
+        uid = str(sender.get('user_id', '')) if isinstance(sender, dict) else ''
+        if (not isinstance(value, dict) or str(value.get('message_id')) != str(mid)
+            or value.get('message_type') != 'private' or uid not in (account, friend)
+            or ('self_id' in value and str(value['self_id']) != account)
+            or any(value.get(k) for k in ('recalled', 'is_recalled', 'deleted', 'is_deleted'))
+            or (uid == account and not known_own and str(value.get('target_id', value.get('user_id', ''))) != friend)
+            or (uid == account and 'target_id' in value and str(value['target_id']) != friend)):
+            raise SendError('无法核对引用消息属于当前私聊，或消息已撤回')
+        return value
+
+    async def quote(self, account, friend, event):
+        value = await self.message(account, friend, event['message_id'], known_own=event['origin'] != 'friend')
+        uid = str(value['sender']['user_id'])
+        expected = friend if event['origin'] == 'friend' else account
+        if uid != expected or value.get('time') != int(event['timestamp']):
+            raise SendError('引用消息的发送者或时间发生变化，未发送')
+
     async def send(self, account, friend, text, guard):
         await self.target(account, friend)
         guard()  # Last synchronous state check immediately before dispatch.
         value = await self.call('send_private_msg', {
-            'user_id': int(friend), 'message': [{'type': 'text', 'data': {'text': text}}],
+            'user_id': int(friend), 'message': text if isinstance(text, list) else [{'type': 'text', 'data': {'text': text}}],
         }, sending=True)
         if not isinstance(value, dict) or type(value.get('message_id')) is not int:
             raise SendUncertain('未取得可靠消息编号，请到 QQ 核对；不会自动重发')

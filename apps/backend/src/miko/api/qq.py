@@ -1,23 +1,28 @@
-from urllib.parse import urlparse
+import base64
+import binascii
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, StrictBool
 
 from miko.domain.conversation.qq import QqService
+from miko.api.local import local_request
 
 
 class FriendSwitch(BaseModel):
     enabled: StrictBool
 
 
-def qq_router(service: QqService):
-    def local_request(request: Request):
-        base = str(request.base_url).rstrip('/')
-        if (urlparse(base).hostname not in ('127.0.0.1', 'localhost', '::1', 'testserver')
-            or request.headers.get('origin') not in (None, base)
-            or request.headers.get('sec-fetch-site') == 'cross-site'):
-            raise HTTPException(403, '请从 Miko 本机页面访问')
+class StickerUpload(BaseModel):
+    image_base64: str
+    description: str
 
+
+class StickerEdit(BaseModel):
+    description: str
+    enabled: StrictBool
+
+
+def qq_router(service: QqService):
     router = APIRouter(prefix='/api/qq', dependencies=[Depends(local_request)])
 
     @router.get('/status')
@@ -37,7 +42,46 @@ def qq_router(service: QqService):
         cfg = service.store.friend(key)
         if not cfg:
             raise HTTPException(404, '找不到这位好友')
-        return {'friend': cfg, 'messages': service.chat.store.messages(cfg['conversation_id']),
+        return {'friend': cfg, 'messages': service.store.messages(key),
                 'runs': service.store.runs(key)}
+
+    def known_account(account):
+        if not any(f['account'] == account for f in service.store.friends()):
+            raise HTTPException(404, '找不到这个 QQ 账号')
+
+    @router.get('/stickers/{account}')
+    async def stickers(account: str):
+        known_account(account)
+        return service.stickers.list(account)
+
+    @router.post('/stickers/{account}')
+    async def upload(account: str, body: StickerUpload):
+        known_account(account)
+        try:
+            if len(body.image_base64) > 8 * 1024 * 1024:
+                raise ValueError('图片超过 6 MiB 上限')
+            raw = base64.b64decode(body.image_base64, validate=True)
+            return {'sticker_id': service.stickers.add(account, raw, body.description)}
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.put('/stickers/{account}/{digest}')
+    async def edit(account: str, digest: str, body: StickerEdit):
+        known_account(account)
+        try:
+            service.stickers.edit(account, digest, body.description, body.enabled)
+            return {'saved': True}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.get('/stickers/{account}/{digest}/image')
+    async def image(account: str, digest: str):
+        known_account(account)
+        try:
+            raw, info = service.stickers.read(account, digest, require_enabled=False)
+            mime = {'PNG': 'image/png', 'JPEG': 'image/jpeg', 'GIF': 'image/gif', 'WEBP': 'image/webp'}[info['format']]
+            return Response(raw, media_type=mime, headers={'Cache-Control': 'private, no-cache'})
+        except (ValueError, OSError):
+            raise HTTPException(404, '表情原文件不可用') from None
 
     return router
