@@ -28,6 +28,7 @@ coverage/
 MikoLocal/
 data/
 memory/
+!apps/backend/src/miko/adapters/memory/
 logs/
 backups/
 imports/

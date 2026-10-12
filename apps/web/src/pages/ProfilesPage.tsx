@@ -7,7 +7,9 @@ type Draft = { subject: 'miko' | 'owner'; kind: 'overview' | 'fact' | 'recent' |
 type Entry = Omit<Draft, 'enabled'> & { id: string; enabled: number; source: string; updated_at: number };
 type Friend = { account: string; friend: string; name: string };
 type Context = { current_time: string; role_material: Entry[];
-  friend_relationships: (Friend & { owner_relationship: string; miko_relationship: string; miko_introduced: boolean })[] };
+  friend_relationships: (Friend & { owner_relationship: string; miko_relationship: string; miko_introduced: boolean })[];
+  retrieval?: { engine: string; error?: string };
+  social_memory?: { subject: 'miko' | 'owner'; peer: string; automatic: string; manual_corrections: string }[] };
 const kinds = { overview: '整体描述', fact: '设定／资料条目', recent: '手动近况', excerpt: '对话片段' };
 const subjects = { miko: 'Miko', owner: '我' };
 const blank = (): Draft => ({ subject: 'miko', kind: 'fact', category: '', title: '', content: '',
@@ -86,6 +88,7 @@ export function ProfilesPage() {
       <a className="brand" href="/"><span className="brand-mark">m</span><span>Miko</span></a>
       <a className="section-link" href="/">和 Miko 聊天</a>
       <a className="section-link" href="/?view=qq">QQ 好友</a>
+      <a className="section-link" href="/?view=memory">关系与经历记忆</a>
       <div className="history-label">设定与资料</div>
       <p className="profile-help">整体描述保存核心设定，条目补充细节。主题可自由填写，对话片段用于了解关系和经历。</p>
     </aside>
@@ -137,18 +140,21 @@ export function ProfilesPage() {
           {notice && <p role="status" className="profile-notice">{notice}</p>}
         </section>
         <section className="context-preview" aria-label="检索预览">
-          <h2>检索预览</h2><p>输入一段聊天，查看会提供给 Miko 的资料。此处只检索资料，不调用模型或发送消息。</p>
+          <h2>检索预览</h2><p>输入一段聊天，查看会提供给 Miko 的资料。语义检索会调用 Embedding 接口，此处不生成回复或发送消息。</p>
           <div className="profile-filters"><input aria-label="预览聊天内容" value={question} placeholder="输入想聊的内容" onChange={event => setQuestion(event.target.value)} />
             <select aria-label="预览对话对象" value={previewFriend} onChange={event => setPreviewFriend(event.target.value)}>
               <option value="">我与 Miko 的聊天</option>{friends.map(f => <option key={`${f.account}:${f.friend}`} value={`${f.account}:${f.friend}`}>{f.name}</option>)}</select>
             <button className="send-button" disabled={busy} onClick={() => void inspect()}>查看资料</button></div>
           {preview && <div className="context-material">
+            <p>{preview.retrieval?.engine}{preview.retrieval?.error && ` · ${preview.retrieval.error}`}</p>
             {!preview.role_material.length && !preview.friend_relationships.length && <p>目前没有可用资料。</p>}
             {preview.role_material.map(entry => <article key={entry.id}><small>{subjects[entry.subject]} · {kinds[entry.kind]}{entry.as_of && ` · ${entry.as_of}`} · 由你填写</small>
               <strong>{entry.title}</strong><p>{entry.content}</p></article>)}
             {preview.friend_relationships.map(f => <article key={`${f.account}:${f.friend}`}><strong>{f.name} · 关系资料</strong>
               <p>你与好友：{f.owner_relationship || '尚未填写'}</p><p>Miko 与好友：{f.miko_relationship || '尚未填写'}</p>
               <small>{f.miko_introduced ? '已介绍过 Miko' : '尚无介绍记录'}</small></article>)}
+            {preview.social_memory?.map(r => <article key={`${r.subject}:${r.peer}`}><strong>{subjects[r.subject]} · 关系与经历记忆</strong>
+              <p>{r.automatic}</p>{r.manual_corrections && <p>你的补充：{r.manual_corrections}</p>}</article>)}
           </div>}
         </section>
       </div>

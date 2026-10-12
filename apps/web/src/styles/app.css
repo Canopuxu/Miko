@@ -147,3 +147,4 @@ textarea::placeholder { color: #b7ac9e; }
   .friend-controls { padding: 16px 22px; }
   .friend-actions { flex-direction: column; align-items: flex-end; }
 }
+.memory-body { white-space: pre-wrap; }

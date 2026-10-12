@@ -1,0 +1,155 @@
+"""The host seam: where a session log lives, and how to read one record of it.
+
+This is deliberately the *only* abstraction between hosts. Everything else the
+bridging task does — staged per-session cursors, the job-instruction templates,
+the content-hash snapshot/diff of the mirrored recall files, the commit back into
+memU — is host-agnostic and already lives in :mod:`memu.hosts.bridging`.
+
+So a second host is a :class:`TranscriptSource` and a thin CLI, and nothing else.
+If a host ever needs to fork the pipeline, that is a signal the seam is drawn in
+the wrong place — widen this class rather than copying `bridging/`.
+"""
+
+from __future__ import annotations
+
+import json
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import ClassVar
+
+
+class RecordKind(Enum):
+    """Which of the two transcripts a session record belongs in.
+
+    Each session is sliced into two files, because the two mining jobs want
+    different things: the **memory** job reads the conversation alone (what the
+    user said they want), while the **skill** job also needs the tool calls (how
+    the work was actually done).
+    """
+
+    MESSAGE = "message"
+    """A user or assistant turn — appears in both transcripts."""
+
+    TOOL = "tool"
+    """A tool call or its output — appears only in the full transcript."""
+
+    OTHER = "other"
+    """Anything else (session metadata, reasoning traces, …) — dropped."""
+
+
+class TranscriptReadError(RuntimeError):
+    """A recoverable failure to read one transcript container or session."""
+
+    def __init__(self, path: Path, cause: BaseException) -> None:
+        self.path = path
+        self.cause = cause
+        super().__init__(f"could not read transcript data from {path}: {cause}")
+
+
+@dataclass(frozen=True)
+class TranscriptRead:
+    """One source-owned incremental read and the cursor to stage after it."""
+
+    records: list[str]
+    start: int
+    cursor: dict[str, object]
+
+    @property
+    def changed(self) -> bool:
+        return len(self.records) > self.start
+
+
+class TranscriptSource(ABC):
+    """One host's on-disk session log.
+
+    The defaults assume one JSON object per line, which is what both Codex and
+    Claude Code write. A host with a different container overrides
+    :meth:`discover`, :meth:`read_records`, and :meth:`timestamp`; a host that is
+    merely *shaped* differently only needs :meth:`classify`.
+    """
+
+    name: ClassVar[str]
+    """Short host id. Names the binary (``memu-codex``) and scopes the cursor file."""
+
+    @abstractmethod
+    def root(self) -> Path:
+        """Absolute directory holding the raw session logs."""
+
+    @abstractmethod
+    def classify(self, record: str) -> RecordKind:
+        """Bucket one raw record. This *is* the host's log schema — the real seam."""
+
+    def sanitize(self, path: Path, record: str) -> str:
+        """Rewrite one kept record before it enters a prepared transcript."""
+        return record
+
+    def exists(self) -> bool:
+        """Whether the host has a session log here at all — the prepare gate.
+
+        Directory-shaped hosts get this for free; a host whose log is a single
+        file (Hermes's SQLite store) overrides it to check that file.
+        """
+        return self.root().is_dir()
+
+    def discover(self) -> list[Path]:
+        """Session files under :meth:`root`, most-recently-modified first.
+
+        Newest-first is load-bearing: the cursor scan stops at the first
+        already-seen file, which is only sound if no older file can hold newer
+        content.
+        """
+        root = self.root()
+        if not root.is_dir():
+            return []
+        files = [path for path in root.rglob("*.jsonl") if path.is_file()]
+        files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        return files
+
+    def read_records(self, path: Path) -> list[str]:
+        """A session's records in order; sources may raise ``TranscriptReadError`` for recoverable I/O failures."""
+        with path.open(encoding="utf-8") as handle:
+            return [line for line in (raw.strip() for raw in handle) if line]
+
+    def read_incremental(self, path: Path, previous: dict[str, object] | None) -> TranscriptRead:
+        """Read a session and interpret its cursor; append-only lines are the default."""
+        records = self.read_records(path)
+        start = previous.get("lines", 0) if previous else 0
+        if not isinstance(start, int):
+            start = 0
+        return TranscriptRead(records=records, start=start, cursor={"lines": len(records)})
+
+    def timestamp(self, record: str) -> str | None:
+        """The record's timestamp, if it carries one. Recorded in the cursor file."""
+        try:
+            value = json.loads(record).get("timestamp")
+        except (json.JSONDecodeError, AttributeError):
+            return None
+        return value if isinstance(value, str) else None
+
+    def key(self, path: Path) -> str:
+        """The cursor-file key for a session — its path relative to :meth:`root`."""
+        return path.relative_to(self.root()).as_posix()
+
+    def scan_region(self, path: Path) -> str:
+        """The independently newest-first discovery region containing ``path``.
+
+        Ordinary file-backed sources have one region. Composite sources override
+        this so an unchanged session in one root does not hide newer history in
+        another root.
+        """
+        return "default"
+
+    def session_id(self, path: Path) -> str:
+        """The host's own id for this session — what it reports in the environment.
+
+        Used to recognise the bridging run's own session and skip it (#606), so
+        this must line up with
+        :attr:`~memu.hosts.host_cli.HostSpec.session_id_env`'s value. The
+        default holds wherever the session is named by its id: every
+        ``<sessionId>.jsonl`` host, and Hermes's virtual paths alike. A host
+        whose file name carries more than the id (Codex's
+        ``rollout-<timestamp>-<uuid>.jsonl``) overrides this.
+        """
+        return path.stem

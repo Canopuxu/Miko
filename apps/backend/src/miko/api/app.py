@@ -12,6 +12,8 @@ from miko.adapters.dsh.runtime import DshRuntime
 from miko.api.chat import chat_router
 from miko.api.qq import qq_router
 from miko.api.profiles import profiles_router
+from miko.api.memory import memory_router
+from miko.adapters.memory.service import Memory
 from miko.domain.conversation.chat import ChatService
 from miko.domain.conversation.qq import QqService
 from miko.settings import REPO_ROOT, Settings
@@ -21,16 +23,20 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     runtime = DshRuntime(settings)
     chat = ChatService(settings)
     qq = QqService(chat, settings.load_qq())
+    chat.memory = Memory(chat)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await asyncio.to_thread(runtime.start)
         qq.start()
+        chat.memory.start()
         try:
             yield
         finally:
             await qq.close()
+            chat.memory.social.worker.stop()
             await chat.close()
+            await chat.memory.close()
             await asyncio.to_thread(runtime.close)
 
     app = FastAPI(title="Miko", version=__version__, lifespan=lifespan)
@@ -46,7 +52,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     @app.get("/api/status")
     async def status():
         return {"service": "miko", "version": __version__, "dsh": runtime.status(),
-                "chat": chat.status()}
+                "chat": chat.status(), "memory": chat.memory.status()}
 
     @app.post("/_runtime/stop", include_in_schema=False)
     async def stop(authorization: str = Header(default="")):
@@ -58,6 +64,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     app.include_router(chat_router(chat))
     app.include_router(qq_router(qq))
     app.include_router(profiles_router(chat, qq))
+    app.include_router(memory_router(chat.memory))
     web_root = REPO_ROOT / "apps/web/dist"
     if web_root.exists():
         app.mount("/", StaticFiles(directory=web_root, html=True), name="miko-web")

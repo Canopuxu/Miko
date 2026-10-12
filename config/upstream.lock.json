@@ -46,7 +46,8 @@
         "src/memu/embedding"
       ],
       "licenseSha256": "07c4d28666540783f5b12454305d29b687ad7ce152aa163eb8afb46d36428838",
-      "licenseSnapshot": "licenses/memU-LICENSE.txt"
+      "licenseSnapshot": "licenses/memU-LICENSE.txt",
+      "vendoredPackage": "packages/upstream/memu"
     },
     {
       "name": "memobase",
@@ -114,7 +115,8 @@
         "chatlocal/mcp_chat.py",
         "chatlocal/mcp_chat_turns.py",
         "chatlocal/mcp_chat_media.py",
-        "chatlocal/mcp_sticker_library.py"
+        "chatlocal/mcp_sticker_library.py",
+        "chatlocal/tulpa.py"
       ],
       "licenseSha256": "ef81f235949481abc167b306426521d9c60765116fe771f2fd2ea713f21f03b0",
       "licenseSnapshot": "licenses/tulpa-qq-baseline-LICENSE.txt"

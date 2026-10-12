@@ -1,0 +1,240 @@
+---
+name: {{task_doc_name}}
+description: Register a scheduled job that bridges recent Cursor agent sessions into memU memory, skills, and resource submissions. Runs the prepare → self-evolve → commit pipeline on a schedule (default: every hour).
+---
+
+# Create the memU bridging scheduled task (Cursor)
+
+## Task identity
+
+- Current task name: `{{task_name}}`
+- Former task names: {{former_task_names}}
+- Names recognized during migration and removal: {{all_task_names}}
+
+Use this when the user asks to **set up (or change) the recurring memU
+"bridging" task** — the job that periodically turns what the agent recently did
+in its Cursor agent sessions into memU memory files, skills, and resource
+submissions.
+
+Memory and skills are durable in both modes. In cloud mode, the current service
+accepts workspace resources from this unchanged pipeline but does not persist or
+retrieve them yet.
+
+Your goal is to **register a recurring headless Cursor agent run** whose prompt
+is the three-step pipeline below. You are not running the pipeline now.
+
+Part of the full setup in `INSTALL.md` (`memu-cursor docs install`), but usable
+on its own.
+
+## What the bridging task does (context)
+
+1. **Prepare** — `memu-cursor prepare` scans new turns from Cursor Agent
+   sessions, mirrors the current memU recall files to
+   `~/.memu/hosts/cursor/memory` and `~/.memu/hosts/cursor/skill`, snapshots
+   them by content hash, and writes numbered **job-instruction files** to
+   `~/.memu/hosts/cursor/jobs/` (`1.txt`, `2.txt`, …).
+2. **Self-evolve** — the agent opens each job file **in numeric order** and
+   follows it: mine a session into user **memory**, mine a session into a
+   **skill**, and **describe** the files the sessions touched. "Do nothing" is
+   an allowed, common outcome for any job.
+3. **Commit** — `memu-cursor commit` diffs the tracked directories against the
+   step-1 snapshot and submits what the agent actually created or changed back
+   to memU.
+
+Only steps 1 and 3 are code. **Step 2 is real agent work**, so the scheduled
+run's prompt must instruct the agent to do it, not shell out to a script.
+
+## Prerequisites
+
+- **memU is installed and `memu-cursor` is on `PATH`.** Verify with
+  `memu-cursor doctor`; if it fails, do `INSTALL.md` Part 1 first.
+- **`cursor-agent` runs headless.** The scheduled entry invokes
+  `cursor-agent -p` non-interactively with permission to run `memu-cursor` and
+  write under `~/.memu/`. The Cursor IDE does not provide this binary (its
+  `cursor` launcher on `PATH` is the GUI opener, not an agent CLI) — it is
+  a separate install; `INSTALL.md` Part 2.0 is the install + bare-environment
+  verify procedure to pass first.
+
+## Step 1 — settle the schedule
+
+Ask the user for a schedule if the request doesn't include one. **Default: every
+hour**, cron `0 * * * *` (local time). Confirm before creating.
+
+## Step 2 — register the scheduled run
+
+**Never inline the pipeline prompt in the crontab entry.** The quoted prompt is
+~1.2 KB, and cron truncates a crontab line at roughly 1 KB before handing it to
+`/bin/sh` — the shell receives a command cut off mid-quote and every tick dies
+instantly with `unexpected EOF while looking for matching "'"`, mailed to
+`/var/mail/$USER` and visible nowhere else; `cursor-agent` never starts. This is
+the Unix sibling of the Windows `schtasks /TR` limit (memU#539), and the fix is
+the same shape: **the prompt lives in a file; the crontab line stays short.**
+
+1. Write the pipeline prompt to `~/.memu/hosts/cursor/bridge-prompt.txt`,
+   this content **verbatim** as a single line:
+
+   ```
+   Run the memU bridging pipeline. Do the four steps strictly in order; do not skip a step even if the previous one looks like it produced nothing.  1. LEFTOVERS. If ~/.memu/hosts/cursor/jobs/ already contains job files, they are unfinished work from an earlier run (a crash, or the install itself) — process them exactly as step 3 describes, then run:  memu-cursor commit  — and only then continue.  2. PREPARE. Run this exact command with bash:  memu-cursor prepare  — it regenerates ~/.memu/hosts/cursor/jobs/. If the command exits non-zero, stop and report the error.  3. SELF-EVOLVE. List ~/.memu/hosts/cursor/jobs/*.txt and process them in ascending numeric order (1.txt, then 2.txt, …). The count changes every run — always glob and sort. If there are no job files, skip to step 4. For each job file: read it and follow its instructions to the letter. Each job is self-contained and already carries the concrete paths it needs. Emitting no files for a job is a valid outcome; do not invent content.  4. COMMIT. Run this exact command with bash:  memu-cursor commit  — it commits whatever the jobs created or changed. If it exits non-zero, report the error.  ON FAILURE. If step 2 or step 4 exited non-zero, run this once before you stop:  memu-cursor report error --stage remember --detail "<a full account of what went wrong>"  — that detail is all a memU engineer gets to work out what is broken on this machine, so be generous: which step, what you ran, what happened instead, what you already tried, and what you think the cause is. Write it as prose for a human, not as a transcript — do not paste the traceback or raw command output, which the CLI already reports on its own, and keep credentials, absolute paths, and memory or transcript text out of it. Ignore any failure of that command; it is never part of the run.  Finish with a one-line summary: how many jobs ran (leftovers included) and what was committed.
+   ```
+
+2. Write `~/.memu/hosts/cursor/bridge.sh` and `chmod +x` it. Note the
+   **`--trust` flag and the `cd` into the host working tree**: `cursor-agent`
+   refuses headless runs in an untrusted directory ("Workspace Trust
+   Required", exit 1 — field-verified on Windows in memU#571, and the wall is
+   in headless running itself, so it applies to cron too). The trust lands on
+   memU's own tree, never on whatever directory cron happens to start in.
+   Never `--yolo` — that is the blanket permission-skip this guide rejects:
+
+   ```sh
+   #!/bin/sh
+   # memU bridging for Cursor — invoked by cron.
+   # The pipeline prompt lives in bridge-prompt.txt because cron truncates
+   # crontab lines around 1 KB (see BRIDGING_TASK.md).
+   DIR="$HOME/.memu/hosts/cursor"
+   # Single-instance lock: an hourly tick can fire while a long backlog run is
+   # still going; a second run would race it on jobs/ and double-commit.
+   # mkdir is atomic; a stale lock older than 3h is reclaimed. Tradeoff: a
+   # legitimate run longer than 3h loses its lock to the next tick and can
+   # double-run — accepted deliberately, because the alternative (no reclaim)
+   # lets one crashed run wedge the schedule forever. Do not "fix" one side
+   # without weighing the other.
+   LOCK="$DIR/.bridge.lock"
+   if ! mkdir "$LOCK" 2>/dev/null; then
+     if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +180 2>/dev/null)" ]; then
+       rmdir "$LOCK" 2>/dev/null
+       mkdir "$LOCK" 2>/dev/null || exit 0
+     else
+       echo "$(date '+%F %T') skipped: another bridging run is in progress" >> "$DIR/bridge.log"
+       exit 0
+     fi
+   fi
+   trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+   # Marks this invocation as the scheduled bridging run. The Cursor Agent
+   # supplies CURSOR_CONVERSATION_ID inside its shell tools; prepare combines
+   # the two signals to skip this run's own transcript.
+   export MEMU_BRIDGING_RUN=1
+   # --trust scopes workspace trust to $DIR (memU's own tree), which is also
+   # the working directory — headless cursor-agent dies without it.
+   cd "$DIR" || exit 1
+   cursor-agent --trust -p "$(cat "$DIR/bridge-prompt.txt")" >> "$DIR/bridge.log" 2>&1
+   ```
+
+**The crontab's first line is a `PATH`.** cron runs with a bare
+`/usr/bin:/bin`; the binaries the pipeline needs (pipx and npm installs land in
+`~/.local/bin` and `/opt/homebrew/bin`) are not there, and the run dies on
+`command not found` before the pipeline starts. Derive it at registration time
+and write it **above** the entry:
+
+```
+PATH=$(dirname "$(command -v memu-cursor)"):$(dirname "$(command -v cursor-agent)"):/usr/local/bin:/usr/bin:/bin
+```
+
+The machine-specific fact lives in the crontab, where machine facts belong —
+the pipeline prompt itself stays verbatim in its file.
+
+Then the cron entry — the default, macOS included (use launchd only if the user
+explicitly asks for it) — is one short line (cron does not expand `~` in the
+command field, but it does run the line through `/bin/sh`, so `$HOME` works; a
+literal absolute path is equally fine):
+
+```
+0 * * * * $HOME/.memu/hosts/cursor/bridge.sh # {{task_name}}
+```
+
+If launchd is explicitly chosen, set its Label to `{{task_name}}`.
+
+The prompt block is fixed; only the cron expression is the user's choice.
+Nothing machine-specific leaks into the prompt — the pipeline is invoked
+through `PATH` commands. As a side benefit the run's output now lands in
+`~/.memu/hosts/cursor/bridge.log` (an inlined entry discarded it), so a
+failed tick leaves a diagnosable trace instead of only a cron mail.
+
+## Step 3 — confirm
+
+**Your shell's `PATH` proves nothing about the scheduler's.** Two checks that
+count:
+
+- `env -i PATH=/usr/bin:/bin /bin/sh -c 'command -v memu-cursor'` — this
+  *failing* is exactly why the entry needs its `PATH` line; with that line in
+  place the command must resolve from the directories it names.
+- The hard check: trigger one run through cron itself (temporarily set the
+  schedule a minute ahead, or run `bridge.sh` by hand with
+  `env -i PATH=... HOME="$HOME" /bin/sh -c`), then verify **filesystem
+  traces** — the session cursor and `jobs/` timestamps moved, and
+  `~/.memu/hosts/cursor/bridge.log` grew — rather than trusting the run's
+  own summary. Field data, twice over: scheduled runs in bare environments
+  have reported "completed successfully" on a command-not-found.
+
+Report back: where the schedule was registered, and the cron in words. Mention
+that the first run only has work to do once there are new Cursor agent sessions
+since the last run.
+
+## Windows (Task Scheduler)
+
+Steps 2–3 above are cron/launchd — Unix only. **On Windows, do not hand-write a
+`schtasks` entry.** The pipeline prompt is ~1000 quoted characters and `schtasks
+/TR` splits it on the first space (memU#539); a bare scheduled process also
+resolves and authenticates differently than your shell (memU#538). Run the
+helper instead — every install identical, removable by name:
+
+```
+memu-cursor schedule install     # register the hourly task
+memu-cursor schedule verify      # prove it resolves + authenticates
+memu-cursor schedule status      # last run / next run
+memu-cursor schedule uninstall   # remove it
+```
+
+`install` writes the prompt to a file plus a small PowerShell wrapper that reads
+it (nothing long ever touches the command line), bakes in the absolute path to
+`cursor-agent`, and registers the task named `{{task_name}}` under an
+**S4U** principal — windowless, runs whether or not you're logged in, catches up
+a run missed while the machine was off. `--interval <minutes>` changes the
+cadence (default 60).
+
+Cursor-specific facts, all field-verified on real Windows 11:
+
+- **Run `schedule install` from a terminal opened *after* installing
+  `cursor-agent`.** The installer updates the registry user `PATH`; a shell (or
+  IDE) started earlier keeps its launch-time environment and the helper will
+  refuse with "not on PATH" (`INSTALL.md` Part 2.0's stale-environment trap).
+- **The invocation carries `--trust`.** `cursor-agent` refuses headless runs in
+  an untrusted directory ("Workspace Trust Required", exit 1) — invisible in
+  session 0. The helper's template bakes `--trust` into both the install-time
+  auth probe and the scheduled run, and sets the task's working directory to
+  `~/.memu/hosts/cursor`, so trust lands on memU's own working tree — never on
+  `System32` (the scheduler's default CWD) or wherever install was run. Do not
+  substitute `--yolo`; that is the blanket permission skip this guide rejects.
+- **The credential is the Cursor account session.** With the IDE signed in on
+  this machine, the CLI reuses that session — profile-backed, and verified to
+  survive into an S4U session-0 run. Custom-provider (BYOK) models do **not**
+  work in the CLI: scheduled runs bill the account's plan, and a free plan will
+  starve on quota even though `schedule verify` shows green — the one
+  entitlement failure the gate cannot see.
+
+Confirm the same way Step 3 does — by filesystem traces, not the run's own
+summary: after a run, check that `~/.memu/hosts/cursor/jobs/` timestamps and the
+session manifest advanced.
+
+## Notes
+
+- **Existing Unix schedules need the updated wrapper.** Re-copy `bridge.sh` (or
+  re-run the scheduling setup) so it exports `MEMU_BRIDGING_RUN=1`; without the
+  marker, `prepare` deliberately treats the run like a person's hand-run and
+  will not claim its Cursor session. Windows wrappers already export it.
+- **Leftovers run before prepare.** Job files already on disk when the run
+  starts are unfinished work — a run that died mid-pipeline, or the install's
+  own verify. `prepare` deletes unprocessed job files, and the cursor already
+  marks their sessions as seen, so anything skipped at that moment would never
+  be minable again; draining leftovers first turns a half-done cycle into
+  bounded re-work instead of silent loss.
+- **Idempotent and incremental.** `prepare` tracks a per-session line cursor in
+  `~/.memu/hosts/cursor/.session_manifest.cursor.json`.
+- **Ordering is load-bearing.** Memory jobs before skill jobs, the
+  resource-describe job last. Always ascending numeric order.
+- **The working tree is host-scoped.** Everything under `~/.memu/hosts/cursor/`
+  is this adapter's run-scoped working state; other memU host adapters never
+  race with it. The durable backend they all share is selected by
+  `MEMU_MEMORY_MODE` in `~/.memu/config.env`; local mode uses the `MEMU_DB`
+  there.
+- **Failure handling.** Steps 1 and 3 are the only failure points that should
+  abort the run. A "do nothing" job in step 2 is normal, not an error.

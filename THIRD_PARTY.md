@@ -1,7 +1,7 @@
 # 开源来源
 
 本清单记录 Miko 开发准备阶段下载的源码。具体提交、模块路径与本地位置见
-[`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包已接入应用，Tulpa 的相关 QQ 流程已适配；memU、Memobase 和 jieba 保留供后续接入。实际使用的发行包记录在下表。
+[`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包、Tulpa QQ 与关系记忆流程、memU 检索及 jieba 分词已接入；Memobase 保留供后续评估。实际使用的发行包记录在下表。
 
 | 项目 | 来源 | 许可 | 选用部分 |
 | --- | --- | --- | --- |
@@ -14,7 +14,7 @@
 
 上游根目录许可不替代仓库内其他组件或后续安装依赖各自的许可。
 上游角色提示词保留供审阅；当前身份及 QQ 输出格式使用用户审核后的项目文件。
-第五阶段设定库复用 Tulpa 的中文双字匹配、全文检索查询与相关片段筛选方法；手动资料不作为模仿主人表达的范本。角色资料、主人资料与好友关系经项目接口组装后通过现有独立 DSH 执行。memU 的自动记忆整理仍留待后续接入。
+设定库保留 Tulpa 的中文双字匹配与全文检索，并接入 memU 语义检索；手动资料不作为模仿主人表达的范本。关系整理复用 Tulpa 流程，经独立 DSH 调用模型。当前固定版本的 memU 是仅使用 Embedding 的存储与检索服务，不承担模型记忆整理。
 
 ## Python 依赖
 
@@ -88,3 +88,29 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 | typescript | [5.9.3](https://www.npmjs.com/package/typescript/v/5.9.3) | Apache-2.0 |
 | use-sync-external-store | [1.6.0](https://www.npmjs.com/package/use-sync-external-store/v/1.6.0) | MIT |
 | vite | [6.4.3](https://www.npmjs.com/package/vite/v/6.4.3) | MIT |
+
+## 关系记忆与语义检索复用
+
+- [Tulpa](https://github.com/fumingyang2004/Tulpa)：MIT，本地固定基线 `7b603d32bc72cab082a3b39aa52658b64bd506ff` 的 `chatlocal/tulpa.py`，复用收集、分批整理、修正、证据校验、历史与后台工作器；仅将工作器的旧全局配置检查接到 Miko。页面沿用原记忆面板的功能组织，移植到统一 React 页面。
+- [memU](https://github.com/NevaMind-AI/memU)：Apache-2.0，固定源码 `dc7bda82b1f2a6429d9d1531ebdfd08d71e4e2b1`（0.11.0-beta.3），完整未修改 Python 包保存于 `packages/upstream/memu/`，实际调用 MemoryService、SQLite 与 Embedding 检索；未启用其宿主插件。
+- [jieba](https://github.com/fxsjy/jieba)：MIT，0.42.1，用于 Tulpa 的中文分词。
+
+新增 Python 依赖及许可记录在 `config/python-dependencies.lock.json`，许可副本在 `licenses/python/`。
+
+- [alembic 1.20.0](https://pypi.org/project/alembic/1.20.0/)
+- [httpcore2 2.13.1](https://pypi.org/project/httpcore2/2.13.1/)
+- [httpx2 2.13.1](https://pypi.org/project/httpx2/2.13.1/)
+- [jieba 0.42.1](https://pypi.org/project/jieba/0.42.1/)
+- [jiter 0.17.0](https://pypi.org/project/jiter/0.17.0/)
+- [Mako 1.4.3](https://pypi.org/project/Mako/1.4.3/)
+- [MarkupSafe 3.0.4](https://pypi.org/project/MarkupSafe/3.0.4/)
+- [numpy 2.5.4](https://pypi.org/project/numpy/2.5.4/)
+- [openai 3.29.0](https://pypi.org/project/openai/3.29.0/)
+- [pendulum 3.2.0](https://pypi.org/project/pendulum/3.2.0/)
+- [python-dateutil 2.9.0.post0](https://pypi.org/project/python-dateutil/2.9.0.post0/)
+- [six 1.17.0](https://pypi.org/project/six/1.17.0/)
+- [sniffio 1.3.1](https://pypi.org/project/sniffio/1.3.1/)
+- [SQLAlchemy 2.1.4](https://pypi.org/project/SQLAlchemy/2.1.4/)
+- [sqlmodel 0.0.48](https://pypi.org/project/sqlmodel/0.0.48/)
+- [truststore 0.10.4](https://pypi.org/project/truststore/0.10.4/)
+- [tzdata 2026.5](https://pypi.org/project/tzdata/2026.5/)

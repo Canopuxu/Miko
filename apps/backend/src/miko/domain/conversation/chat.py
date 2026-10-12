@@ -41,6 +41,8 @@ class Turn:
     system_prompt: str | None = None
     status: str = 'running'
     json_output: bool = False
+    memory_query: str | None = None
+    memory_key: tuple | None = None
 
     def close_runtime(self):
         with self.lifecycle:
@@ -58,6 +60,7 @@ class ChatService:
         self.profiles = ProfileStore(self.store)
         self.store.recover_interrupted()
         self.turns: dict[str, Turn] = {}
+        self.memory = None
         # SDK carrier includes coding tools by default. Chat has no tool calls in this stage.
         self.patch = settings.local_root / "runtime/dsh/chat.patch.json"
         self.patch.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +90,7 @@ class ChatService:
         turn = Turn(uuid.uuid4().hex, conversation_id, message.strip())
         query = turn.message + '\n' + '\n'.join(r['content'] for r in self.store.history(conversation_id)[-6:][::-1])
         turn.system_prompt = self.compose_prompt(self.system_prompt, query)
+        turn.memory_query = query
         turn.user_message_id = self.store.begin_turn(conversation_id, turn.id, turn.message)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
@@ -100,6 +104,13 @@ class ChatService:
     async def run(self, turn: Turn):
         status = "error"
         try:
+            if self.memory and turn.memory_query is not None:
+                context = await self.memory.context(turn.memory_query, turn.memory_key)
+                base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
+                instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
+                turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(context, ensure_ascii=False)
+                if turn.memory_key:
+                    turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
             turn.runtime = DshRuntime(
                 self.settings, base_url=f"{self.settings.url}/_runtime/llm/{turn.id}",
                 token=self.bridge_token, model=self.provider.model,
@@ -156,9 +167,28 @@ class ChatService:
                     context=[{'role': 'user', 'content': message}],
                     system_prompt=self.compose_prompt(prompt_path.read_text(encoding='utf-8').strip(), query, (account, friend)) + '\n\n' + output,
                     json_output=True)
+        turn.memory_query = query
+        turn.memory_key = (account, friend)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         return turn
+
+    async def summarize_memory(self, payload):
+        message = json.dumps(payload, ensure_ascii=False)
+        prompt = (REPO_ROOT / 'config/defaults/memory-consolidation.txt').read_text(encoding='utf-8').strip()
+        turn = Turn(uuid.uuid4().hex, 'memory', message, context=[{'role': 'user', 'content': message}],
+                    system_prompt=prompt, json_output=True)
+        self.turns[turn.id] = turn
+        turn.task = asyncio.create_task(self.run(turn))
+        try:
+            await asyncio.wait_for(asyncio.shield(turn.task), timeout=140)
+            if turn.status != 'completed':
+                raise ValueError('记忆整理模型请求未完成')
+            return json.loads(turn.text)
+        finally:
+            if not turn.task.done():
+                await self.cancel(turn)
+                await turn.task
 
     def conversation_detail(self, conversation_id: str) -> dict:
         conversation = self.store.conversation(conversation_id)

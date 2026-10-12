@@ -175,6 +175,7 @@ export function ChatPage() {
       <div className="sidebar-label">我们的空间</div>
       <a className="section-link" href="/?view=qq">QQ 好友 →</a>
       <a className="section-link" href="/?view=profiles">设定与资料 →</a>
+      <a className="section-link" href="/?view=memory">关系与经历记忆 →</a>
       <button className="nav-item selected" onClick={() => input.current?.focus()}><span>◌</span> 聊天</button>
       <button className="new-chat" onClick={newConversation} disabled={generating || loading} aria-label="开启新对话" title="开启新对话"><span>＋</span><span className="new-chat-label"> 开启新对话</span></button>
       <div className="history-label">最近对话</div>

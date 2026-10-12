@@ -1,0 +1,172 @@
+[project]
+name = "memu-cli"
+version = "0.11.0-beta.3"
+authors = [
+    {name = "MemU Team", email = "contact@nevamind.ai"},
+]
+description = "Personal memory as files — fast retrieval, higher accuracy, lower cost."
+readme = "README.md"
+# license = {file = "LICENSE"}
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+keywords = ["agent", "agentic", "agent-harness", "harness", "loop-engineering", "context-engineering", "context-window", "memory", "personal-information", "workspace", "retrieval", "llm"]
+dependencies = [
+    "httpx>=0.28.1",
+    "numpy>=2.3.4",
+    "openai>=2.8.0",
+    "pydantic>=2.12.4",
+    "sqlmodel>=0.0.27",
+    "alembic>=1.14.0",
+    "pendulum>=3.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memu"]
+
+[dependency-groups]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+]
+lint = [
+    "deptry>=0.23.1",
+    "mypy>=1.18.2",
+    "pre-commit>=4.3.0",
+    "ruff>=0.14.3",
+    "types-defusedxml>=0.7.0",
+]
+test = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.0.0",
+]
+
+[project.optional-dependencies]
+postgres = ["pgvector>=0.3.4", "sqlalchemy[postgresql-psycopgbinary]>=2.0.36"]
+
+[project.scripts]
+memu = "memu.cli:main"
+# Host adapters get their own binary rather than a subcommand: `memu` is the
+# algorithm surface, these are sidecars to a desktop agent (ADR 0008/0009/0010).
+memu-codex = "memu.hosts.codex.cli:main"
+memu-claude-code = "memu.hosts.claude_code.cli:main"
+memu-cursor = "memu.hosts.cursor.cli:main"
+memu-openclaw = "memu.hosts.openclaw.cli:main"
+memu-hermes = "memu.hosts.hermes.cli:main"
+memu-workbuddy = "memu.hosts.workbuddy.cli:main"
+memu-cola = "memu.hosts.cola.cli:main"
+memu-pi = "memu.hosts.pi.cli:main"
+# The generic adapter: any agent without a dedicated binary. `memu-agent
+# detect` finds the session log and instruction file, then reports which of
+# the two seams (memorization / retrieval) work for that agent.
+memu-agent = "memu.hosts.generic.cli:main"
+
+[project.urls]
+"Homepage" = "https://github.com/NevaMind-AI/MemU"
+"Bug Tracker" = "https://github.com/NevaMind-AI/MemU/issues"
+"Documentation" = "https://github.com/NevaMind-AI/MemU#readme"
+
+[tool.mypy]
+files = ["src", "tests"]
+python_version = "3.11"
+disallow_untyped_defs = true
+disallow_any_unimported = true
+no_implicit_optional = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_unused_ignores = false
+disable_error_code = ["attr-defined", "call-arg"]
+
+[[tool.mypy.overrides]]
+module = ["pgvector.*"]
+ignore_missing_imports = true
+
+[tool.deptry.per_rule_ignores]
+# memu.trust imports certifi only as a fallback, inside a try/except that
+# degrades when it is absent — so it is deliberately a transitive dependency
+# (via httpx) rather than one this package declares and would then require.
+DEP003 = ["certifi"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+fix = true
+
+[tool.ruff.lint]
+select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+    # tryceratops
+    "TRY",
+]
+ignore = [
+    # LineTooLong
+    "E501",
+    # DoNotAssignLambda
+    "E731",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.coverage.report]
+skip_empty = true
+
+[tool.coverage.run]
+branch = true
+source = ["memu"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+log_cli = true
+log_cli_level = "INFO"
+asyncio_mode = "auto"

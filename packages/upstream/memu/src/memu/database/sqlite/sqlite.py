@@ -1,0 +1,133 @@
+"""SQLite database store implementation for MemU."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from pydantic import BaseModel
+from sqlmodel import SQLModel
+
+from memu.database.interfaces import Database
+from memu.database.models import (
+    RecallFile,
+    RecallFileSegment,
+    Resource,
+)
+from memu.database.repositories import (
+    RecallFileRepo,
+    RecallFileSegmentRepo,
+    ResourceRepo,
+)
+from memu.database.sqlite.repositories.recall_file_repo import SQLiteRecallFileRepo
+from memu.database.sqlite.repositories.recall_file_segment_repo import SQLiteRecallFileSegmentRepo
+from memu.database.sqlite.repositories.resource_repo import SQLiteResourceRepo
+from memu.database.sqlite.schema import SQLiteSQLAModels, get_sqlite_sqlalchemy_models
+from memu.database.sqlite.session import SQLiteSessionManager
+from memu.database.state import DatabaseState
+
+logger = logging.getLogger(__name__)
+
+
+class SQLiteStore(Database):
+    """SQLite database store implementation.
+
+    This store provides a lightweight, file-based database backend for MemU.
+    It uses SQLite for metadata storage and brute-force cosine similarity
+    for vector search (native vector support is not available in SQLite).
+
+    Attributes:
+        resource_repo: Repository for resource records.
+        recall_file_repo: Repository for recall files.
+        resources: Dict cache of resource records.
+        recall_files: Dict cache of recall file records.
+    """
+
+    resource_repo: ResourceRepo
+    recall_file_repo: RecallFileRepo
+    recall_file_segment_repo: RecallFileSegmentRepo
+    resources: dict[str, Resource]
+    recall_files: dict[str, RecallFile]
+    segments: list[RecallFileSegment]
+
+    def __init__(
+        self,
+        *,
+        dsn: str,
+        scope_model: type[BaseModel] | None = None,
+        resource_model: type[Any] | None = None,
+        recall_file_model: type[Any] | None = None,
+        recall_file_segment_model: type[Any] | None = None,
+        sqla_models: SQLiteSQLAModels | None = None,
+    ) -> None:
+        """Initialize SQLite database store.
+
+        Args:
+            dsn: SQLite connection string (e.g., "sqlite:///path/to/db.sqlite").
+            scope_model: Pydantic model defining user scope fields.
+            resource_model: Optional custom resource model.
+            recall_file_model: Optional custom recall file model.
+            sqla_models: Pre-built SQLAlchemy models container.
+        """
+        self.dsn = dsn
+        self._scope_model: type[BaseModel] = scope_model or BaseModel
+        self._scope_fields = list(getattr(self._scope_model, "model_fields", {}).keys())
+        self._state = DatabaseState()
+        self._sessions = SQLiteSessionManager(dsn=self.dsn)
+        self._sqla_models: SQLiteSQLAModels = sqla_models or get_sqlite_sqlalchemy_models(scope_model=self._scope_model)
+
+        # Create tables
+        self._create_tables()
+
+        # Use provided models or defaults from sqla_models
+        resource_model = resource_model or self._sqla_models.Resource
+        recall_file_model = recall_file_model or self._sqla_models.RecallFile
+        recall_file_segment_model = recall_file_segment_model or self._sqla_models.RecallFileSegment
+
+        # Initialize repositories
+        self.resource_repo = SQLiteResourceRepo(
+            state=self._state,
+            resource_model=resource_model,
+            sqla_models=self._sqla_models,
+            sessions=self._sessions,
+            scope_fields=self._scope_fields,
+        )
+        self.recall_file_repo = SQLiteRecallFileRepo(
+            state=self._state,
+            recall_file_model=recall_file_model,
+            sqla_models=self._sqla_models,
+            sessions=self._sessions,
+            scope_fields=self._scope_fields,
+        )
+        self.recall_file_segment_repo = SQLiteRecallFileSegmentRepo(
+            state=self._state,
+            recall_file_segment_model=recall_file_segment_model,
+            sqla_models=self._sqla_models,
+            sessions=self._sessions,
+            scope_fields=self._scope_fields,
+        )
+
+        # Set up cache references
+        self.resources = self._state.resources
+        self.recall_files = self._state.recall_files
+        self.segments = self._state.segments
+
+    def _create_tables(self) -> None:
+        """Create SQLite tables if they don't exist."""
+        SQLModel.metadata.create_all(self._sessions.engine)
+        # Also create tables from our custom metadata
+        self._sqla_models.Base.metadata.create_all(self._sessions.engine)
+        logger.debug("SQLite tables created/verified")
+
+    def close(self) -> None:
+        """Close the database connection and release resources."""
+        self._sessions.close()
+
+    def load_existing(self) -> None:
+        """Load all existing data from database into cache."""
+        self.resource_repo.load_existing()
+        self.recall_file_repo.load_existing()
+        self.recall_file_segment_repo.load_existing()
+
+
+__all__ = ["SQLiteStore"]

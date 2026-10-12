@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from typing import Literal
 
@@ -76,6 +77,8 @@ def profiles_router(chat, qq):
         key = (account, friend) if account else None
         if key and not qq.store.friend(key):
             raise HTTPException(404, '找不到这位好友')
+        if getattr(chat, 'memory', None):
+            return await chat.memory.context(q, key)
         return store.context(q, key)
 
     @router.put('/relationships/{account}/{friend}')
@@ -90,6 +93,17 @@ def profiles_router(chat, qq):
         elif bool(row['miko_introduced']) != body.miko_introduced:
             fields['intro_receipt_id'] = None
         qq.store.update_friend(key, **fields)
+        if getattr(chat, 'memory', None):
+            await asyncio.to_thread(chat.memory.social.store.sync)
+            for subject in ('owner', 'miko'):
+                cid = subject + '|' + row['conversation_id']
+                with chat.memory.social.store.connect() as db:
+                    db.execute("INSERT OR IGNORE INTO tulpa_scopes(platform,conversation_id,kind) VALUES('qq',?,'direct')", (cid,))
+                    scope = db.execute('SELECT id,revision,manual FROM tulpa_scopes WHERE conversation_id=?', (cid,)).fetchone()
+                text = fields[subject + '_relationship']
+                if scope['manual'] != text:
+                    chat.memory.social.edit(scope['id'], text, scope['revision'])
+            await chat.memory.sync()
         return qq.store.friend(key)
 
     return router

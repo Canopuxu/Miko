@@ -208,6 +208,190 @@
       "licenseFiles": [
         "licenses/python/Pillow/LICENSE"
       ]
+    },
+    {
+      "name": "alembic",
+      "version": "1.20.0",
+      "source": "https://pypi.org/project/alembic/1.20.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/alembic/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "httpcore2",
+      "version": "2.13.1",
+      "source": "https://pypi.org/project/httpcore2/2.13.1/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/httpcore2/licenses/LICENSE.md"
+      ]
+    },
+    {
+      "name": "httpx2",
+      "version": "2.13.1",
+      "source": "https://pypi.org/project/httpx2/2.13.1/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/httpx2/licenses/LICENSE.md"
+      ]
+    },
+    {
+      "name": "jieba",
+      "version": "0.42.1",
+      "source": "https://pypi.org/project/jieba/0.42.1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/jieba-LICENSE.txt"
+      ]
+    },
+    {
+      "name": "jiter",
+      "version": "0.17.0",
+      "source": "https://pypi.org/project/jiter/0.17.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/jiter/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "Mako",
+      "version": "1.4.3",
+      "source": "https://pypi.org/project/Mako/1.4.3/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/Mako/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.4",
+      "source": "https://pypi.org/project/MarkupSafe/3.0.4/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/MarkupSafe/licenses/LICENSE.txt"
+      ]
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "source": "https://pypi.org/project/numpy/2.5.4/",
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "licenseFiles": [
+        "licenses/python/numpy/licenses/LICENSE.txt",
+        "licenses/python/numpy/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+        "licenses/python/numpy/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+        "licenses/python/numpy/licenses/numpy/_core/src/highway/LICENSE",
+        "licenses/python/numpy/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt",
+        "licenses/python/numpy/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/_core/src/umath/svml/LICENSE",
+        "licenses/python/numpy/licenses/numpy/fft/pocketfft/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+        "licenses/python/numpy/licenses/numpy/ma/LICENSE",
+        "licenses/python/numpy/licenses/numpy/random/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/distributions/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/mt19937/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/pcg64/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/philox/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/sfc64/LICENSE.md",
+        "licenses/python/numpy/licenses/numpy/random/src/splitmix64/LICENSE.md"
+      ]
+    },
+    {
+      "name": "openai",
+      "version": "3.29.0",
+      "source": "https://pypi.org/project/openai/3.29.0/",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        "licenses/python/openai/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "pendulum",
+      "version": "3.2.0",
+      "source": "https://pypi.org/project/pendulum/3.2.0/",
+      "license": "MIT License",
+      "licenseFiles": [
+        "licenses/python/pendulum/licenses/LICENSE",
+        "licenses/python/pendulum/pendulum-3.2.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "source": "https://pypi.org/project/python-dateutil/2.9.0.post0/",
+      "license": "Dual License",
+      "licenseFiles": [
+        "licenses/python/python-dateutil/LICENSE"
+      ]
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "source": "https://pypi.org/project/six/1.17.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/six/LICENSE"
+      ]
+    },
+    {
+      "name": "sniffio",
+      "version": "1.3.1",
+      "source": "https://pypi.org/project/sniffio/1.3.1/",
+      "license": "MIT OR Apache-2.0",
+      "licenseFiles": [
+        "licenses/python/sniffio/LICENSE",
+        "licenses/python/sniffio/LICENSE.APACHE2",
+        "licenses/python/sniffio/LICENSE.MIT"
+      ]
+    },
+    {
+      "name": "SQLAlchemy",
+      "version": "2.1.4",
+      "source": "https://pypi.org/project/SQLAlchemy/2.1.4/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/SQLAlchemy/licenses/AUTHORS",
+        "licenses/python/SQLAlchemy/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "sqlmodel",
+      "version": "0.0.48",
+      "source": "https://pypi.org/project/sqlmodel/0.0.48/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/sqlmodel/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "truststore",
+      "version": "0.10.4",
+      "source": "https://pypi.org/project/truststore/0.10.4/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/truststore/licenses/LICENSE"
+      ]
+    },
+    {
+      "name": "tzdata",
+      "version": "2026.5",
+      "source": "https://pypi.org/project/tzdata/2026.5/",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        "licenses/python/tzdata/licenses/LICENSE",
+        "licenses/python/tzdata/licenses/licenses/LICENSE_APACHE"
+      ]
+    },
+    {
+      "name": "memu-cli",
+      "version": "0.11.0b3",
+      "source": "https://github.com/NevaMind-AI/memU/tree/dc7bda82b1f2a6429d9d1531ebdfd08d71e4e2b1",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        "packages/upstream/memu/LICENSE.txt"
+      ],
+      "localSource": "packages/upstream/memu"
     }
   ],
   "dshArtifacts": [

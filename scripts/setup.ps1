@@ -24,6 +24,8 @@ try {
     }
     & $mikoPython -m pip install --disable-pip-version-check -r (Join-Path $mikoRepoRoot 'requirements.lock.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed.' }
+    & $mikoPython -m pip install --disable-pip-version-check --no-deps (Join-Path $mikoRepoRoot 'packages\upstream\memu')
+    if ($LASTEXITCODE -ne 0) { throw 'memU installation failed.' }
     & $mikoPython -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e $mikoRepoRoot
     if ($LASTEXITCODE -ne 0) { throw 'Miko package installation failed.' }
 } finally {

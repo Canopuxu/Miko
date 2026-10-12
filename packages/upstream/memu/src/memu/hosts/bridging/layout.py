@@ -1,0 +1,113 @@
+"""Where the bridging pipeline keeps its working state.
+
+Prepare and commit must agree on every one of these paths. They used to agree by
+duplicating the constants in two scripts under a ``# Must match prepare_jobs.py``
+comment — a comment is not a mechanism. One object, one source of truth.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+BASE_DIR = "~/.memu"
+
+TRACK_DIRS: dict[str, str] = {"memory": "memory", "skill": "skill"}
+"""RecallFile ``track`` -> the subdirectory its files are mirrored into."""
+
+
+@dataclass(frozen=True)
+class Layout:
+    """The ``~/.memu`` working tree for one host's bridging runs."""
+
+    base: Path
+    host: str
+
+    @classmethod
+    def default(cls, host: str, base: str | Path = BASE_DIR) -> Layout:
+        return cls(base=Path(os.path.expanduser(str(base))), host=host)
+
+    @property
+    def sessions(self) -> Path:
+        """Transcripts sliced out of the host's session log this run."""
+        return self.base / "sessions"
+
+    @property
+    def jobs(self) -> Path:
+        """The numbered job-instruction files the agent works through."""
+        return self.base / "jobs"
+
+    @property
+    def memory(self) -> Path:
+        return self.base / TRACK_DIRS["memory"]
+
+    @property
+    def skill(self) -> Path:
+        return self.base / TRACK_DIRS["skill"]
+
+    @property
+    def session_manifest(self) -> Path:
+        """Per-session line cursor — the *promoted* one, advanced only by a
+        successful ``commit``. Scoped by host: two hosts' session keys are
+        unrelated, and sharing one cursor file would let each hide the other's
+        new turns."""
+        return self.base / f".session_manifest.{self.host}.json"
+
+    @property
+    def session_manifest_pending(self) -> Path:
+        """The cursor as ``prepare`` staged it, promoted by ``commit``.
+
+        Two files because the two moments differ: prepare knows what it *saw*,
+        only commit knows what survived into the store. Promoting on commit is
+        what makes a bare ``prepare`` harmless and a run that dies mid-pipeline
+        recoverable instead of silently lossy (#518)."""
+        return self.session_manifest.with_name(self.session_manifest.name + ".pending")
+
+    @property
+    def run_marker(self) -> Path:
+        """When this cycle's ``prepare`` began, for ``commit`` to close (ADR 0016 §10).
+
+        The two halves of the record seam are separate processes, usually minutes
+        or hours apart, so the start cannot be held in memory — and
+        :func:`time.monotonic` does not cross a process boundary at all. A file is
+        the only carrier, and an explicit one rather than an existing artifact's
+        mtime: ``session_manifest_pending`` is written partway through ``prepare``,
+        before the store mirror and the template fetches, so reading its timestamp
+        would silently exclude exactly the network time worth measuring — and would
+        bind the number to a statement order nobody has agreed to preserve.
+
+        Host-scoped like the cursor beside it, and ephemeral: written by every
+        ``prepare``, cleared by the ``commit`` that reports it.
+        """
+        return self.base / f".bridging_run.{self.host}.json"
+
+    @property
+    def self_sessions(self) -> Path:
+        """Session ids of the bridging runs themselves, skipped by ``prepare``.
+
+        Host-scoped like the cursor, and for the same reason: two hosts' session
+        ids are unrelated, and a shared file would let one host's run id mask an
+        unrelated real session on the other."""
+        return self.base / f".self_sessions.{self.host}.json"
+
+    @property
+    def memory_manifest(self) -> Path:
+        """Content hashes of the tracked files as of the last successful
+        ``commit`` (bootstrapped by the first ``prepare`` from the
+        store-derived mirror)."""
+        return self.base / ".memory_manifest.json"
+
+    @property
+    def resource_log(self) -> Path:
+        """Raw append-only log of files the sessions touched, written by the skill jobs."""
+        return self.base / ".resource.tmp"
+
+    @property
+    def resources(self) -> Path:
+        """The verified, describe-me resource file the agent annotates."""
+        return self.base / "resources.md"
+
+    @property
+    def track_dirs(self) -> list[str]:
+        return list(TRACK_DIRS.values())
