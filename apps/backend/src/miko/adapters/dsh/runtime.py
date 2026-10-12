@@ -1,0 +1,87 @@
+from importlib.metadata import version
+from pathlib import Path
+
+from deepseek_harness import HarnessClient, HarnessConfig
+from deepseek_harness_runtime import bundled_runtime_path
+import psutil
+
+from miko.settings import Settings
+
+
+class DshRuntime:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.client: HarnessClient | None = None
+        self.process: psutil.Process | None = None
+        self.server_info: dict = {}
+        self.executable = Path(bundled_runtime_path()).resolve()
+        # Use the runtime installed in Miko's environment, never an executable from PATH.
+        if not self.executable.is_relative_to(settings.local_root / "envs/python"):
+            raise RuntimeError("DSH runtime must be installed in MikoLocal/envs/python")
+        if version("deepseek-harness-sdk") != version("deepseek-harness-runtime-bin"):
+            raise RuntimeError("DSH SDK and runtime versions differ")
+
+    def start(self) -> None:
+        settings = self.settings
+        client = HarnessClient(HarnessConfig(
+            dsh_bin=str(self.executable),
+            profile="sdk-minimal",
+            dsh_home=str(settings.dsh_home),
+            cwd=str(settings.workspace),
+            env={
+                "DSH_HOME": str(settings.dsh_home),
+                "DSH_AGENTS_HOME": str(settings.agents_home),
+                "DSH_RESOURCE_CACHE": str(settings.local_root / "cache/dsh-resources"),
+                "DSH_PRIMARY_RUNTIME": "",
+                "DSH_OFFICE_SIDECAR": "",
+                "DSH_RUNTIME_MODE": "exe",
+                "TEMP": str(settings.local_root / "cache/tmp"),
+                "TMP": str(settings.local_root / "cache/tmp"),
+                # Stage one only initializes the protocol; no model request is submitted.
+                "DEEPSEEK_BASE_URL": "http://127.0.0.1:9",
+                "DEEPSEEK_API_KEY": "miko-local-handshake-only",
+            },
+            initialize_timeout_seconds=30,
+            request_timeout_seconds=15,
+            shutdown_timeout_seconds=5,
+        ))
+        self.client = client
+        try:
+            client.start()
+            result = client.initialize(
+                cwd=str(settings.workspace), provider="deepseek-official", model="deepseek-chat"
+            )
+            self.server_info = result.model_dump(exclude_none=True)
+        except BaseException:
+            self.close()
+            raise
+        # The pinned SDK has no public process-status accessor.
+        self.process = psutil.Process(client._proc.pid)
+
+    @property
+    def ready(self) -> bool:
+        return self.client is not None and self.process is not None and self.process.is_running()
+
+    def close(self) -> None:
+        if self.client is not None:
+            process = self.client._proc
+            try:
+                self.client.close()
+            finally:
+                # SDK 0.1.5rc1 waits for its readers but leaves the output pipes open.
+                if process is not None:
+                    for pipe in (process.stdout, process.stderr):
+                        if pipe is not None:
+                            pipe.close()
+                self.client = None
+                self.process = None
+
+    def status(self) -> dict:
+        return {
+            "ready": self.ready,
+            "profile": "sdk-minimal",
+            "sdk_version": version("deepseek-harness-sdk"),
+            "runtime_version": version("deepseek-harness-runtime-bin"),
+            "executable": str(self.executable),
+            "server": self.server_info,
+        }

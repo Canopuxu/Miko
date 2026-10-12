@@ -1,0 +1,178 @@
+{
+  "pythonVersion": "3.13.16",
+  "packages": [
+    {
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "source": "https://pypi.org/project/annotated-doc/0.0.5/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/annotated-doc/LICENSE"
+      ]
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "source": "https://pypi.org/project/annotated-types/0.8.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/annotated-types/LICENSE"
+      ]
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "source": "https://pypi.org/project/anyio/4.15.1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/anyio/LICENSE"
+      ]
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "source": "https://pypi.org/project/click/8.5.0/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/click/LICENSE.txt"
+      ]
+    },
+    {
+      "name": "deepseek-harness-runtime-bin",
+      "version": "0.1.5rc1",
+      "source": "https://pypi.org/project/deepseek-harness-runtime-bin/0.1.5rc1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/deepseek-harness-runtime-bin/LICENSE",
+        "licenses/python/deepseek-harness-runtime-bin/THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    {
+      "name": "deepseek-harness-sdk",
+      "version": "0.1.5rc1",
+      "source": "https://pypi.org/project/deepseek-harness-sdk/0.1.5rc1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/deepseek-harness-sdk/LICENSE"
+      ]
+    },
+    {
+      "name": "fastapi",
+      "version": "0.143.0",
+      "source": "https://pypi.org/project/fastapi/0.143.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/fastapi/LICENSE"
+      ]
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "source": "https://pypi.org/project/h11/0.16.0/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/h11/LICENSE.txt"
+      ]
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "source": "https://pypi.org/project/idna/3.20/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/idna/LICENSE.md"
+      ]
+    },
+    {
+      "name": "opentelemetry-api",
+      "version": "1.45.1",
+      "source": "https://pypi.org/project/opentelemetry-api/1.45.1/",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        "licenses/python/opentelemetry-api/LICENSE"
+      ]
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "source": "https://pypi.org/project/psutil/7.2.2/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/psutil/LICENSE"
+      ]
+    },
+    {
+      "name": "pydantic",
+      "version": "2.14.1",
+      "source": "https://pypi.org/project/pydantic/2.14.1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/pydantic/LICENSE"
+      ]
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.50.1",
+      "source": "https://pypi.org/project/pydantic_core/2.50.1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/pydantic_core/LICENSE"
+      ]
+    },
+    {
+      "name": "setuptools",
+      "version": "82.0.1",
+      "source": "https://pypi.org/project/setuptools/82.0.1/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/setuptools/LICENSE"
+      ]
+    },
+    {
+      "name": "starlette",
+      "version": "1.7.0",
+      "source": "https://pypi.org/project/starlette/1.7.0/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/starlette/LICENSE.md"
+      ]
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "source": "https://pypi.org/project/typing-inspection/0.4.4/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/typing-inspection/LICENSE"
+      ]
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "source": "https://pypi.org/project/typing_extensions/4.16.0/",
+      "license": "PSF-2.0",
+      "licenseFiles": [
+        "licenses/python/typing_extensions/LICENSE"
+      ]
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "source": "https://pypi.org/project/uvicorn/0.54.0/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/uvicorn/LICENSE.md"
+      ]
+    }
+  ],
+  "dshArtifacts": [
+    {
+      "filename": "deepseek_harness_sdk-0.1.5rc1-py3-none-any.whl",
+      "sha256": "8d9897e97e8a95fd738cb2c3e2c563951d824e43847ec6f3b0fb172c0729b4d8"
+    },
+    {
+      "filename": "deepseek_harness_runtime_bin-0.1.5rc1-py3-none-win_amd64.whl",
+      "sha256": "d031a5ab4919c572fd7e48c7ef19ec8b1896e93d93c44b0937bb958c528f8acf"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 *.local.json
+!config/examples/*.local.json
 *.local.yaml
 *.local.yml
 
