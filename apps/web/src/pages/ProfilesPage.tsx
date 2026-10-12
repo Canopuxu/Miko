@@ -1,3 +1,4 @@
+import { AppShell } from '../components/AppShell';
 import { useEffect, useState } from 'react';
 import { getJson, responseError } from '../api/chat';
 
@@ -83,19 +84,7 @@ export function ProfilesPage() {
   }
   const categories = [...new Set(entries.map(e => e.category).filter(Boolean))];
   const shown = entries.filter(e => !category || e.category === category);
-  return <div className="app-frame profiles-frame">
-    <aside className="sidebar">
-      <a className="brand" href="/"><span className="brand-mark">m</span><span>Miko</span></a>
-      <a className="section-link" href="/">和 Miko 聊天</a>
-      <a className="section-link" href="/?view=qq">QQ 好友</a>
-      <a className="section-link" href="/?view=memory">关系与经历记忆</a>
-      <div className="history-label">设定与资料</div>
-      <p className="profile-help">整体描述保存核心设定，条目补充细节。主题可自由填写，对话片段用于了解关系和经历。</p>
-    </aside>
-    <main className="main-panel">
-      <header className="page-header"><div><h1>设定与资料</h1><p>Miko、你的资料，以及你提供的近期状态</p></div>
-        <button className="send-button" disabled={busy} onClick={() => { setDraft(blank()); setEditing(null); setNotice(''); }}>新增条目</button></header>
-      <div className="profile-workspace">
+  return <AppShell view="profiles" sidebar={
         <section className="profile-browser" aria-label="资料库">
           <div className="profile-filters">
             <input aria-label="搜索资料" value={q} placeholder="搜索标题、内容或关键词" onChange={event => setQ(event.target.value)} />
@@ -113,6 +102,11 @@ export function ProfilesPage() {
               {entry.as_of && <small>{entry.as_of}</small>}
             </button>)}
         </section>
+  }>
+    <main className="main-panel">
+      <header className="page-header"><div><h1>设定与资料</h1><p>Miko、你的资料，以及你提供的近期状态</p></div>
+        <button className="send-button" disabled={busy} onClick={() => { setDraft(blank()); setEditing(null); setNotice(''); }}>新增条目</button></header>
+      <div className="profile-workspace">
         <section className="profile-editor" aria-label="资料编辑">
           <h2>{editing ? '编辑资料' : '新增资料'}</h2>
           <fieldset className="profile-fields" disabled={busy}>
@@ -159,5 +153,5 @@ export function ProfilesPage() {
         </section>
       </div>
     </main>
-  </div>;
+  </AppShell>;
 }

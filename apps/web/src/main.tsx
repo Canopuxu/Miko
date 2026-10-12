@@ -1,9 +1,6 @@
 import { Context } from '@deepseek-ai/cordis';
 import * as UiRenderer from '@deepseek-ai/dsh-client-ui-renderer/client';
-import { ChatPage } from './pages/ChatPage';
-import { QqPage } from './pages/QqPage';
-import { ProfilesPage } from './pages/ProfilesPage';
-import { MemoryPage } from './pages/MemoryPage';
+import { App } from './App';
 import './styles/app.css';
 
 async function start() {
@@ -16,8 +13,7 @@ async function start() {
   const source = { getSnapshot: () => absent, subscribe: () => () => {} };
   context.slots.installScope('session', { current: source, bindingSource: () => source });
   // This standalone application owns the root; the stock DSH layout is not mounted.
-  const view = new URLSearchParams(location.search).get('view');
-  context.slots.register({ name: 'root' }, view === 'qq' ? QqPage : view === 'profiles' ? ProfilesPage : view === 'memory' ? MemoryPage : ChatPage);
+  context.slots.register({ name: 'root' }, App);
   const unmount = context.uiRenderer.mount(document.getElementById('app')!);
   window.addEventListener('pagehide', unmount, { once: true });
 }

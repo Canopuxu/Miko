@@ -1,3 +1,4 @@
+import { AppShell } from '../components/AppShell';
 import { useEffect, useRef, useState } from 'react';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerLibrary } from './StickerLibrary';
@@ -68,12 +69,7 @@ export function QqPage() {
     finally { setChanging(false); }
   }
 
-  return <div className="app-frame qq-frame">
-    <aside className="sidebar">
-      <a className="brand" href="/" aria-label="Miko 首页"><span className="brand-mark">m</span><span>Miko</span></a>
-      <a className="section-link" href="/">← 和 Miko 聊天</a>
-      <a className="section-link" href="/?view=profiles">设定与资料 →</a>
-      <div className="history-label">QQ 好友</div>
+  return <AppShell view="qq" sidebar={<>
       <nav className="conversation-list" aria-label="QQ 好友">
         {status?.friends.map(item => <button key={`${item.account}:${item.friend}`}
           className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => select(item.friend)}>
@@ -81,7 +77,7 @@ export function QqPage() {
           <span className="conversation-preview">{states[item.state] ?? item.state}</span>
         </button>)}
       </nav>
-    </aside>
+    </>}>
     <main className="main-panel">
       <header className="page-header"><div><h1>{friend?.name ?? 'QQ 好友'}</h1>
         <p>{friend?.friend ?? '选择一位好友查看接话状态'}</p></div>
@@ -132,5 +128,5 @@ export function QqPage() {
         <p className="qq-caption">你两分钟没有回复时，Miko 接话；你发言后重新由你主导。</p>
       </> : <section className="conversation"><div className="welcome"><h2>让 Miko 帮你接话。</h2><p>为指定好友开启接话后，等待新的私聊消息。</p></div></section>}
     </main>
-  </div>;
+  </AppShell>;
 }

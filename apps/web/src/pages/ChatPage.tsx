@@ -1,3 +1,4 @@
+import { AppShell } from '../components/AppShell';
 import { useEffect, useRef, useState } from 'react';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
 
@@ -169,16 +170,8 @@ export function ChatPage() {
   const today = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
   const title = conversations.find(item => item.id === selected)?.title;
 
-  return <div className="app-frame">
-    <aside className="sidebar">
-      <a className="brand" href="/" aria-label="Miko 首页"><span className="brand-mark">m</span><span>Miko</span></a>
-      <div className="sidebar-label">我们的空间</div>
-      <a className="section-link" href="/?view=qq">QQ 好友 →</a>
-      <a className="section-link" href="/?view=profiles">设定与资料 →</a>
-      <a className="section-link" href="/?view=memory">关系与经历记忆 →</a>
-      <button className="nav-item selected" onClick={() => input.current?.focus()}><span>◌</span> 聊天</button>
+  return <AppShell view="chat" sidebar={<>
       <button className="new-chat" onClick={newConversation} disabled={generating || loading} aria-label="开启新对话" title="开启新对话"><span>＋</span><span className="new-chat-label"> 开启新对话</span></button>
-      <div className="history-label">最近对话</div>
       <nav className="conversation-list" aria-label="历史对话">
         {conversations.map(item => <button key={item.id} className={`conversation-item ${selected === item.id ? 'active' : ''}`}
           aria-current={selected === item.id ? 'page' : undefined} onClick={() => void openConversation(item.id)}
@@ -190,7 +183,7 @@ export function ChatPage() {
       </nav>
       <div className="sidebar-footer"><span className={`status-dot ${connected ? 'online' : ''}`} />
         {connected ? '已连接' : '连接中'}<small>私人的一隅</small></div>
-    </aside>
+    </>}>
     <main className="main-panel">
       <header className="page-header"><div><h1>{title ?? '和 Miko 聊聊'}</h1><p>{today}</p></div>
         <span className="model-label">{status?.chat.model ?? '等待模型配置'}</span></header>
@@ -226,5 +219,5 @@ export function ChatPage() {
         <p className="composer-caption">{generating ? 'Miko 正在回复你' : selected ? '这段对话已保存在这里。' : '一段对话，一点新的日常。'}</p>
       </footer>
     </main>
-  </div>;
+  </AppShell>;
 }

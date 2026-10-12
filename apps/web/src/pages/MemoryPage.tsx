@@ -1,3 +1,4 @@
+import { AppShell } from '../components/AppShell';
 // Tulpa's contact memory panel adapted to Miko's React root: separate automatic
 // and manual memories, batch progress, source records, revision and history.
 import { useEffect, useState } from 'react';
@@ -40,23 +41,21 @@ export function MemoryPage() {
       setRefresh(v => v + 1); setNotice(method === 'PATCH' ? '修正已保存，历史记录保留' : '已更新');
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
-  return <div className="app-frame profiles-frame">
-    <aside className="sidebar"><a className="brand" href="/"><span className="brand-mark">m</span><span>Miko</span></a>
-      <a className="section-link" href="/">和 Miko 聊天</a><a className="section-link" href="/?view=qq">QQ 好友</a>
-      <a className="section-link" href="/?view=profiles">设定与资料</a><div className="history-label">关系与经历记忆</div>
-      <p className="profile-help">你与好友、Miko 与好友分别整理。既有聊天可作为原文查看；新对话每积累 100 条有效消息自动整理一次。</p></aside>
-    <main className="main-panel"><header className="page-header"><div><h1>关系与经历记忆</h1>
-      <p>{listing?.index.configured ? `语义检索 · ${listing.index.embedding_model}` : '尚未配置语义检索'}</p></div>
-      <button disabled={busy || !listing} className="send-button" onClick={() => void mutate('/api/memory/control', 'POST', { enabled: !listing?.control.enabled })}>
-        {listing?.control.enabled ? '暂停自动记忆' : '开启自动记忆'}</button></header>
-      {(notice || listing?.index.error) && <p role="status" className="profile-notice">{notice || listing?.index.error}</p>}
-      <div className="profile-workspace"><section className="profile-browser" aria-label="记忆对象">
+  return <AppShell view="memory" sidebar={
+        <section className="profile-browser" aria-label="记忆对象">
         <div className="profile-filters"><input aria-label="搜索记忆对象" placeholder="搜索人物" value={q} onChange={e => setQ(e.target.value)} /></div>
         {listing?.scopes.map(scope => <button disabled={busy} className={`profile-card ${selected === scope.id ? 'active' : ''}`} key={scope.id} onClick={() => setSelected(scope.id)}>
           <strong>{scope.name}</strong><small>{scope.has_memory ? '已有自动记忆' : '正在积累'} · {scope.progress}/100 · 待整理 {scope.pending_batches} 批</small>
           <small>{scope.status === 'update_failed' ? '整理失败，可重试' : scope.status === 'updating' ? '正在整理' : ''}</small></button>)}
         {!listing?.scopes.length && <p>有聊天记录后，这里会出现对应的记忆对象。</p>}
-      </section><section className="profile-editor" aria-label="记忆详情">
+      </section>
+  }>
+    <main className="main-panel"><header className="page-header"><div><h1>关系与经历记忆</h1>
+      <p>{listing?.index.configured ? `语义检索 · ${listing.index.embedding_model}` : '尚未配置语义检索'}</p></div>
+      <button disabled={busy || !listing} className="send-button" onClick={() => void mutate('/api/memory/control', 'POST', { enabled: !listing?.control.enabled })}>
+        {listing?.control.enabled ? '暂停自动记忆' : '开启自动记忆'}</button></header>
+      {(notice || listing?.index.error) && <p role="status" className="profile-notice">{notice || listing?.index.error}</p>}
+      <div className="profile-workspace"><section className="profile-editor" aria-label="记忆详情">
         {!detail ? <p>选择一位人物，查看记忆、原文和历史。</p> : <>
           <h2>自动记忆</h2><p className="memory-body">{detail.automatic || '尚未积累到一批有效消息。'}</p>
           {!detail.valid && <p>原文已变化，这份自动记忆暂不用于聊天。</p>}
@@ -69,5 +68,5 @@ export function MemoryPage() {
             <p className="memory-body">{h.body}</p></details>)}
         </>}
       </section></div>
-    </main></div>;
+    </main></AppShell>;
 }
