@@ -1,0 +1,9 @@
+{
+  "name": "miko-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "build:web": "pnpm --dir apps/web build"
+  }
+}

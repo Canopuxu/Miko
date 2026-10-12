@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Python = 'E:\Software\Anaconda3\envs\tulpa\python.exe')
+param([string]$Python = 'E:\Software\Anaconda3\envs\tulpa\python.exe', [string]$Pnpm = 'pnpm')
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 & (Join-Path $PSScriptRoot 'prepare_workspace.ps1')
@@ -33,4 +33,5 @@ $configPath = Join-Path $mikoLocalRoot 'config\miko.local.json'
 if (-not (Test-Path -LiteralPath $configPath)) {
     Copy-Item -LiteralPath (Join-Path $mikoRepoRoot 'config\examples\miko.local.json') -Destination $configPath
 }
+& (Join-Path $PSScriptRoot 'setup_web.ps1') -Pnpm $Pnpm
 Invoke-Miko 'check'

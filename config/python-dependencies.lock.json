@@ -29,6 +29,15 @@
       ]
     },
     {
+      "name": "certifi",
+      "version": "2026.7.22",
+      "source": "https://pypi.org/project/certifi/2026.7.22/",
+      "license": "MPL-2.0",
+      "licenseFiles": [
+        "licenses/python/certifi/LICENSE"
+      ]
+    },
+    {
       "name": "click",
       "version": "8.5.0",
       "source": "https://pypi.org/project/click/8.5.0/",
@@ -72,6 +81,24 @@
       "license": "MIT",
       "licenseFiles": [
         "licenses/python/h11/LICENSE.txt"
+      ]
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "source": "https://pypi.org/project/httpcore/1.0.9/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/httpcore/LICENSE.md"
+      ]
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "source": "https://pypi.org/project/httpx/0.28.1/",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/python/httpx/LICENSE.md"
       ]
     },
     {

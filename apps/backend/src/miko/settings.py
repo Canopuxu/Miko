@@ -2,7 +2,30 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+
+class ProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    api_base: str
+    api_key: SecretStr
+    model: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self):
+        parsed = urlparse(self.api_base)
+        if (parsed.username or parsed.password or parsed.query or parsed.fragment
+                or not parsed.hostname or (parsed.scheme != "https" and not (
+                    parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")))):
+            raise ValueError("模型地址需要无凭据参数的 HTTPS，或本机 HTTP 地址")
+        if not self.api_key.get_secret_value().strip():
+            raise ValueError("模型密钥为空")
+        self.api_base = self.api_base.rstrip("/")
+        return self
 
 
 class LocalConfig(BaseModel):
@@ -56,6 +79,12 @@ class Settings:
             "agents_home": str(self.agents_home),
             "workspace": str(self.workspace),
         }
+
+    def load_provider(self) -> ProviderConfig | None:
+        path = self.local_root / "config/provider.local.json"
+        if not path.exists():
+            return None
+        return ProviderConfig.model_validate_json(path.read_text(encoding="utf-8-sig"))
 
 
 def write_json(path: Path, value: dict) -> None:

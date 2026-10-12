@@ -5,14 +5,18 @@ from typing import Callable
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from miko import __version__
 from miko.adapters.dsh.runtime import DshRuntime
-from miko.settings import Settings
+from miko.api.chat import chat_router
+from miko.domain.conversation.chat import ChatService
+from miko.settings import REPO_ROOT, Settings
 
 
 def create_app(settings: Settings, control_token: str, request_stop: Callable[[], None]) -> FastAPI:
     runtime = DshRuntime(settings)
+    chat = ChatService(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -20,6 +24,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
         try:
             yield
         finally:
+            await chat.close()
             await asyncio.to_thread(runtime.close)
 
     app = FastAPI(title="Miko", version=__version__, lifespan=lifespan)
@@ -34,7 +39,8 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
 
     @app.get("/api/status")
     async def status():
-        return {"service": "miko", "version": __version__, "dsh": runtime.status()}
+        return {"service": "miko", "version": __version__, "dsh": runtime.status(),
+                "chat": chat.status()}
 
     @app.post("/_runtime/stop", include_in_schema=False)
     async def stop(authorization: str = Header(default="")):
@@ -43,4 +49,8 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
         request_stop()
         return {"stopping": True}
 
+    app.include_router(chat_router(chat))
+    web_root = REPO_ROOT / "apps/web/dist"
+    if web_root.exists():
+        app.mount("/", StaticFiles(directory=web_root, html=True), name="miko-web")
     return app

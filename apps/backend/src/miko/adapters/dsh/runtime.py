@@ -9,8 +9,12 @@ from miko.settings import Settings
 
 
 class DshRuntime:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, base_url: str = "http://127.0.0.1:9",
+                 token: str = "miko-local-handshake-only", model: str = "deepseek-chat",
+                 patches: tuple[str, ...] = (), system_prompt: str | None = None):
         self.settings = settings
+        self.base_url, self.token, self.model = base_url, token, model
+        self.patches, self.system_prompt = patches, system_prompt
         self.client: HarnessClient | None = None
         self.process: psutil.Process | None = None
         self.server_info: dict = {}
@@ -23,24 +27,25 @@ class DshRuntime:
 
     def start(self) -> None:
         settings = self.settings
+        environment = {
+            "DSH_HOME": str(settings.dsh_home),
+            "DSH_AGENTS_HOME": str(settings.agents_home),
+            "DSH_RESOURCE_CACHE": str(settings.local_root / "cache/dsh-resources"),
+            "DSH_PRIMARY_RUNTIME": "", "DSH_OFFICE_SIDECAR": "", "DSH_RUNTIME_MODE": "exe",
+            "TEMP": str(settings.local_root / "cache/tmp"),
+            "TMP": str(settings.local_root / "cache/tmp"),
+            "DEEPSEEK_BASE_URL": self.base_url, "DEEPSEEK_API_KEY": self.token,
+            "API_KEY": "", "OPENAI_API_KEY": "",
+        }
+        if self.system_prompt is not None:
+            environment["DSH_SYSTEM_PROMPT"] = self.system_prompt
         client = HarnessClient(HarnessConfig(
             dsh_bin=str(self.executable),
             profile="sdk-minimal",
             dsh_home=str(settings.dsh_home),
             cwd=str(settings.workspace),
-            env={
-                "DSH_HOME": str(settings.dsh_home),
-                "DSH_AGENTS_HOME": str(settings.agents_home),
-                "DSH_RESOURCE_CACHE": str(settings.local_root / "cache/dsh-resources"),
-                "DSH_PRIMARY_RUNTIME": "",
-                "DSH_OFFICE_SIDECAR": "",
-                "DSH_RUNTIME_MODE": "exe",
-                "TEMP": str(settings.local_root / "cache/tmp"),
-                "TMP": str(settings.local_root / "cache/tmp"),
-                # Stage one only initializes the protocol; no model request is submitted.
-                "DEEPSEEK_BASE_URL": "http://127.0.0.1:9",
-                "DEEPSEEK_API_KEY": "miko-local-handshake-only",
-            },
+            env=environment,
+            patches=self.patches,
             initialize_timeout_seconds=30,
             request_timeout_seconds=15,
             shutdown_timeout_seconds=5,
@@ -49,7 +54,8 @@ class DshRuntime:
         try:
             client.start()
             result = client.initialize(
-                cwd=str(settings.workspace), provider="deepseek-official", model="deepseek-chat"
+                cwd=str(settings.workspace), provider="deepseek-official", model=self.model,
+                reasoning_effort="high", max_tokens=2048,
             )
             self.server_info = result.model_dump(exclude_none=True)
         except BaseException:

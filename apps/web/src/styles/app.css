@@ -1,0 +1,66 @@
+:root { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #34312f; background: #faf9f6; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .48; }
+button:focus-visible, a:focus-visible { outline: 2px solid #a97963; outline-offset: 4px; }
+.app-frame { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100dvh; }
+.sidebar { padding: 37px 23px 23px; background: #f0ede7; border-right: 1px solid #e7e3dc; display: flex; flex-direction: column; }
+.brand { display: flex; gap: 12px; align-items: center; font-size: 25px; font-weight: 600; letter-spacing: -.6px; color: inherit; text-decoration: none; margin-bottom: 51px; }
+.brand-mark { width: 35px; height: 35px; background: #766858; color: white; border-radius: 12px; display: grid; place-items: center; font: italic 28px Georgia, serif; }
+.sidebar-label { color: #999087; font-size: 11px; letter-spacing: 1px; margin: 0 12px 13px; }
+.nav-item, .new-chat { border: 0; text-align: left; border-radius: 10px; padding: 12px 13px; font-size: 13px; }
+.nav-item.selected { background: #e5dfd5; color: #5c4e40; font-weight: 600; }
+.nav-item span { font-size: 22px; margin-right: 9px; vertical-align: -2px; }
+.new-chat { margin-top: 9px; background: transparent; color: #8a8176; }
+.new-chat:hover:enabled { background: #e8e3db; }
+.new-chat > span:first-child { margin-right: 10px; }
+.sidebar-footer { margin-top: auto; color: #78756e; font-size: 12px; padding: 12px; }
+.sidebar-footer small { display: block; color: #a49d94; margin-top: 13px; font-size: 11px; }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #c7b69c; margin-right: 8px; }
+.status-dot.online { background: #82937c; }
+.main-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.page-header { display: flex; align-items: center; justify-content: space-between; padding: 30px 48px 23px; border-bottom: 1px solid #eeeae3; gap: 15px; }
+h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+.page-header p { font-size: 11px; color: #a69d91; margin: 0; }
+.model-label { font-size: 11px; color: #8d857b; background: #f0ede7; border: 1px solid #e8e3da; border-radius: 20px; padding: 7px 11px; }
+.conversation { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: #ddd7ce transparent; position: relative; }
+.welcome { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px 0 45px; }
+.welcome-orbit { display: grid; place-items: center; width: 92px; height: 92px; border: 1px solid #e3dbce; border-radius: 50%; position: relative; margin-bottom: 30px; transform: rotate(-12deg); }
+.welcome-orbit::after { content: ''; position: absolute; width: 9px; height: 9px; right: 0; top: 18px; border-radius: 50%; background: #b99c83; border: 3px solid #faf9f6; }
+.welcome-orbit span { display: grid; place-items: center; height: 61px; width: 61px; border-radius: 21px; background: #eae3d8; color: #86725e; font: italic 42px Georgia, serif; transform: rotate(12deg); }
+.eyebrow { font-size: 10px !important; letter-spacing: 3px; color: #b4a492 !important; margin-bottom: 14px !important; }
+.welcome h2 { font-size: 26px; font-weight: 500; letter-spacing: 1px; margin: 0 0 14px; }
+.welcome p { font-size: 13px; color: #a59b8e; margin: 0; }
+.message-list { max-width: 850px; padding: 29px 36px 12px; margin: auto; }
+.message { display: flex; gap: 15px; margin-bottom: 31px; }
+.message-avatar { flex: 0 0 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; background: #e9e0d1; color: #86715b; font: italic 23px Georgia, serif; }
+.message.user .message-avatar { background: #e9e8e2; color: #858a7e; font: 11px "Microsoft YaHei", sans-serif; }
+.message-content { min-width: 0; padding-top: 2px; }
+.message-name { color: #988978; font-size: 11px; margin-bottom: 10px; }
+.message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; font-size: 14px; }
+.message.user .message-text { color: #787166; }
+.message-note { display: block; color: #aaa095; font-size: 10px; margin-top: 8px; }
+.thinking { color: #b1a292; animation: breathe 1.5s infinite; }
+.composer-area { width: 100%; max-width: 850px; margin: auto; padding: 13px 36px 18px; }
+.composer { border: 1px solid #ded7cd; border-radius: 17px; background: #fffdfa; padding: 15px 17px 12px; box-shadow: 0 6px 25px #84745408; }
+.composer:focus-within { border-color: #bba58c; box-shadow: 0 0 0 3px #beaa8f0c; }
+textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; line-height: 1.7; color: #494039; font-size: 13px; }
+textarea::placeholder { color: #b7ac9e; }
+.composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 7px; }
+.composer-bottom > span { color: #b8afa3; font-size: 10px; }
+.composer-bottom i { padding: 0 6px; font-style: normal; }
+.send-button { border: 0; border-radius: 10px; padding: 9px 13px; background: #82705c; color: #fffdf9; font-size: 11px; }
+.send-button:hover:enabled { background: #6c5b48; }
+.send-button span { margin-left: 9px; }
+.stop-button { background: #eee8df; color: #786552; }
+.stop-button span { margin-left: 0; margin-right: 5px; font-size: 9px; }
+.stop-button:hover:enabled { background: #e4dacc; }
+.composer-caption { text-align: center; font-size: 10px; color: #b7ad9e; margin: 12px 0 0; }
+.error-notice { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: #f7ece5; color: #956d53; border: 1px solid #ead4c5; padding: 10px 13px; border-radius: 10px; font-size: 12px; }
+.error-notice button { border: 0; background: none; color: inherit; font-size: 18px; }
+.boot { text-align: center; padding: 20vh 20px; color: #978775; }
+@keyframes breathe { 50% { opacity: .45; } }
+@media (max-width: 760px) { .app-frame { grid-template-columns: 68px minmax(0, 1fr); } .sidebar { padding: 24px 10px 18px; align-items: center; } .brand { margin-bottom: 35px; } .brand > span:last-child, .sidebar-label, .sidebar-footer, .new-chat-label { display: none; } .new-chat { padding: 7px 11px; } .new-chat > span:first-child { margin: 0; font-size: 25px; } .nav-item { font-size: 0; padding: 7px 11px; } .nav-item span { margin: 0; font-size: 25px; } .page-header { padding: 22px 23px 18px; } .message-list { padding: 25px 22px 10px; } .composer-area { padding: 12px 17px 16px; } .model-label { max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .welcome h2 { font-size: 22px; } }
+@media (prefers-reduced-motion: reduce) { .thinking { animation: none; } }

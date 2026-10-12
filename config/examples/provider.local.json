@@ -1,0 +1,5 @@
+{
+  "api_base": "https://your-provider.example/v1",
+  "api_key": "fill-in-locally",
+  "model": "deepseek-v4.1-flash"
+}
