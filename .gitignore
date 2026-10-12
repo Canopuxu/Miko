@@ -1,0 +1,45 @@
+# Local credentials and per-machine configuration.
+.env
+.env.*
+!.env.example
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Environments, dependency installs and build products.
+.venv/
+venv/
+node_modules/
+.pnpm-store/
+.cache/
+.tmp/
+__pycache__/
+*.py[cod]
+dist/
+build/
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Private runtime data belong in the sibling MikoLocal directory.
+MikoLocal/
+data/
+memory/
+logs/
+backups/
+imports/
+exports/
+*.db
+*.db-*
+*.sqlite*
+*.log
+*.pem
+*.key
+
+# Local research checkouts and temporary release artifacts.
+research/upstream/
+*.zip
+*.7z
+*.dmp

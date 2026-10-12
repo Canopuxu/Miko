@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "stage": "source-preparation",
+  "sources": [
+    {
+      "name": "deepseek-harness",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness.git",
+      "commit": "d743267388641bc76f17c45ce8b4c231aed1d32c",
+      "version": "0.2.1-alpha.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "localPath": "../MikoLocal/research/upstream/deepseek-harness",
+      "checkout": "full",
+      "selectedModules": [
+        "python/sdk",
+        "packages/core/system-prompt",
+        "packages/client/ui-layout",
+        "packages/client/ui-slots",
+        "packages/client/ui-chat",
+        "packages/client/ui-renderer",
+        "packages/client/modules",
+        "packages/mcp/mcp-client"
+      ],
+      "licenseSha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+      "licenseSnapshot": "licenses/deepseek-harness-LICENSE.txt"
+    },
+    {
+      "name": "memU",
+      "repository": "https://github.com/NevaMind-AI/memU.git",
+      "commit": "dc7bda82b1f2a6429d9d1531ebdfd08d71e4e2b1",
+      "version": "0.11.0-beta.3",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt",
+      "localPath": "../MikoLocal/research/upstream/memU",
+      "checkout": "sparse",
+      "sparseDirectories": [
+        "src",
+        "tests",
+        "docs"
+      ],
+      "selectedModules": [
+        "src/memu/app/service.py",
+        "src/memu/app/agentic.py",
+        "src/memu/app/settings.py",
+        "src/memu/database",
+        "src/memu/embedding"
+      ],
+      "licenseSha256": "07c4d28666540783f5b12454305d29b687ad7ce152aa163eb8afb46d36428838",
+      "licenseSnapshot": "licenses/memU-LICENSE.txt"
+    },
+    {
+      "name": "memobase",
+      "repository": "https://github.com/memodb-io/memobase.git",
+      "commit": "358c16bbc6d687937d79bc2f984a11c3be8da901",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "localPath": "../MikoLocal/research/upstream/memobase",
+      "checkout": "sparse",
+      "sparseDirectories": [
+        "src/server/api",
+        "docs/site"
+      ],
+      "selectedModules": [
+        "src/server/api/memobase_server/controllers/modal/chat/extract.py",
+        "src/server/api/memobase_server/controllers/modal/chat/merge.py",
+        "src/server/api/memobase_server/controllers/modal/chat/event_summary.py",
+        "src/server/api/memobase_server/controllers/modal/chat/types.py",
+        "src/server/api/memobase_server/prompts"
+      ],
+      "licenseSha256": "fa7f07ac6c5f017206e25c3ccced5949e2878de50055ca2495485bd8bece01d7",
+      "licenseSnapshot": "licenses/memobase-LICENSE.txt"
+    },
+    {
+      "name": "jieba",
+      "repository": "https://github.com/fxsjy/jieba.git",
+      "commit": "1e20c89b66f56c9301b0feed211733ffaa1bd72a",
+      "version": "0.42.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "localPath": "../MikoLocal/research/upstream/jieba",
+      "checkout": "full",
+      "selectedModules": [
+        "jieba"
+      ],
+      "licenseSha256": "901d4ea24b62b5d6ab28e0e359ea7d8407a72eb876605ec5f20591267fb0d136",
+      "licenseSnapshot": "licenses/jieba-LICENSE.txt"
+    },
+    {
+      "name": "tulpa-qq-baseline",
+      "repository": "https://github.com/fumingyang2004/Tulpa.git",
+      "commit": "7b603d32bc72cab082a3b39aa52658b64bd506ff",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "localPath": "../MikoLocal/research/upstream/tulpa-qq-baseline",
+      "checkout": "git-archive",
+      "archivePaths": [
+        "chatlocal",
+        "harness",
+        "requirements",
+        "requirements.txt",
+        "LICENSE"
+      ],
+      "selectedModules": [
+        "chatlocal/private_replies.py",
+        "chatlocal/reply_live.py",
+        "chatlocal/reply_agent.py",
+        "chatlocal/reply_history.py",
+        "chatlocal/reply_sources.py",
+        "chatlocal/private_reply_routes.py",
+        "chatlocal/message_sender.py",
+        "chatlocal/onebot.py",
+        "chatlocal/onebot_events.py",
+        "chatlocal/agent.py"
+      ],
+      "licenseSha256": "ef81f235949481abc167b306426521d9c60765116fe771f2fd2ea713f21f03b0",
+      "licenseSnapshot": "licenses/tulpa-qq-baseline-LICENSE.txt"
+    }
+  ]
+}
