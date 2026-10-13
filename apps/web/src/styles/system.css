@@ -170,3 +170,6 @@ input, textarea, select { accent-color: var(--sage); }
 .persona-tile.is-editing .persona-tile-overlay { display: none; }
 @media (hover: none) { .persona-tile .persona-tile-overlay { position: static; opacity: 1; pointer-events: auto; background: transparent; backdrop-filter: none; justify-content: flex-end; margin-top: 6px; }.persona-tile .persona-tile-overlay button { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .persona-tile .persona-tile-overlay { transition: none; } }
+
+.persona-tile.confirming-delete .persona-tile-overlay { opacity: 1; pointer-events: auto; }
+.persona-tile .persona-tile-overlay .confirm-delete-button { background: #f3ded5; color: #9a4b36; }

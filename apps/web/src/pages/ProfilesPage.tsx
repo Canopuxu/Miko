@@ -2,7 +2,7 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowUpRight, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Check, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { useDiscardGuard, useNotice } from '../components/ui';
 
 type Subject = 'miko' | 'owner';
@@ -36,6 +36,16 @@ export function ProfilesPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [previewFriend, setPreviewFriend] = useState('');
   const [preview, setPreview] = useState<Context | null>(null);
+  useEffect(()=>{
+    if(deleting?.kind !== 'entry') return;
+    const cancel=(event: PointerEvent)=>{
+      if(!(event.target instanceof Element) || !event.target.closest('[data-confirm-entry="'+deleting.id+'"]')) setDeleting(null);
+    };
+    const escape=(event: KeyboardEvent)=>{if(event.key==='Escape')setDeleting(null);};
+    document.addEventListener('pointerdown',cancel);
+    document.addEventListener('keydown',escape);
+    return()=>{document.removeEventListener('pointerdown',cancel);document.removeEventListener('keydown',escape);};
+  },[deleting]);
   const contentRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef<number | null>(null);
 
@@ -260,15 +270,19 @@ export function ProfilesPage() {
             {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
             {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
-            <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id || (deleting?.kind === 'entry' && deleting.id === entry.id) ? ' is-editing' : ''}${dragging?.id===entry.id?' is-dragging':''}`} key={entry.id}
+            <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id ? ' is-editing' : ''}${deleting?.kind==='entry' && deleting.id===entry.id?' confirming-delete':''}${dragging?.id===entry.id?' is-dragging':''}`} key={entry.id}
               draggable={!busy && !edit && !categoryEdit && !deleting}
               onDragStart={event=>{event.dataTransfer.setData('text/plain',entry.id);event.dataTransfer.effectAllowed='move';setDragging(entry);}}
               onDragEnd={()=>{setDragging(null);setDropPath(null);}}>
               {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer className="persona-tile-overlay"><span>{entry.account && '指定好友'}</span>
                 <div><button disabled={busy} aria-label="编辑词条" title="编辑" onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:entry.id,path:entry.category,
                   content:entry.content,original:entry});})}><Pencil size={16} aria-hidden="true"/></button>
-                  <button disabled={busy} aria-label="删除词条" title="删除" onClick={() => setDeleting({ kind: 'entry', id: entry.id })}><Trash2 size={16} aria-hidden="true"/></button></div></footer></>}
-              {deleting?.kind === 'entry' && deleting.id === entry.id && deleteConfirmation()}
+                  <button disabled={busy} data-confirm-entry={entry.id}
+                    className={deleting?.kind==='entry' && deleting.id===entry.id?'confirm-delete-button':''}
+                    aria-label={deleting?.kind==='entry' && deleting.id===entry.id?'确认删除词条':'删除词条'}
+                    title={deleting?.kind==='entry' && deleting.id===entry.id?'确认删除':'删除'}
+                    onClick={() => deleting?.kind==='entry' && deleting.id===entry.id ? void remove() : setDeleting({kind:'entry',id:entry.id})}>
+                    {deleting?.kind==='entry' && deleting.id===entry.id?<Check size={16} aria-hidden="true"/>:<Trash2 size={16} aria-hidden="true"/>}</button></div></footer></>}
             </article>)}</div>
             {edit && !edit.id && edit.path === section.path && editor()}
           </section>;
