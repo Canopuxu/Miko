@@ -228,13 +228,13 @@ export function ProfilesPage() {
             {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
             {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
-            {items.map(entry => <article className="persona-entry" key={entry.id}>
-              {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer><span>{entry.account && '指定好友'}</span>
-                <div><button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:entry.id,path:entry.category,
-                  content:entry.content,original:entry});})}>编辑</button>
-                  <button disabled={busy} onClick={() => setDeleting({ kind: 'entry', id: entry.id })}>删除</button></div></footer></>}
+            <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id || (deleting?.kind === 'entry' && deleting.id === entry.id) ? ' is-editing' : ''}`} key={entry.id}>
+              {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer className="persona-tile-overlay"><span>{entry.account && '指定好友'}</span>
+                <div><button disabled={busy} aria-label="编辑词条" title="编辑" onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:entry.id,path:entry.category,
+                  content:entry.content,original:entry});})}><Pencil size={16} aria-hidden="true"/></button>
+                  <button disabled={busy} aria-label="删除词条" title="删除" onClick={() => setDeleting({ kind: 'entry', id: entry.id })}><Trash2 size={16} aria-hidden="true"/></button></div></footer></>}
               {deleting?.kind === 'entry' && deleting.id === entry.id && deleteConfirmation()}
-            </article>)}
+            </article>)}</div>
             {edit && !edit.id && edit.path === section.path && editor()}
           </section>;
         })}
