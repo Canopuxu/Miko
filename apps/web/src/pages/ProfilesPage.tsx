@@ -1,156 +1,210 @@
-import { AppShell } from '../components/AppShell';
-import { useEffect, useState } from 'react';
+import { AppShell, NavigationContext } from '../components/AppShell';
+import { useContext, useEffect, useState } from 'react';
 import { getJson, responseError } from '../api/chat';
+import '../styles/persona.css';
 
-type Draft = { subject: 'miko' | 'owner'; kind: 'overview' | 'fact' | 'recent' | 'excerpt';
+type Subject = 'miko' | 'owner';
+type Entry = { id: string; subject: Subject; kind: 'overview' | 'fact' | 'recent' | 'excerpt';
   category: string; title: string; content: string; keywords: string; account: string; friend: string;
-  as_of: string | null; enabled: boolean };
-type Entry = Omit<Draft, 'enabled'> & { id: string; enabled: number; source: string; updated_at: number };
+  as_of: string | null; enabled: number };
+type Child = { id: string; name: string };
+type Category = Child & { children: Child[] };
+type Edit = { id: string | null; path: string; content: string; enabled: boolean; original?: Entry };
+type CategoryEdit = { id?: string; parent?: string; name: string };
 type Friend = { account: string; friend: string; name: string };
-type Context = { current_time: string; role_material: Entry[];
-  friend_relationships: (Friend & { owner_relationship: string; miko_relationship: string; miko_introduced: boolean })[];
-  retrieval?: { engine: string; error?: string };
-  social_memory?: { subject: 'miko' | 'owner'; peer: string; automatic: string; manual_corrections: string }[] };
-const kinds = { overview: '整体描述', fact: '设定／资料条目', recent: '手动近况', excerpt: '对话片段' };
-const subjects = { miko: 'Miko', owner: '我' };
-const blank = (): Draft => ({ subject: 'miko', kind: 'fact', category: '', title: '', content: '',
-  keywords: '', account: '', friend: '', as_of: null, enabled: true });
+type Context = { role_material: Entry[]; retrieval?: { engine: string; error?: string } };
 
 export function ProfilesPage() {
+  const navigation = useContext(NavigationContext)!;
+  const [subject, setSubject] = useState<Subject>('miko');
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [friends, setFriends] = useState<Friend[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selected, setSelected] = useState('');
   const [q, setQ] = useState('');
-  const [subject, setSubject] = useState('');
-  const [kind, setKind] = useState('');
-  const [category, setCategory] = useState('');
-  const [draft, setDraft] = useState<Draft>(blank);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Edit | null>(null);
+  const [categoryEdit, setCategoryEdit] = useState<CategoryEdit | null>(null);
+  const [deleting, setDeleting] = useState<{ kind: 'category' | 'entry'; id: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [revision, setRevision] = useState(0);
   const [question, setQuestion] = useState('');
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [previewFriend, setPreviewFriend] = useState('');
   const [preview, setPreview] = useState<Context | null>(null);
-  const [revision, setRevision] = useState(0);
-  const [loading, setLoading] = useState(true);
 
+  useEffect(() => { let alive = true; setLoading(true);
+    void Promise.all([
+      getJson<{ entries: Entry[] }>(`/api/profiles?subject=${subject}`),
+      getJson<{ categories: Category[] }>(`/api/profiles/categories?subject=${subject}`),
+    ]).then(([data, tree]) => { if (!alive) return;
+      setEntries(data.entries); setCategories(tree.categories);
+      setSelected(current => current === 'unfiled' || tree.categories.some(c => c.id === current)
+        ? current : tree.categories[0]?.id ?? 'unfiled');
+    }).catch(cause => { if (alive) setNotice(String(cause)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [subject, revision]);
   useEffect(() => { let alive = true;
-    void getJson<{ friends: Friend[] }>('/api/qq/status').then(value => { if (alive) setFriends(value.friends); })
-      .catch(cause => { if (alive) setNotice(String(cause)); });
+    void getJson<{ friends: Friend[] }>('/api/qq/status').then(data => { if (alive) setFriends(data.friends); }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  useEffect(() => { let alive = true; setLoading(true);
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams({ q, subject, kind });
-      void getJson<{ entries: Entry[] }>(`/api/profiles?${params}`).then(value => { if (alive) setEntries(value.entries); })
-        .catch(cause => { if (alive) setNotice(String(cause)); }).finally(() => { if (alive) setLoading(false); });
-    }, 200);
-    return () => { alive = false; clearTimeout(timer); };
-  }, [q, subject, kind, revision]);
 
-  function edit(entry: Entry) {
-    setEditing(entry.id); setNotice('');
-    setDraft({ subject: entry.subject, kind: entry.kind, category: entry.category, title: entry.title,
-      content: entry.content, keywords: entry.keywords, account: entry.account, friend: entry.friend,
-      as_of: entry.as_of, enabled: !!entry.enabled });
+  function canLeave() {
+    return (!edit && !categoryEdit) || window.confirm('有尚未保存的编辑，放弃这次编辑？');
   }
-  async function save() {
+  function choose(id: string) {
+    if (!canLeave()) return;
+    setSelected(id); setEdit(null); setCategoryEdit(null); setDeleting(null); setNotice('');
+  }
+  function chooseSubject(value: Subject) {
+    if (value === subject || !canLeave()) return;
+    setSubject(value); setEntries([]); setCategories([]); setSelected(''); setEdit(null);
+    setCategoryEdit(null); setDeleting(null); setNotice(''); setPreview(null);
+  }
+  const root = categories.find(c => c.id === selected);
+  const settings = entries.filter(e => e.kind === 'fact' || e.kind === 'overview');
+  const known = new Set(categories.flatMap(c => [c.name, ...c.children.map(s => `${c.name}/${s.name}`)]));
+  const unfiled = settings.filter(e => !known.has(e.category));
+  const matches = (e: Entry) => !q.trim() || `${e.content} ${e.category}`.toLocaleLowerCase().includes(q.trim().toLocaleLowerCase());
+  const sections = root ? [{ id: root.id, name: root.children.length ? '综合' : root.name, path: root.name },
+    ...root.children.map(c => ({ ...c, path: `${root.name}/${c.name}` }))]
+    : [{ id: 'unfiled', name: '待归类', path: '' }];
+  const legacy = entries.filter(e => e.kind === 'recent' || e.kind === 'excerpt');
+
+  async function request(url: string, method: string, body?: unknown) {
+    const result = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    if (!result.ok) throw new Error(await responseError(result));
+    return result;
+  }
+  async function saveEntry() {
+    if (!edit || !edit.content.trim()) return;
+    setBusy(true); setNotice('');
+    const original = edit.original;
+    try {
+      await request(edit.id ? `/api/profiles/entries/${edit.id}` : '/api/profiles', edit.id ? 'PUT' : 'POST', {
+        subject, kind: original?.kind ?? (root?.id === `${subject}-core` && edit.path === root.name ? 'overview' : 'fact'),
+        category: edit.path, title: edit.content.trim().split('\n')[0].slice(0, 80), content: edit.content.trim(),
+        keywords: original?.keywords ?? '', account: original?.account ?? '', friend: original?.friend ?? '',
+        as_of: original?.as_of ?? null, enabled: edit.enabled,
+      });
+      setEdit(null); setRevision(v => v + 1); setPreview(null); setNotice('词条已保存');
+    } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
+  }
+  async function saveTree(tree: Category[]) {
+    await request('/api/profiles/categories', 'PUT', { subject, categories: tree });
+    setCategoryEdit(null); setDeleting(null); setRevision(v => v + 1); setPreview(null);
+  }
+  async function saveCategory() {
+    if (!categoryEdit?.name.trim()) return;
     setBusy(true); setNotice('');
     try {
-      const response = await fetch(editing ? `/api/profiles/entries/${editing}` : '/api/profiles', {
-        method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft),
-      });
-      if (!response.ok) throw new Error(await responseError(response));
-      const value: Entry = await response.json(); setEditing(value.id);
-      setNotice(value.enabled ? '已保存并用于后续聊天' : '已保存，暂不用于聊天');
-      setRevision(value => value + 1); setPreview(null);
+      const data = { id: categoryEdit.id ?? crypto.randomUUID(), name: categoryEdit.name.trim() };
+      let tree = categories;
+      if (categoryEdit.parent) {
+        tree = categories.map(c => c.id !== categoryEdit.parent ? c : { ...c, children: categoryEdit.id
+          ? c.children.map(child => child.id === data.id ? data : child) : [...c.children, data] });
+      } else {
+        tree = categoryEdit.id ? categories.map(c => c.id === data.id ? { ...c, name: data.name } : c)
+          : [...categories, { ...data, children: [] }];
+      }
+      await saveTree(tree);
+      if (!categoryEdit.parent) setSelected(data.id);
+      setNotice('分类已保存');
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   async function remove() {
-    if (!editing || !window.confirm('删除这条资料？')) return;
+    if (!deleting) return;
     setBusy(true); setNotice('');
     try {
-      const response = await fetch(`/api/profiles/entries/${editing}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(await responseError(response));
-      setEditing(null); setDraft(blank()); setRevision(value => value + 1); setPreview(null); setNotice('已删除');
+      if (deleting.kind === 'entry') {
+        await request(`/api/profiles/entries/${deleting.id}`, 'DELETE'); setDeleting(null); setRevision(v => v + 1);
+        if (edit?.id === deleting.id) setEdit(null); setNotice('词条已删除');
+      } else {
+        await saveTree(categories.filter(c => c.id !== deleting.id).map(c => ({ ...c,
+          children: c.children.filter(child => child.id !== deleting.id) })));
+        if (selected === deleting.id) setSelected('unfiled'); setNotice('分类已删除，已有词条保留在待归类中');
+      }
+      setPreview(null);
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   async function inspect() {
     setBusy(true); setNotice('');
     try {
-      const selected = friends.find(f => `${f.account}:${f.friend}` === previewFriend);
-      const params = new URLSearchParams({ q: question, ...(selected ? { account: selected.account, friend: selected.friend } : {}) });
-      setPreview(await getJson<Context>(`/api/profiles/context?${params}`));
+      const friend = friends.find(f => `${f.account}:${f.friend}` === previewFriend);
+      setPreview(await getJson<Context>(`/api/profiles/context?${new URLSearchParams({ q: question,
+        ...(friend ? { account: friend.account, friend: friend.friend } : {}) })}`));
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
-  const categories = [...new Set(entries.map(e => e.category).filter(Boolean))];
-  const shown = entries.filter(e => !category || e.category === category);
-  return <AppShell view="profiles" sidebar={
-        <section className="profile-browser" aria-label="资料库">
-          <div className="profile-filters">
-            <input aria-label="搜索资料" value={q} placeholder="搜索标题、内容或关键词" onChange={event => setQ(event.target.value)} />
-            <select aria-label="按主体筛选" value={subject} onChange={event => setSubject(event.target.value)}>
-              <option value="">全部主体</option>{Object.entries(subjects).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select>
-            <select aria-label="按类型筛选" value={kind} onChange={event => setKind(event.target.value)}>
-              <option value="">全部类型</option>{Object.entries(kinds).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select>
-            <select aria-label="按主题筛选" value={category} onChange={event => setCategory(event.target.value)}>
-              <option value="">全部主题</option>{[...new Set([...categories, category].filter(Boolean))].map(name => <option key={name}>{name}</option>)}</select>
-          </div>
-          {loading ? <p>正在读取…</p> : !shown.length ? <p className="profile-empty">暂无匹配资料。可以先写整体描述，再逐步补充细节。</p> : shown.map(entry =>
-            <button disabled={busy} className={`profile-card ${entry.id === editing ? 'active' : ''}`} key={entry.id} onClick={() => edit(entry)}>
-              <small>{subjects[entry.subject]} · {kinds[entry.kind]}{entry.category && ` · ${entry.category}`}{!entry.enabled && ' · 未启用'}</small>
-              <strong>{entry.title}</strong><p>{entry.content.slice(0, 110)}</p>
-              {entry.as_of && <small>{entry.as_of}</small>}
-            </button>)}
-        </section>
-  }>
-    <main className="main-panel">
-      <header className="page-header"><div><h1>设定与资料</h1><p>Miko、你的资料，以及你提供的近期状态</p></div>
-        <button className="send-button" disabled={busy} onClick={() => { setDraft(blank()); setEditing(null); setNotice(''); }}>新增条目</button></header>
-      <div className="profile-workspace">
-        <section className="profile-editor" aria-label="资料编辑">
-          <h2>{editing ? '编辑资料' : '新增资料'}</h2>
-          <fieldset className="profile-fields" disabled={busy}>
-            <div className="profile-row"><label>主体<select value={draft.subject} onChange={event => setDraft({ ...draft, subject: event.target.value as Draft['subject'] })}>
-              {Object.entries(subjects).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label>
-              <label>类型<select value={draft.kind} onChange={event => setDraft({ ...draft, kind: event.target.value as Draft['kind'] })}>
-                {Object.entries(kinds).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label></div>
-            <label>主题<input value={draft.category} maxLength={80} placeholder="自由填写，例如外貌、喜好、工作"
-              onChange={event => setDraft({ ...draft, category: event.target.value })} /></label>
-            <label>标题<input value={draft.title} maxLength={100} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
-            <label>内容<textarea rows={9} value={draft.content} maxLength={6000} onChange={event => setDraft({ ...draft, content: event.target.value })} /></label>
-            <label>检索关键词<input value={draft.keywords} maxLength={300} placeholder="可选，补充相关称呼或近义词"
-              onChange={event => setDraft({ ...draft, keywords: event.target.value })} /></label>
-            <label>发生日期{draft.kind === 'recent' ? '（近况必填）' : '（可选）'}<input type="date" value={draft.as_of ?? ''}
-              onChange={event => setDraft({ ...draft, as_of: event.target.value || null })} /></label>
-            <label>关联好友<select value={draft.account ? `${draft.account}:${draft.friend}` : ''}
-              onChange={event => { const selected = friends.find(f => `${f.account}:${f.friend}` === event.target.value);
-                setDraft({ ...draft, account: selected?.account ?? '', friend: selected?.friend ?? '' }); }}>
-              <option value="">共用资料</option>{friends.map(f => <option key={`${f.account}:${f.friend}`} value={`${f.account}:${f.friend}`}>{f.name} · {f.friend}</option>)}</select></label>
-            <label className="check-field"><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} />用于聊天</label>
-            <div className="profile-actions"><button className="send-button" disabled={!draft.title.trim() || !draft.content.trim() || (draft.kind === 'recent' && !draft.as_of)}
-              onClick={() => void save()}>{draft.enabled ? '保存并用于聊天' : '保存资料'}</button>
-              {editing && <button className="new-chat" onClick={() => void remove()}>删除</button>}</div>
-          </fieldset>
-          {notice && <p role="status" className="profile-notice">{notice}</p>}
-        </section>
-        <section className="context-preview" aria-label="检索预览">
-          <h2>检索预览</h2><p>输入一段聊天，查看会提供给 Miko 的资料。语义检索会调用 Embedding 接口，此处不生成回复或发送消息。</p>
-          <div className="profile-filters"><input aria-label="预览聊天内容" value={question} placeholder="输入想聊的内容" onChange={event => setQuestion(event.target.value)} />
-            <select aria-label="预览对话对象" value={previewFriend} onChange={event => setPreviewFriend(event.target.value)}>
-              <option value="">我与 Miko 的聊天</option>{friends.map(f => <option key={`${f.account}:${f.friend}`} value={`${f.account}:${f.friend}`}>{f.name}</option>)}</select>
+  function editor() {
+    return edit && <form className="persona-entry-editor" onSubmit={event => { event.preventDefault(); void saveEntry(); }}>
+      <label>词条内容<textarea autoFocus aria-label="词条内容" rows={4} maxLength={6000} value={edit.content}
+        onChange={event => setEdit({ ...edit, content: event.target.value })} disabled={busy} placeholder="写下一条具体的设定" /></label>
+      <div className="persona-edit-bottom"><label className="persona-check"><input type="checkbox" checked={edit.enabled}
+        onChange={event => setEdit({ ...edit, enabled: event.target.checked })} disabled={busy} />用于聊天</label>
+        <div><button type="button" disabled={busy} onClick={() => setEdit(null)}>取消</button>
+          <button className="send-button" disabled={busy || !edit.content.trim()}>保存词条</button></div></div>
+      {edit.id && <label className="persona-move">所属分类<select value={edit.path} disabled={busy}
+        onChange={event => setEdit({ ...edit, path: event.target.value })}>
+        <option value="">待归类</option>{!known.has(edit.path) && edit.path && <option value={edit.path}>{edit.path}</option>}
+        {categories.map(c => <optgroup key={c.id} label={c.name}><option value={c.name}>{c.name} · 综合</option>
+          {c.children.map(child => <option key={child.id} value={`${c.name}/${child.name}`}>{child.name}</option>)}</optgroup>)}
+      </select></label>}
+    </form>;
+  }
+
+  return <AppShell view="profiles" sidebar={<section className="persona-browser" aria-label="人物分类">
+    <div className="persona-subject" role="group" aria-label="人物"><button aria-pressed={subject === 'miko'} disabled={busy}
+      onClick={() => chooseSubject('miko')}>Miko</button><button aria-pressed={subject === 'owner'} disabled={busy}
+      onClick={() => chooseSubject('owner')}>我</button></div>
+    <input className="persona-search" aria-label="搜索词条" value={q} onChange={event => setQ(event.target.value)} placeholder="搜索词条内容" />
+    <nav className="persona-categories" aria-label="大分类">{categories.map(c => <button key={c.id} disabled={busy}
+      aria-current={selected === c.id ? 'page' : undefined} onClick={() => choose(c.id)}><span>{c.name}</span>
+      <small>{settings.filter(e => (e.category === c.name || e.category.startsWith(c.name + '/')) && matches(e)).length}</small></button>)}
+      <button aria-current={selected === 'unfiled' ? 'page' : undefined} disabled={busy} onClick={() => choose('unfiled')}>
+        <span>待归类</span><small>{unfiled.filter(matches).length}</small></button></nav>
+    <button className="persona-add-category" disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ name: '' }); } }}>＋ 新增大分类</button>
+  </section>}>
+    <main className="main-panel persona-panel"><header className="page-header"><div><h1>{subject === 'miko' ? 'Miko 的人物设定' : '我的稳定资料'}</h1>
+      <p>{subject === 'miko' ? '从各个方面，慢慢认识她' : '你希望 Miko 了解的长期信息'}</p></div>
+      <button className="persona-memory-link" onClick={() => navigation.select('memory')}>近况与经历 →</button></header>
+      <div className="persona-content"><div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
+        {root && <div className="persona-category-actions"><button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ parent: root.id, name: '' }); } }}>＋ 小分类</button>
+          <button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ id: root.id, name: root.name }); } }}>重命名</button>
+          <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: root.id })}>删除分类</button></div>}</div>
+        {notice && <p className="profile-notice" role="status">{notice}</p>}
+        {categoryEdit && <form className="persona-category-form" onSubmit={event => { event.preventDefault(); void saveCategory(); }}>
+          <label>{categoryEdit.id ? '分类新名称' : categoryEdit.parent ? '小分类名称' : '大分类名称'}<input autoFocus aria-label="分类名称" maxLength={36}
+            value={categoryEdit.name} onChange={event => setCategoryEdit({ ...categoryEdit, name: event.target.value })} disabled={busy} /></label>
+          <button className="send-button" disabled={busy || !categoryEdit.name.trim()}>保存分类</button><button type="button" disabled={busy} onClick={() => setCategoryEdit(null)}>取消</button></form>}
+        {deleting && <div className="persona-delete" role="alert"><p>{deleting.kind === 'category' ? '删除这个分类？其中的词条将移到待归类，内容仍会保留。' : '删除这条词条？'}</p>
+          <button disabled={busy} onClick={() => void remove()}>确认删除</button><button disabled={busy} onClick={() => setDeleting(null)}>取消</button></div>}
+        {loading ? <p className="profile-empty">正在读取…</p> : sections.map(section => {
+          const items = (root ? settings.filter(e => e.category === section.path) : unfiled).filter(matches);
+          return <section className="persona-section" key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
+            <div>{root && section.id !== root.id && <><button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ id: section.id, parent: root.id, name: section.name }); } }}>重命名</button>
+              <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: section.id })}>删除小分类</button></>}
+              <button disabled={busy} onClick={() => { if (canLeave()) { setCategoryEdit(null); setEdit({ id: null, path: section.path, content: '', enabled: true }); } }}>＋ 添加词条</button></div></header>
+            {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
+            {items.map(entry => <article className={`persona-entry ${!entry.enabled ? 'inactive' : ''}`} key={entry.id}>
+              {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer><span>{entry.enabled ? '用于聊天' : '暂未启用'}{entry.account && ' · 指定好友'}</span>
+                <div><button disabled={busy} onClick={() => { if (canLeave()) { setCategoryEdit(null); setEdit({ id: entry.id, path: entry.category,
+                  content: entry.content, enabled: !!entry.enabled, original: entry }); } }}>编辑</button>
+                  <button disabled={busy} onClick={() => setDeleting({ kind: 'entry', id: entry.id })}>删除</button></div></footer></>}
+            </article>)}
+            {edit && !edit.id && edit.path === section.path && editor()}
+          </section>;
+        })}
+        <details className="persona-preview"><summary>检索预览</summary><p>查看一段聊天会找到哪些人物资料。</p>
+          <div className="profile-filters"><input aria-label="预览聊天内容" value={question} placeholder="输入想聊的内容" onChange={e => setQuestion(e.target.value)} />
+            <select aria-label="预览对话对象" value={previewFriend} onChange={e => setPreviewFriend(e.target.value)}><option value="">我与 Miko</option>
+              {friends.map(f => <option key={`${f.account}:${f.friend}`} value={`${f.account}:${f.friend}`}>{f.name}</option>)}</select>
             <button className="send-button" disabled={busy} onClick={() => void inspect()}>查看资料</button></div>
-          {preview && <div className="context-material">
-            <p>{preview.retrieval?.engine}{preview.retrieval?.error && ` · ${preview.retrieval.error}`}</p>
-            {!preview.role_material.length && !preview.friend_relationships.length && <p>目前没有可用资料。</p>}
-            {preview.role_material.map(entry => <article key={entry.id}><small>{subjects[entry.subject]} · {kinds[entry.kind]}{entry.as_of && ` · ${entry.as_of}`} · 由你填写</small>
-              <strong>{entry.title}</strong><p>{entry.content}</p></article>)}
-            {preview.friend_relationships.map(f => <article key={`${f.account}:${f.friend}`}><strong>{f.name} · 关系资料</strong>
-              <p>你与好友：{f.owner_relationship || '尚未填写'}</p><p>Miko 与好友：{f.miko_relationship || '尚未填写'}</p>
-              <small>{f.miko_introduced ? '已介绍过 Miko' : '尚无介绍记录'}</small></article>)}
-            {preview.social_memory?.map(r => <article key={`${r.subject}:${r.peer}`}><strong>{subjects[r.subject]} · 关系与经历记忆</strong>
-              <p>{r.automatic}</p>{r.manual_corrections && <p>你的补充：{r.manual_corrections}</p>}</article>)}
-          </div>}
-        </section>
+          {preview && <div className="context-material"><p>{preview.retrieval?.engine}{preview.retrieval?.error}</p>
+            {preview.role_material.map(e => <article key={e.id}><small>{e.subject === 'miko' ? 'Miko' : '我'} · {e.category}</small><p>{e.content}</p></article>)}</div>}</details>
+        {!!legacy.length && <details className="persona-preview"><summary>保留的旧近况与对话片段 · {legacy.length}</summary>
+          <p>这些资料仍然保留；近况与经历由记忆模块维护。</p>{legacy.map(e => <article className="persona-entry" key={e.id}><small>{e.as_of}</small><p>{e.content}</p></article>)}</details>}
       </div>
     </main>
   </AppShell>;
