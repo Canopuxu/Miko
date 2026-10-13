@@ -15,6 +15,25 @@ class Correction(BaseModel):
     text: str
     revision: int
 
+class ItemCorrection(Correction):
+    enabled: StrictBool = True
+
+class Annotation(ItemCorrection):
+    scope: str = 'example'
+
+class Restore(BaseModel):
+    history_id: int
+    revision: int
+
+class Organization(BaseModel):
+    subject: str
+    peer: str = ''
+    category: str
+
+class OrganizationApply(Organization):
+    items: list[dict[str,str]]
+    revisions: dict[str,int]
+
 
 def memory_router(memory):
     router = APIRouter(prefix='/api/memory', dependencies=[Depends(local_request)])
@@ -66,5 +85,100 @@ def memory_router(memory):
         with memory.social.store.connect() as db:
             db.execute('UPDATE tulpa_scopes SET retry_at=0 WHERE id=?', (sid,))
         return {'queued': True}
+
+    @router.post('/scopes/{sid}/consolidate')
+    async def consolidate(sid: int):
+        if memory.social.engine!='memobase':
+            raise HTTPException(409,'新版记忆整理尚未配置')
+        import time
+        with memory.social.store.connect() as db:
+            cur=db.execute("UPDATE tulpa_scopes SET status='updating',retry_at=? WHERE id=? AND retry_at<=?",
+                           (time.time()+600,sid,time.time()))
+            if not cur.rowcount:
+                raise HTTPException(409,'该会话正在整理或等待重试')
+        try:
+            result=await asyncio.to_thread(memory.social.consolidate,sid,None,True)
+            await memory.sync()
+            return result
+        except Exception:
+            with memory.social.store.connect() as db:
+                db.execute("UPDATE tulpa_scopes SET status='update_failed',retry_at=? WHERE id=?",(time.time()+900,sid))
+            raise HTTPException(502,'整理未完成，本批消息已保留') from None
+        finally:
+            with memory.social.store.connect() as db:
+                db.execute("UPDATE tulpa_scopes SET retry_at=0,status='collecting' WHERE id=? AND status='updating'",(sid,))
+
+    @router.get('/items')
+    async def items(q: str='', subject: str='', category: str=''):
+        return {'items': memory.structured.items(q,subject=subject,category=category)}
+
+    @router.get('/objects')
+    async def objects():
+        with memory.chat.store.connect() as db:
+            return {'people':[dict(r) for r in db.execute('SELECT * FROM people ORDER BY kind,id')]}
+
+    @router.post('/organize')
+    async def organize(body: Organization):
+        if not memory.social.pipeline:
+            raise HTTPException(409,'新版记忆整理尚未配置')
+        return await memory.social.pipeline.organize_category(body.subject,body.peer,body.category)
+
+    @router.post('/organize/apply')
+    async def organize_apply(body: OrganizationApply):
+        try:
+            result=memory.structured.organize(body.subject,body.peer,body.category,body.items,body.revisions)
+            await memory.sync()
+            return {'items':result}
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from None
+
+    @router.get('/items/{item_id}')
+    async def item(item_id: str):
+        try:
+            return memory.structured.detail(item_id)
+        except ValueError as exc:
+            raise HTTPException(404,str(exc)) from None
+
+    @router.patch('/items/{item_id}')
+    async def edit_item(item_id: str, body: ItemCorrection):
+        try:
+            result=memory.structured.edit(item_id,body.text,body.revision,body.enabled)
+            await memory.sync()
+            return result
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from None
+
+    @router.post('/items/{item_id}/restore')
+    async def restore(item_id: str, body: Restore):
+        try:
+            result=memory.structured.restore(item_id,body.history_id,body.revision)
+            await memory.sync()
+            return result
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from None
+
+    @router.post('/items/{item_id}/summary')
+    async def brief(item_id: str):
+        if not memory.social.pipeline:
+            raise HTTPException(409,'新版记忆整理尚未配置')
+        return await memory.social.pipeline.summarize_item(item_id)
+
+    @router.get('/days')
+    async def days(day: str='', subject: str=''):
+        return {'days': memory.structured.days(day,subject)}
+
+    @router.get('/review')
+    async def review(day: str=''):
+        try:
+            return memory.structured.review(day)
+        except ValueError:
+            raise HTTPException(422,'日期格式需要为 YYYY-MM-DD') from None
+
+    @router.put('/review/{message_id}')
+    async def annotate(message_id: str, body: Annotation):
+        try:
+            return memory.structured.annotate(message_id,body.text,body.scope,body.revision,body.enabled)
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from None
 
     return router

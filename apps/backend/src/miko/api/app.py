@@ -34,7 +34,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
             yield
         finally:
             await qq.close()
-            chat.memory.social.worker.stop()
+            chat.memory.social.stop()
             await chat.close()
             await chat.memory.close()
             await asyncio.to_thread(runtime.close)

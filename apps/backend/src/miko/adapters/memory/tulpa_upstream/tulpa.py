@@ -240,19 +240,20 @@ class Tulpa:
               (sid,'manual',text.strip(),time.time(),'{}'))
         return self.detail(sid)
 
-    def consolidate(self,sid,provider=None):
+    def consolidate(self,sid,provider=None,force=False,require_self=True):
         """One bounded batch, optimistic commit after network; failures never consume it."""
         control=self.control()
         if not control['enabled']:return dict(status='off',api_called=False)
         with self.store.connect() as db:
             s=db.execute('SELECT * FROM tulpa_scopes WHERE id=?',(sid,)).fetchone()
-            if not s or s['total']-s['processed']<100:return dict(status='collecting',api_called=False)
+            if not s or s['total']<=s['processed'] or (not force and s['total']-s['processed']<100):return dict(status='collecting',api_called=False)
+            through=min(s['total'],s['processed']+100)
             rows=db.execute('''SELECT m.* FROM tulpa_events e JOIN messages m ON m.id=e.message_id
               WHERE e.scope_id=? AND e.ordinal>? AND e.ordinal<=? ORDER BY e.ordinal''',
-              (sid,s['processed'],s['processed']+100)).fetchall()
+              (sid,s['processed'],through)).fetchall()
             # A deleted message can leave an ordinal gap. Process remaining evidence honestly.
-            if not rows or (s['kind']=='direct' and not any(r['is_self']==1 for r in rows)):
-                db.execute('UPDATE tulpa_scopes SET processed=processed+100,status=? WHERE id=?',('no_self_participation',sid))
+            if not rows or (require_self and s['kind']=='direct' and not any(r['is_self']==1 for r in rows)):
+                db.execute('UPDATE tulpa_scopes SET processed=?,status=? WHERE id=?',(through,'no_self_participation',sid))
                 return dict(status='no_self_participation',api_called=False)
             end=max(r['timestamp'] for r in rows)
             context=[]
@@ -287,9 +288,11 @@ class Tulpa:
                 if not r or fingerprint(r)!=digest:raise ValueError('原文已变化，保留本批待重试。')
             if not s['valid']:db.execute('DELETE FROM tulpa_memory_sources WHERE scope_id=?',(sid,))
             db.executemany('INSERT OR REPLACE INTO tulpa_memory_sources VALUES(?,?,?)',[(sid,mid,d) for mid,d in refs.items()])
-            db.execute('''UPDATE tulpa_scopes SET automatic=?,valid=1,processed=processed+100,revision=revision+1,
-              updated_at=?,status='collecting',failures=0,retry_at=0 WHERE id=?''',(memory.strip(),time.time(),sid))
-            details=dict(evidence_ids=citations,through=end,processed=s['processed']+100,
+            if 'structured' in result and hasattr(self,'commit_structured'):
+                self.commit_structured(db,sid,result)
+            db.execute('''UPDATE tulpa_scopes SET automatic=?,valid=1,processed=?,revision=revision+1,
+              updated_at=?,status='collecting',failures=0,retry_at=0 WHERE id=?''',(memory.strip(),through,time.time(),sid))
+            details=dict(evidence_ids=citations,through=end,processed=through,
               seconds=round(time.monotonic()-started,2),usage=result.get('usage',{}))
             db.execute('INSERT INTO tulpa_history(scope_id,kind,body,created_at,details) VALUES(?,?,?,?,?)',
               (sid,'automatic',memory.strip(),time.time(),dumps(details)))
@@ -359,13 +362,20 @@ class MemoryWorker:
                 continue
             with self.layer.store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
-                s=db.execute('SELECT id FROM tulpa_scopes WHERE total-processed>=100 AND retry_at<=? ORDER BY retry_at,id LIMIT 1',(time.time(),)).fetchone()
+                s=self.layer.pending_scope(db,time.time()) if hasattr(self.layer,'pending_scope') else db.execute('SELECT id FROM tulpa_scopes WHERE total-processed>=100 AND retry_at<=? ORDER BY retry_at,id LIMIT 1',(time.time(),)).fetchone()
                 if not s:continue
-                sid=s['id'];db.execute("UPDATE tulpa_scopes SET status='updating',retry_at=? WHERE id=?",(time.time()+180,sid))
+                sid=s['id'];db.execute("UPDATE tulpa_scopes SET status='updating',retry_at=? WHERE id=?",(time.time()+(600 if getattr(self.layer,'engine','')=='memobase' else 180),sid))
             try:
                 result=self.layer.consolidate(sid)
+                if result['status'] in ('superseded','off','collecting'):
+                    with self.layer.store.connect() as db:
+                        db.execute("UPDATE tulpa_scopes SET status='collecting',retry_at=0 WHERE id=?",(sid,))
                 logging.getLogger(__name__).info('tulpa consolidation scope=%s status=%s api_called=%s',sid,result['status'],result['api_called'])
             except Exception as exc:
+                if self.stop_event.is_set():
+                    with self.layer.store.connect() as db:
+                        db.execute("UPDATE tulpa_scopes SET status='collecting',retry_at=0 WHERE id=?",(sid,))
+                    continue
                 logging.getLogger(__name__).warning('tulpa consolidation failed: scope=%s error_type=%s retry_seconds=900',sid,type(exc).__name__)
                 # No model response, private text, paths or credentials in routine logs.
                 with self.layer.store.connect() as db:

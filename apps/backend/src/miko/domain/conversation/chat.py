@@ -43,6 +43,8 @@ class Turn:
     json_output: bool = False
     memory_query: str | None = None
     memory_key: tuple | None = None
+    model: str | None = None
+    usage: dict = field(default_factory=dict)
 
     def close_runtime(self):
         with self.lifecycle:
@@ -105,16 +107,19 @@ class ChatService:
         status = "error"
         try:
             if self.memory and turn.memory_query is not None:
-                context = await self.memory.context(turn.memory_query, turn.memory_key)
+                context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
                 turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(context, ensure_ascii=False)
+                if context.get('owner_feedback'):
+                    turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()
                 if turn.memory_key:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
             turn.runtime = DshRuntime(
                 self.settings, base_url=f"{self.settings.url}/_runtime/llm/{turn.id}",
-                token=self.bridge_token, model=self.provider.model,
+                token=self.bridge_token, model=turn.model or self.provider.model,
                 patches=(str(self.patch),), system_prompt=turn.system_prompt or self.system_prompt,
+                max_tokens=8192 if turn.conversation_id == 'memory' else 2048,
             )
 
             def generate():
@@ -190,6 +195,21 @@ class ChatService:
                 await self.cancel(turn)
                 await turn.task
 
+    async def complete_memory(self, system, message, model=None):
+        turn = Turn(uuid.uuid4().hex, 'memory', message,
+                    context=[{'role': 'user', 'content': message}], system_prompt=system, model=model)
+        self.turns[turn.id] = turn
+        turn.task = asyncio.create_task(self.run(turn))
+        try:
+            await asyncio.wait_for(asyncio.shield(turn.task), timeout=150)
+            if turn.status != 'completed':
+                raise ValueError('记忆整理模型请求未完成')
+            return {'text': turn.text, 'usage': turn.usage}
+        finally:
+            if not turn.task.done():
+                await self.cancel(turn)
+                await turn.task
+
     def conversation_detail(self, conversation_id: str) -> dict:
         conversation = self.store.conversation(conversation_id)
         if conversation is None or conversation['source'] != 'web':
@@ -219,14 +239,16 @@ class ChatService:
             raise HTTPException(502, "Unexpected additional model request")
         # Miko owns the cloud context. No default coding instructions or tools are forwarded.
         payload = {
-            "model": self.provider.model,
+            "model": turn.model or self.provider.model,
             "messages": [{"role": "system", "content": turn.system_prompt or self.system_prompt}]
                         + (turn.context if turn.context is not None else self.store.history(turn.conversation_id)
                            + [{"role": "user", "content": turn.message}]),
-            "stream": True, "max_tokens": 2048,
+            "stream": True, "max_tokens": 8192 if turn.conversation_id == 'memory' else 2048,
         }
         if turn.json_output:
             payload['response_format'] = {'type': 'json_object'}
+        if turn.conversation_id == 'memory':
+            payload['stream_options'] = {'include_usage': True}
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
         try:
             turn.provider_task = asyncio.create_task(client.send(client.build_request(
@@ -251,13 +273,20 @@ class ChatService:
         turn.remote = remote
 
         async def stream():
+            finished, done = False, False
             try:
                 async for line in remote.aiter_lines():
                     if turn.cancelled:
                         break
-                    if line.startswith("data:") and line[5:].strip() != "[DONE]":
+                    if line.startswith('data:') and line[5:].strip() == '[DONE]':
+                        done = True
+                    elif line.startswith("data:"):
                         chunk = json.loads(line[5:].strip())
+                        if chunk.get('usage'):
+                            turn.usage = chunk['usage']
                         for choice in chunk.get("choices", []):
+                            if choice.get('index',0)==0 and choice.get('finish_reason'):
+                                finished = True
                             text = (choice.get("delta") or {}).get("content")
                             if choice.get("index", 0) == 0 and isinstance(text, str) and text:
                                 turn.text += text
@@ -267,6 +296,11 @@ class ChatService:
                                     turn.last_checkpoint = now
                                 turn.events.put_nowait({"type": "delta", "text": text})
                     yield (line + "\n").encode("utf-8")
+                if not done and not turn.cancelled:
+                    if finished:
+                        yield b'data: [DONE]\n\n'
+                    else:
+                        turn.error = '模型输出未完整结束，请重试'
             except (httpx.HTTPError, ValueError):
                 if not turn.cancelled:
                     turn.error = "模型输出中断，请重试"

@@ -392,6 +392,15 @@
         "packages/upstream/memu/LICENSE.txt"
       ],
       "localSource": "packages/upstream/memu"
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "source": "https://pypi.org/project/PyYAML/6.0.3/",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/python/pyyaml-LICENSE.txt"
+      ]
     }
   ],
   "dshArtifacts": [

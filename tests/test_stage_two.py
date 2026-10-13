@@ -62,8 +62,10 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
                         yield self.chunk(word)
                         if message == "slow":
                             await asyncio.sleep(30)
-                    yield self.chunk("", "stop")
-                    yield "data: [DONE]\n\n"
+                    if message != 'truncated':
+                        yield self.chunk("", "stop")
+                    if message not in ('no-marker','truncated'):
+                        yield "data: [DONE]\n\n"
                 finally:
                     self.remote_closed.set()
             return StreamingResponse(stream(), media_type="text/event-stream")
@@ -118,6 +120,13 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertNotIn("tools", self.requests[-1])
         self.assertFalse(self.service.turns)
+
+    async def test_complete_stream_without_done_and_real_truncation(self):
+        normal=await self.collect('no-marker')
+        self.assertEqual(normal[-1]['status'],'completed')
+        broken=await self.collect('truncated')
+        self.assertEqual(broken[-1]['status'],'error')
+        self.assertEqual(self.store.history(broken[0]['conversation_id']),[])
 
     async def test_cancel_stream_then_continue(self):
         async with self.client.stream("POST", "/api/chat", json={"message": "slow"}) as response:

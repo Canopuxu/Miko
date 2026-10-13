@@ -11,10 +11,11 @@ from miko.settings import Settings
 class DshRuntime:
     def __init__(self, settings: Settings, *, base_url: str = "http://127.0.0.1:9",
                  token: str = "miko-local-handshake-only", model: str = "deepseek-chat",
-                 patches: tuple[str, ...] = (), system_prompt: str | None = None):
+                 patches: tuple[str, ...] = (), system_prompt: str | None = None, max_tokens: int = 2048):
         self.settings = settings
         self.base_url, self.token, self.model = base_url, token, model
         self.patches, self.system_prompt = patches, system_prompt
+        self.max_tokens = max_tokens
         self.client: HarnessClient | None = None
         self.process: psutil.Process | None = None
         self.server_info: dict = {}
@@ -55,7 +56,7 @@ class DshRuntime:
             client.start()
             result = client.initialize(
                 cwd=str(settings.workspace), provider="deepseek-official", model=self.model,
-                reasoning_effort="high", max_tokens=2048,
+                reasoning_effort="high", max_tokens=self.max_tokens,
             )
             self.server_info = result.model_dump(exclude_none=True)
         except BaseException:

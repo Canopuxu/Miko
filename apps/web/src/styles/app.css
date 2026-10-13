@@ -203,3 +203,12 @@ textarea::placeholder { color: #b7ac9e; }
   .workspace-frame .profile-workspace { padding: 24px 18px; }
   .workspace-frame .context-material { grid-template-columns: minmax(0, 1fr); }
 }
+.memory-modes { display: grid; gap: 6px; padding: 12px 16px; }
+[aria-label="记忆导航"] .profile-filters { grid-template-columns: 1fr; }
+.memory-panel button:not(.send-button) { border: 1px solid #d9d3c8; border-radius: 8px; padding: 8px 12px; background: transparent; color: #827767; font: inherit; cursor: pointer; }
+.memory-modes button { text-align: left; border: 0; padding: 10px 12px; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.memory-modes button.active { background: var(--surface-active, #e6e0d5); }
+.profile-editor > textarea, .review-card textarea { width: 100%; box-sizing: border-box; border: 1px solid #d9d3c8; border-radius: 8px; padding: 12px; font: inherit; background: transparent; color: inherit; resize: vertical; }
+.review-card { border-bottom: 1px solid #e8e3db; padding: 20px 0; }
+.profile-editor details { margin: 14px 0; }
+.profile-editor details summary { cursor: pointer; color: #827767; }

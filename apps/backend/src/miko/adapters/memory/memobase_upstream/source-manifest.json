@@ -1,0 +1,110 @@
+{
+  "source": "https://github.com/memodb-io/memobase",
+  "upstream_commit": "358c16bbc6d687937d79bc2f984a11c3be8da901",
+  "license": "Apache-2.0",
+  "scope": "embedded in Miko; reviewed production templates; server configuration replaced",
+  "files": [
+    {
+      "path": "env.py",
+      "sha256": "aa1e639a336e20da1cbe5a0b7d728efbc051fe26663050bac50e05a80b7f8ed5",
+      "upstream_path": "env.py",
+      "byte_identical": false
+    },
+    {
+      "path": "processors.py",
+      "sha256": "97f0fbc96b3064990226f4bb131818d6ec2be77b14517c408a4cdf1975e06469",
+      "upstream_path": null,
+      "byte_identical": false
+    },
+    {
+      "path": "types.py",
+      "sha256": "ccade6b6cc0746016453b0d5b6bd87578ed0c82174782bea833f8a1939c74dd3",
+      "upstream_path": "types.py",
+      "byte_identical": true
+    },
+    {
+      "path": "__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "upstream_path": "__init__.py",
+      "byte_identical": false
+    },
+    {
+      "path": "models/response.py",
+      "sha256": "10b34ec8f3d1d9b8c2f103bb783007d7f86f4a933705bdd195f1ba0fdc093b73",
+      "upstream_path": "models\\response.py",
+      "byte_identical": false
+    },
+    {
+      "path": "models/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "upstream_path": "models\\__init__.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/organize_profile.py",
+      "sha256": "88ca7bf3589017babbc741893d99b8586b17623fa0cde3d4c1db2a1a13635d52",
+      "upstream_path": "prompts\\organize_profile.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/profile_init_utils.py",
+      "sha256": "10b656865e21fb395f321386c8f415681afac54d40109810c72be8c4ec40e3ff",
+      "upstream_path": "prompts\\profile_init_utils.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/summary_profile.py",
+      "sha256": "b302d96a93f09f2b9804351322b61371bd2e9539ce069b9656bd9585af99535a",
+      "upstream_path": "prompts\\summary_profile.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/user_profile_topics.py",
+      "sha256": "caa524ba0e1a8ea122efbddccfa4e74972c3a1e60e5463b664875c15b4630e49",
+      "upstream_path": "prompts\\user_profile_topics.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/utils.py",
+      "sha256": "8c024b6d5aaaa168cbefae22b79048aa464b64a6a7a690df39bec87853158fab",
+      "upstream_path": "prompts\\utils.py",
+      "byte_identical": false
+    },
+    {
+      "path": "prompts/zh_extract_profile.py",
+      "sha256": "88b9fe0d77f0be90fd3ab3d8c8da52cba3d712ba7a19561eb5100132a4fc7a00",
+      "upstream_path": "prompts\\zh_extract_profile.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/zh_merge_profile_yolo.py",
+      "sha256": "ef4649e53a50e75573a303ec3c425992d21d64dd62d6d1df74330c05d62d9185",
+      "upstream_path": "prompts\\zh_merge_profile_yolo.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/zh_summary_entry_chats.py",
+      "sha256": "49a4885d73f42b21e1e9ac008f868dc50703c7ea25664a59c8e62da9e0f472dc",
+      "upstream_path": "prompts\\zh_summary_entry_chats.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/zh_user_profile_topics.py",
+      "sha256": "e6b47c9e492cf2a8639013469464f62dec59e31558a5b480570df25f3fd06877",
+      "upstream_path": "prompts\\zh_user_profile_topics.py",
+      "byte_identical": true
+    },
+    {
+      "path": "prompts/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "upstream_path": "prompts\\__init__.py",
+      "byte_identical": false
+    }
+  ],
+  "extracted_symbols": {
+    "processors.merge_by_topic_sub_topics": "controllers/modal/chat/extract.py:merge_by_topic_sub_topics",
+    "processors.deduplicate_profiles": "controllers/modal/chat/organize.py:deduplicate_profiles",
+    "models.response": "models/response.py:AIUserProfile,AIUserProfiles",
+    "env": "env.py:ProfileConfig,ContanstTable"
+  }
+}

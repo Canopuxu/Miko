@@ -7,6 +7,7 @@ from memu.app.service import MemoryService
 from pydantic import BaseModel
 
 from miko.adapters.memory.tulpa import SocialMemory
+from miko.adapters.memory.structured import StructuredMemory
 
 
 class Scope(BaseModel):
@@ -20,6 +21,11 @@ class Memory:
         self.chat = chat
         local = chat.settings.local_root
         self.social = SocialMemory(local / 'data/database/social-memory.sqlite3', chat)
+        self.structured = StructuredMemory(self.social.store)
+        self.social.structured = self.structured
+        if self.social.engine == 'memobase':
+            from miko.adapters.memory.memobase import MemobasePipeline
+            self.social.pipeline = MemobasePipeline(self.social, chat)
         self.index = None
         self.error = None
         self.lock = asyncio.Lock()
@@ -41,7 +47,8 @@ class Memory:
 
     def status(self):
         return {'configured': self.index is not None, 'embedding_model': self.model,
-                'error': self.error, 'automatic': self.social.control(), 'batch_size': 100}
+                'error': self.error, 'automatic': self.social.control(), 'batch_size': 100,
+                'memory_engine': self.social.engine, 'idle_flush_seconds': 60}
 
     def documents(self):
         result = {}
@@ -52,9 +59,20 @@ class Memory:
                 'content': f"# {row['title']}\n{row['content']}", 'subject': row['subject'],
                 'peer': peer, 'entry_id': name}
         if self.social.control()['enabled']:
+            for row in self.structured.items(active=True):
+                name = 'item:' + row['id']
+                result[name] = {'name': name, 'track': 'memory',
+                    'description': f"{row['subject']}|{row['peer']}|{row['category']}|{row['topic']}",
+                    'content': f"# {row['category']} · {row['topic']}\n{row['content']}",
+                    'subject': row['subject'], 'peer': row['peer'], 'entry_id': name}
+            for row in self.structured.days():
+                name = row['id']
+                result[name] = {'name': name, 'track': 'memory',
+                    'description': f"{row['subject']}|{row['peer']}|{row['day']}",
+                    'content': row['text'], 'subject': row['subject'], 'peer': row['peer'], 'entry_id': name}
             for row in self.social.listing()['scopes']:
                 detail = self.social.detail(row['id'])
-                automatic = detail['automatic'] if detail['valid'] else ''
+                automatic = detail['automatic'] if detail['valid'] and self.social.engine!='memobase' else ''
                 if not automatic and not detail['manual']:
                     continue
                 subject, peer = row['conversation_id'].split('|', 1)
@@ -92,10 +110,18 @@ class Memory:
                 self.error = '记忆索引更新失败（' + type(exc).__name__ + '），本次使用原有关键词检索'
                 logging.getLogger(__name__).warning('Memory index sync failed: %s', type(exc).__name__)
 
-    async def context(self, query, key=None):
+    async def context(self, query, key=None, conversation_id=None):
         await self.sync()
         context = self.chat.profiles.context(query, key)
         context['social_memory'] = self.social.context(query, key)
+        peer = f'qq:{key[0]}:{key[1]}' if key else ''
+        context['people_memory'] = [{k: r[k] for k in ('id','subject','peer','category','topic','content','updated_at')}
+            for r in self.structured.items(query, peer=peer, active=True)[:12]] if self.social.control()['enabled'] else []
+        context['dated_experiences'] = self.structured.days(peer=peer, query=query)[:6] if self.social.control()['enabled'] else []
+        context['owner_feedback'] = self.structured.feedback(query, conversation_id or peer or 'web:owner')
+        if self.social.engine=='memobase':
+            for row in context['social_memory']:
+                row['automatic'] = ''
         context['retrieval'] = {'engine': 'Tulpa FTS', 'error': self.error}
         if not self.index or self.error or not query.strip():
             return context
@@ -119,8 +145,16 @@ class Memory:
                         subject, peer = detail['conversation_id'].split('|', 1)
                         if not any(r['subject'] == subject and r['peer'] == peer for r in context['social_memory']):
                             context['social_memory'].append({'subject': subject, 'peer': peer,
-                                'automatic': detail['automatic'] if detail['valid'] else '',
+                                'automatic': detail['automatic'] if detail['valid'] and self.social.engine!='memobase' else '',
                                 'manual_corrections': detail['manual'], 'sources': self.social.sources(detail['id'])})
+                    elif name.startswith('item:'):
+                        row = self.structured.detail(name[5:])
+                        if not any(r['id']==row['id'] for r in context['people_memory']):
+                            context['people_memory'].append({k: row[k] for k in ('id','subject','peer','category','topic','content','updated_at')})
+                    elif name.startswith('day:'):
+                        row = next((r for r in self.structured.days(peer=peer) if r['id']==name), None)
+                        if row and not any(r['id']==name for r in context['dated_experiences']):
+                            context['dated_experiences'].append(row)
                 context['retrieval'] = {'engine': 'memU Embedding + Tulpa FTS', 'model': self.model,
                                         'hits': [{k: h[k] for k in ('name','score')} for h in hits['files']]}
             except Exception as exc:
@@ -138,7 +172,9 @@ class Memory:
             await asyncio.sleep(15)
 
     async def close(self):
-        self.social.worker.stop()
+        self.social.stop()
+        if self.social.worker.thread:
+            await asyncio.to_thread(self.social.worker.thread.join,5)
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)

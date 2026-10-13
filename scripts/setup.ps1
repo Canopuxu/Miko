@@ -36,4 +36,7 @@ if (-not (Test-Path -LiteralPath $configPath)) {
     Copy-Item -LiteralPath (Join-Path $mikoRepoRoot 'config\examples\miko.local.json') -Destination $configPath
 }
 & (Join-Path $PSScriptRoot 'setup_web.ps1') -Pnpm $Pnpm
+if (-not (Test-Path -LiteralPath (Join-Path $mikoLocalRoot 'config\memory.local.json'))) {
+    Copy-Item -LiteralPath (Join-Path $mikoRepoRoot 'config\examples\memory.local.json') -Destination (Join-Path $mikoLocalRoot 'config\memory.local.json')
+}
 Invoke-Miko 'check'

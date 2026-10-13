@@ -1,7 +1,7 @@
 # 开源来源
 
-本清单记录 Miko 开发准备阶段下载的源码。具体提交、模块路径与本地位置见
-[`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包、Tulpa QQ 与关系记忆流程、memU 检索及 jieba 分词已接入；Memobase 保留供后续评估。实际使用的发行包记录在下表。
+本清单记录 Miko 使用及调研的开源源码。具体提交、模块路径与本地位置见
+[`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包、Tulpa QQ 与记忆流程、memU 检索、jieba 分词及 Memobase 中文整理模块已接入。实际使用的发行包记录在下表。
 
 | 项目 | 来源 | 许可 | 选用部分 |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@
 | jieba | [fxsjy/jieba](https://github.com/fxsjy/jieba) | MIT；[许可副本](licenses/jieba-LICENSE.txt) | 中文分词 |
 | Tulpa 本地 QQ 基线 | [fumingyang2004/Tulpa](https://github.com/fumingyang2004/Tulpa)；本地提交 `7b603d3` | MIT；[许可副本](licenses/tulpa-qq-baseline-LICENSE.txt) | QQ 接收、调度、发送确认；适配 MCP Chat 的消息段解析、原生引用校验、ChatTurns 气泡队列/节奏/回执恢复，以及 ChatMedia/StickerLibrary 的原图校验、中文匹配和表情笔记 |
 | SQLite | [sqlite.org](https://sqlite.org/) | Public Domain；[版权说明](https://sqlite.org/copyright.html) | 通过现有 Python 标准库 sqlite3 保存会话、消息与作者 |
+| PyYAML 6.0.3 | [yaml/pyyaml](https://github.com/yaml/pyyaml) | MIT；[许可副本](licenses/python/pyyaml-LICENSE.txt) | Memobase 内嵌主题配置与隔离验证 |
 
 上游根目录许可不替代仓库内其他组件或后续安装依赖各自的许可。
 上游角色提示词保留供审阅；当前身份及 QQ 输出格式使用用户审核后的项目文件。
@@ -94,6 +95,11 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 - [Tulpa](https://github.com/fumingyang2004/Tulpa)：MIT，本地固定基线 `7b603d32bc72cab082a3b39aa52658b64bd506ff` 的 `chatlocal/tulpa.py`，复用收集、分批整理、修正、证据校验、历史与后台工作器；仅将工作器的旧全局配置检查接到 Miko。页面沿用原记忆面板的功能组织，移植到统一 React 页面。
 - [memU](https://github.com/NevaMind-AI/memU)：Apache-2.0，固定源码 `dc7bda82b1f2a6429d9d1531ebdfd08d71e4e2b1`（0.11.0-beta.3），完整未修改 Python 包保存于 `packages/upstream/memu/`，实际调用 MemoryService、SQLite 与 Embedding 检索；未启用其宿主插件。
 - [jieba](https://github.com/fxsjy/jieba)：MIT，0.42.1，用于 Tulpa 的中文分词。
+
+- [ReMe](https://github.com/agentscope-ai/ReMe)：Apache-2.0，研究基线 `749c653f23bbe6791574dd8428fec6c49984574d`（0.4.1.13），原始源码位于 `MikoLocal/research/upstream/reme/`，仅用于独立的 Windows 本地记忆验证，尚未接入生产记忆系统。
+- [Memobase](https://github.com/memodb-io/memobase)：Apache-2.0，模块抽取基线 `358c16bbc6d687937d79bc2f984a11c3be8da901`。复用中文提炼/提取/合并模板、条目归并与摘要模板、解析器、主题类型，以及 `merge_by_topic_sub_topics` / `deduplicate_profiles` 原函数。保留原始模板和解析函数；替换服务器配置依赖，抽取所需数据类型。来源、文件哈希及改动范围见内嵌模块的 `source-manifest.json`；许可副本随模块保存。
+- 实际内嵌的 Memobase 模块位于 `apps/backend/src/miko/adapters/memory/memobase_upstream/`，许可与逐文件来源随包保留。五份原模板及项目任务说明已获用户批准用于正式整理。Miko 适配作者、时间、DSH 调用与 SQLite 提交；Tulpa 增加小批次整理、事务提交回调和后台待整理选择，保留原文校验与版本竞争检查。长条目摘要仅供页面浏览，完整条目继续参与检索。
+- [AgentScope](https://github.com/agentscope-ai/agentscope)：Apache-2.0，2.0.9，ReMe 隔离验证采用上游原生模型封装与记忆 Agent 工具循环；未替换 Miko 的 DSH。隔离环境安装依赖的名称、版本、来源与许可元数据见 [dependencies.json](../MikoLocal/research/reme-evaluation/dependencies.json)。
 
 新增 Python 依赖及许可记录在 `config/python-dependencies.lock.json`，许可副本在 `licenses/python/`。
 
