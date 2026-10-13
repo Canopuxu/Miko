@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import threading
@@ -18,6 +19,32 @@ from miko.adapters.qq.messages import FACES, OUTPUT_SCHEMA
 from miko.settings import REPO_ROOT, Settings
 from miko.storage.chat import ChatStore
 from miko.storage.profiles import ProfileStore
+
+
+def reply_context(context):
+    """Keep conversational material; evidence and diagnostics stay in the preview."""
+    result = {'current_time': context['current_time']}
+    fields = {
+        'role_material': ('subject', 'kind', 'category', 'title', 'content', 'as_of', 'source'),
+        'friend_relationships': ('name', 'owner_relationship', 'miko_relationship', 'miko_introduced'),
+        'social_memory': ('subject', 'peer', 'automatic', 'manual_corrections'),
+        'people_memory': ('subject', 'peer', 'category', 'topic', 'content'),
+        'dated_experiences': ('subject', 'day', 'text'),
+        'owner_feedback': ('reply', 'feedback'),
+    }
+    for group, names in fields.items():
+        rows = []
+        for original in context.get(group, []):
+            row = {name: original[name] for name in names if original.get(name) not in (None, '')}
+            if group == 'social_memory' and not (row.get('automatic') or row.get('manual_corrections')):
+                continue
+            if group == 'dated_experiences':
+                row['text'] = re.sub(r'[ \t]*//[ \t]*(event|schedule)[ \t]*$', '', row['text'], flags=re.MULTILINE)
+            if row not in rows:
+                rows.append(row)
+        if rows:
+            result[group] = rows
+    return result
 
 
 @dataclass
@@ -101,7 +128,7 @@ class ChatService:
     def compose_prompt(self, base, query, key=None):
         instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
         context = self.profiles.context(query, key)
-        return base + '\n\n' + instructions + '\n\n' + json.dumps(context, ensure_ascii=False)
+        return base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
 
     async def run(self, turn: Turn):
         status = "error"
@@ -110,7 +137,7 @@ class ChatService:
                 context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
-                turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(context, ensure_ascii=False)
+                turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
                 if context.get('owner_feedback'):
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()
                 if turn.memory_key:

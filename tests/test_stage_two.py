@@ -4,6 +4,7 @@ from pathlib import Path
 import socket
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -269,6 +270,45 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((relation['owner_relationship'], relation['miko_relationship']), ('多年同学', '刚认识'))
         self.assertEqual(len(data['friend_relationships']), 1)
         self.assertTrue(relation['miko_introduced'])
+
+    async def test_reply_uses_compact_memory_and_preserves_review_data(self):
+        from copy import deepcopy
+        material = self.service.profiles.context('摄影')
+        material.update({
+            'social_memory': [{'subject': 'miko', 'peer': 'qq:123:456', 'automatic': '',
+                'manual_corrections': '和朋友甲刚认识', 'sources': [{'content': '证据原文保留供回顾'}],
+                'episodes': [[{'content': '旧聊天片段'}]]}],
+            'people_memory': [{'id': 'internal-memory-id', 'subject': 'miko', 'peer': '',
+                'category': '兴趣', 'topic': '摄影', 'content': '开始学摄影', 'updated_at': 123}],
+            'dated_experiences': [{'id': 'internal-day-id', 'subject': 'miko', 'day': '2026-10-12',
+                'text': '- 开始学摄影。[提及于 2026/10/12] // event\n- 明天练构图。 // schedule',
+                'sources': [{'content': '事件依据'}], 'scope_id': 2}],
+            'retrieval': {'engine': 'memU', 'hits': [{'name': 'internal-memory-id', 'score': .9}]},
+        })
+        original = deepcopy(material)
+
+        async def context(*args):
+            return material
+        self.service.memory = SimpleNamespace(context=context)
+        await self.collect('最近在做什么')
+        web_prompt = self.requests[-1]['messages'][0]['content']
+        web = json.loads(web_prompt.split('\n\n', 2)[2])
+        turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'},
+                                                'text': '最近在做什么'}])
+        await asyncio.wait_for(turn.task, 10)
+        prompt = self.requests[-1]['messages'][0]['content']
+        qq = json.loads(prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
+        self.assertEqual(web, qq)
+        self.assertEqual(qq['people_memory'][0]['content'], '开始学摄影')
+        self.assertEqual(qq['social_memory'][0]['manual_corrections'], '和朋友甲刚认识')
+        self.assertEqual(qq['dated_experiences'][0]['day'], '2026-10-12')
+        self.assertIn('\n- 明天练构图。', qq['dated_experiences'][0]['text'])
+        self.assertNotIn('// event', prompt)
+        self.assertNotIn('// schedule', prompt)
+        for omitted in ('证据原文保留供回顾', '旧聊天片段', '事件依据', 'internal-memory-id', 'retrieval'):
+            self.assertNotIn(omitted, web_prompt)
+            self.assertNotIn(omitted, prompt)
+        self.assertEqual(material, original)
 
 
 if __name__ == "__main__":
