@@ -1,5 +1,5 @@
 import { AppShell, NavigationContext } from '../components/AppShell';
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
 import { ArrowUpRight, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
@@ -27,6 +27,8 @@ export function ProfilesPage() {
   const [categoryEdit, setCategoryEdit] = useState<CategoryEdit | null>(null);
   const [deleting, setDeleting] = useState<{ kind: 'category' | 'entry'; id: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState<Entry | null>(null);
+  const [dropPath, setDropPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const {notice,setNotice,setFailure,failed}=useNotice();
   const [revision, setRevision] = useState(0);
@@ -99,6 +101,33 @@ export function ProfilesPage() {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     if (!result.ok) throw new Error(await responseError(result));
     return result;
+  }
+  async function moveEntry(entry: Entry, category: string) {
+    if (busy || entry.category === category) return;
+    setBusy(true); setNotice('');
+    try {
+      const {subject,kind,title,content,keywords,account,friend,as_of}=entry;
+      await request(`/api/profiles/entries/${entry.id}`, 'PUT',
+        {subject,kind,title,content,keywords,account,friend,as_of,category});
+      preservePosition(); setRevision(v=>v+1); setPreview(null);
+      setNotice(`已移到 ${category.replace('/', ' · ') || '待归类'}`);
+    } catch(cause) { setFailure(cause); } finally { setBusy(false); }
+  }
+  function dropTarget(path: string) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (!dragging || busy) return;
+        event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect='move'; setDropPath(path);
+      },
+      onDragLeave: (event: DragEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropPath(current=>current===path?null:current);
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (!dragging || busy) return;
+        event.preventDefault(); event.stopPropagation();
+        const entry=dragging; setDragging(null); setDropPath(null); void moveEntry(entry,path);
+      },
+    };
   }
   async function saveEntry() {
     if (!edit || !edit.content.trim()) return;
@@ -198,15 +227,18 @@ export function ProfilesPage() {
       onClick={() => chooseSubject('miko')}>Miko</button><button aria-pressed={subject === 'owner'} disabled={busy}
       onClick={() => chooseSubject('owner')}>我</button></div>
     <div className="search-field"><Search size={15}/><input className="persona-search" aria-label="搜索词条" value={q} onChange={event => setQ(event.target.value)} placeholder="搜索词条内容" /></div>
-    <nav className="persona-categories" aria-label="大分类">{categories.map(c => <div key={c.id} className={`persona-category-row ${selected===c.id?'selected':''}`}>
+    <nav className="persona-categories" aria-label="大分类">{categories.map(c => <div key={c.id} className={`persona-category-row ${selected===c.id?'selected':''} ${dropPath===c.name?'drop-target':''}`} {...dropTarget(c.name)}>
       <button className="persona-category-label" disabled={busy} aria-current={selected === c.id ? 'page' : undefined}
         onClick={() => choose(c.id)}><span>{c.name}</span>
         <small>{settings.filter(e => (e.category === c.name || e.category.startsWith(c.name + '/')) && matches(e)).length}</small></button>
       <div className="persona-category-tools">
         <button disabled={busy} aria-label={`重命名分类 ${c.name}`} title="重命名分类" onClick={()=>choose(c.id,'rename')}><Pencil size={14} aria-hidden="true"/></button>
         <button disabled={busy} aria-label={`删除分类 ${c.name}`} title="删除分类" onClick={()=>choose(c.id,'delete')}><Trash2 size={14} aria-hidden="true"/></button>
-      </div></div>)}
-      <button aria-current={selected === 'unfiled' ? 'page' : undefined} disabled={busy} onClick={() => choose('unfiled')}>
+      </div>{dragging && !!c.children.length && <div className="persona-drop-children">{c.children.map(child=>{
+        const path=`${c.name}/${child.name}`;
+        return <div key={child.id} className={dropPath===path?'drop-target':''} {...dropTarget(path)}>{child.name}</div>;
+      })}</div>}</div>)}
+      <button {...dropTarget('')} className={dropPath===''?'drop-target':''} aria-current={selected === 'unfiled' ? 'page' : undefined} disabled={busy} onClick={() => choose('unfiled')}>
         <span>待归类</span><small>{unfiled.filter(matches).length}</small></button></nav>
     <button className="persona-add-category" disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({name:''});})}><Plus size={14}/>新增大分类</button>
   </section>}>
@@ -221,14 +253,17 @@ export function ProfilesPage() {
         {deleting?.kind === 'category' && deleting.id === root?.id && deleteConfirmation()}
         {loading ? <p className="profile-empty">正在读取…</p> : sections.map(section => {
           const items = (root ? settings.filter(e => e.category === section.path) : unfiled).filter(matches);
-          return <section className="persona-section" key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
+          return <section className={`persona-section ${dropPath===section.path?'drop-target':''}`} {...dropTarget(section.path)} key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
             <div>{root && section.id !== root.id && <><button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({id:section.id,parent:root.id,name:section.name});})}>重命名</button>
               <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: section.id })}>删除小分类</button></>}
               <button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:null,path:section.path,content:''});})}><Plus size={14}/>添加词条</button></div></header>
             {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
             {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
-            <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id || (deleting?.kind === 'entry' && deleting.id === entry.id) ? ' is-editing' : ''}`} key={entry.id}>
+            <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id || (deleting?.kind === 'entry' && deleting.id === entry.id) ? ' is-editing' : ''}${dragging?.id===entry.id?' is-dragging':''}`} key={entry.id}
+              draggable={!busy && !edit && !categoryEdit && !deleting}
+              onDragStart={event=>{event.dataTransfer.setData('text/plain',entry.id);event.dataTransfer.effectAllowed='move';setDragging(entry);}}
+              onDragEnd={()=>{setDragging(null);setDropPath(null);}}>
               {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer className="persona-tile-overlay"><span>{entry.account && '指定好友'}</span>
                 <div><button disabled={busy} aria-label="编辑词条" title="编辑" onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:entry.id,path:entry.category,
                   content:entry.content,original:entry});})}><Pencil size={16} aria-hidden="true"/></button>

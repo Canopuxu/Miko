@@ -54,3 +54,10 @@
 .persona-preview summary { cursor: pointer; }
 .persona-preview > p { font-size: 12px; line-height: 1.8; }
 @media (max-width: 760px) { .persona-content { padding: 22px 18px 35px; } .persona-category-heading h2 { font-size: 20px; } }
+
+.persona-tile[draggable="true"] { cursor: grab; }
+.persona-tile.is-dragging { opacity: .4; }
+.persona-tile.is-dragging .persona-tile-overlay { opacity: 0; }
+.persona-drop-children { grid-column: 1 / -1; display: grid; gap: 3px; padding: 0 6px 8px 20px; }
+.persona-drop-children > div { padding: 8px 10px; font-size: 12px; color: #706b62; border-radius: 6px; }
+.persona-category-row.drop-target, .persona-categories button.drop-target, .persona-drop-children > .drop-target, .persona-section.drop-target { background: #e1e9da; outline: 2px solid #6d8068; outline-offset: -2px; border-radius: 9px; }
