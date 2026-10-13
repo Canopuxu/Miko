@@ -43,6 +43,7 @@ class MemobasePipeline:
         subjects = list(dict.fromkeys(r['sender_id'] for r in rows))
         with self.chat.store.connect() as db:
             names = {r['id']: r['display_name'] for r in db.execute('SELECT * FROM people')}
+        names['owner'] = '橙汁'
         plans, days, summaries = [], [], []
         for subject in subjects:
             existing = self.social.structured.items(subject=subject)
@@ -51,10 +52,10 @@ class MemobasePipeline:
             previous = '\n'.join(f'- {r["category"]}::{r["topic"]}::{r["content"]}' for r in relevant) or 'NONE'
             dialogue = '\n'.join(
                 f'[{datetime.fromtimestamp(r["timestamp"]/1000).astimezone().isoformat()}] '
-                f'{names.get(r["sender_id"], r["sender_id"])}({"user" if r["sender_id"] == subject else {"owner":"主人","miko":"Miko","contact":"好友"}[r["author"]]}): {r["content"]}'
+                f'{names.get(r["sender_id"], r["sender_id"])}({"user" if r["sender_id"] == subject else {"owner":"橙汁","miko":"Miko","contact":"好友"}[r["author"]]}): {r["content"]}'
                 for r in rows)
             dialogue = '本次整理对象：' + names.get(subject,subject) + '\n参与者身份：' + json.dumps(
-                {names.get(r['sender_id'],r['sender_id']): {'owner':'主人','miko':'Miko','contact':'好友'}[r['author']] for r in rows},
+                {names.get(r['sender_id'],r['sender_id']): {'owner':'橙汁','miko':'Miko','contact':'好友'}[r['author']] for r in rows},
                 ensure_ascii=False) + '\n' + dialogue
             topic_prompt = topics.get_prompt()
             recorded = await ask(f'{subject}:summary', summary.get_prompt(topic_prompt, '', self.guidance),

@@ -210,14 +210,14 @@ class QqService:
                 quoted = self.store.get_event(key, segment['message_id'])
                 if quoted:
                     record['quoted_message'] = {'message_id': quoted['message_id'], 'text': quoted['text'],
-                        'author': '好友' if quoted['origin'] == 'friend' else 'Miko' if quoted['origin'] == 'miko' else '账号主人',
+                        'author': '好友' if quoted['origin'] == 'friend' else 'Miko' if quoted['origin'] == 'miko' else '橙汁',
                         'recalled': bool(quoted['recalled'])}
                 elif not record.get('quoted_message') or record['quoted_message'].get('content_status') == 'unavailable':
                     try:
                         value = await self.client.message(*key, segment['message_id'])
                         record['quoted_message'] = {'message_id': segment['message_id'],
                             'text': parse_message(value.get('message'))['text'],
-                            'author': '好友' if str(value['sender']['user_id']) == key[1] else '账号主人'}
+                            'author': '好友' if str(value['sender']['user_id']) == key[1] else '橙汁'}
                     except (SendError, AttributeError):
                         record['quoted_message'] = {'message_id': segment['message_id'], 'content_status': 'unavailable'}
                 self.store.quote_snapshot(key, record['message_id'], record['quoted_message'])
