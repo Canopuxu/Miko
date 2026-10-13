@@ -1,5 +1,5 @@
 import { AppShell, NavigationContext } from '../components/AppShell';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
 
@@ -32,8 +32,18 @@ export function ProfilesPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [previewFriend, setPreviewFriend] = useState('');
   const [preview, setPreview] = useState<Context | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef<number | null>(null);
 
-  useEffect(() => { let alive = true; setLoading(true);
+  useLayoutEffect(() => {
+    if (contentRef.current && savedScroll.current !== null) {
+      contentRef.current.scrollTop = savedScroll.current;
+      savedScroll.current = null;
+    }
+  }, [entries, categories]);
+  function preservePosition() { savedScroll.current = contentRef.current?.scrollTop ?? null; }
+
+  useEffect(() => { let alive = true;
     void Promise.all([
       getJson<{ entries: Entry[] }>(`/api/profiles?subject=${subject}`),
       getJson<{ categories: Category[] }>(`/api/profiles/categories?subject=${subject}`),
@@ -55,11 +65,13 @@ export function ProfilesPage() {
   }
   function choose(id: string) {
     if (!canLeave()) return;
+    savedScroll.current = null;
+    if (contentRef.current) contentRef.current.scrollTop = 0;
     setSelected(id); setEdit(null); setCategoryEdit(null); setDeleting(null); setNotice('');
   }
   function chooseSubject(value: Subject) {
     if (value === subject || !canLeave()) return;
-    setSubject(value); setEntries([]); setCategories([]); setSelected(''); setEdit(null);
+    setLoading(true); setSubject(value); setEntries([]); setCategories([]); setSelected(''); setEdit(null);
     setCategoryEdit(null); setDeleting(null); setNotice(''); setPreview(null);
   }
   const root = categories.find(c => c.id === selected);
@@ -89,11 +101,13 @@ export function ProfilesPage() {
         keywords: original?.keywords ?? '', account: original?.account ?? '', friend: original?.friend ?? '',
         as_of: original?.as_of ?? null, enabled: edit.enabled,
       });
+      preservePosition();
       setEdit(null); setRevision(v => v + 1); setPreview(null); setNotice('词条已保存');
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   async function saveTree(tree: Category[]) {
     await request('/api/profiles/categories', 'PUT', { subject, categories: tree });
+    if (categoryEdit?.id || categoryEdit?.parent || deleting?.id !== selected) preservePosition();
     setCategoryEdit(null); setDeleting(null); setRevision(v => v + 1); setPreview(null);
   }
   async function saveCategory() {
@@ -119,7 +133,7 @@ export function ProfilesPage() {
     setBusy(true); setNotice('');
     try {
       if (deleting.kind === 'entry') {
-        await request(`/api/profiles/entries/${deleting.id}`, 'DELETE'); setDeleting(null); setRevision(v => v + 1);
+        await request(`/api/profiles/entries/${deleting.id}`, 'DELETE'); preservePosition(); setDeleting(null); setRevision(v => v + 1);
         if (edit?.id === deleting.id) setEdit(null); setNotice('词条已删除');
       } else {
         await saveTree(categories.filter(c => c.id !== deleting.id).map(c => ({ ...c,
@@ -138,7 +152,8 @@ export function ProfilesPage() {
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   function editor() {
-    return edit && <form className="persona-entry-editor" onSubmit={event => { event.preventDefault(); void saveEntry(); }}>
+    return edit && <form className="persona-entry-editor" onSubmit={event => { event.preventDefault(); void saveEntry(); }}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setEdit(null); } }}>
       <label>词条内容<textarea autoFocus aria-label="词条内容" rows={4} maxLength={6000} value={edit.content}
         onChange={event => setEdit({ ...edit, content: event.target.value })} disabled={busy} placeholder="写下一条具体的设定" /></label>
       <div className="persona-edit-bottom"><label className="persona-check"><input type="checkbox" checked={edit.enabled}
@@ -152,6 +167,21 @@ export function ProfilesPage() {
           {c.children.map(child => <option key={child.id} value={`${c.name}/${child.name}`}>{child.name}</option>)}</optgroup>)}
       </select></label>}
     </form>;
+  }
+  function categoryEditor() {
+    return categoryEdit && <form className="persona-category-form" onSubmit={event => { event.preventDefault(); void saveCategory(); }}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setCategoryEdit(null); } }}>
+      <label>{categoryEdit.id ? '分类新名称' : categoryEdit.parent ? '小分类名称' : '大分类名称'}<input autoFocus aria-label="分类名称" maxLength={36}
+        value={categoryEdit.name} onChange={event => setCategoryEdit({ ...categoryEdit, name: event.target.value })} disabled={busy} /></label>
+      <button className="send-button" disabled={busy || !categoryEdit.name.trim()}>保存分类</button>
+      <button type="button" disabled={busy} onClick={() => setCategoryEdit(null)}>取消</button>
+    </form>;
+  }
+  function deleteConfirmation() {
+    return deleting && <div className="persona-delete" role="alert"><p>{deleting.kind === 'category'
+      ? '删除这个分类？其中的词条将移到待归类，内容仍会保留。' : '删除这条词条？'}</p>
+      <button disabled={busy} onClick={() => void remove()}>确认删除</button>
+      <button disabled={busy} onClick={() => setDeleting(null)}>取消</button></div>;
   }
 
   return <AppShell view="profiles" sidebar={<section className="persona-browser" aria-label="人物分类">
@@ -169,29 +199,28 @@ export function ProfilesPage() {
     <main className="main-panel persona-panel"><header className="page-header"><div><h1>{subject === 'miko' ? 'Miko 的人物设定' : '我的稳定资料'}</h1>
       <p>{subject === 'miko' ? '从各个方面，慢慢认识她' : '你希望 Miko 了解的长期信息'}</p></div>
       <button className="persona-memory-link" onClick={() => navigation.select('memory')}>近况与经历 →</button></header>
-      <div className="persona-content"><div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
+      <div className="persona-content" ref={contentRef}><div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
         {root && <div className="persona-category-actions"><button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ parent: root.id, name: '' }); } }}>＋ 小分类</button>
           <button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ id: root.id, name: root.name }); } }}>重命名</button>
           <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: root.id })}>删除分类</button></div>}</div>
-        {notice && <p className="profile-notice" role="status">{notice}</p>}
-        {categoryEdit && <form className="persona-category-form" onSubmit={event => { event.preventDefault(); void saveCategory(); }}>
-          <label>{categoryEdit.id ? '分类新名称' : categoryEdit.parent ? '小分类名称' : '大分类名称'}<input autoFocus aria-label="分类名称" maxLength={36}
-            value={categoryEdit.name} onChange={event => setCategoryEdit({ ...categoryEdit, name: event.target.value })} disabled={busy} /></label>
-          <button className="send-button" disabled={busy || !categoryEdit.name.trim()}>保存分类</button><button type="button" disabled={busy} onClick={() => setCategoryEdit(null)}>取消</button></form>}
-        {deleting && <div className="persona-delete" role="alert"><p>{deleting.kind === 'category' ? '删除这个分类？其中的词条将移到待归类，内容仍会保留。' : '删除这条词条？'}</p>
-          <button disabled={busy} onClick={() => void remove()}>确认删除</button><button disabled={busy} onClick={() => setDeleting(null)}>取消</button></div>}
+        {notice && <p className="persona-status" role="status">{notice}</p>}
+        {categoryEdit && (!categoryEdit.parent || !categoryEdit.id) && categoryEditor()}
+        {deleting?.kind === 'category' && deleting.id === root?.id && deleteConfirmation()}
         {loading ? <p className="profile-empty">正在读取…</p> : sections.map(section => {
           const items = (root ? settings.filter(e => e.category === section.path) : unfiled).filter(matches);
           return <section className="persona-section" key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
             <div>{root && section.id !== root.id && <><button disabled={busy} onClick={() => { if (canLeave()) { setEdit(null); setCategoryEdit({ id: section.id, parent: root.id, name: section.name }); } }}>重命名</button>
               <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: section.id })}>删除小分类</button></>}
               <button disabled={busy} onClick={() => { if (canLeave()) { setCategoryEdit(null); setEdit({ id: null, path: section.path, content: '', enabled: true }); } }}>＋ 添加词条</button></div></header>
+            {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
+            {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
             {items.map(entry => <article className={`persona-entry ${!entry.enabled ? 'inactive' : ''}`} key={entry.id}>
               {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer><span>{entry.enabled ? '用于聊天' : '暂未启用'}{entry.account && ' · 指定好友'}</span>
                 <div><button disabled={busy} onClick={() => { if (canLeave()) { setCategoryEdit(null); setEdit({ id: entry.id, path: entry.category,
                   content: entry.content, enabled: !!entry.enabled, original: entry }); } }}>编辑</button>
                   <button disabled={busy} onClick={() => setDeleting({ kind: 'entry', id: entry.id })}>删除</button></div></footer></>}
+              {deleting?.kind === 'entry' && deleting.id === entry.id && deleteConfirmation()}
             </article>)}
             {edit && !edit.id && edit.path === section.path && editor()}
           </section>;
