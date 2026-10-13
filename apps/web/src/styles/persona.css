@@ -2,7 +2,7 @@
 .persona-subject { display: flex; gap: 4px; background: #ebe5dc; border-radius: 10px; padding: 4px; }
 .persona-subject button { flex: 1; border: 0; border-radius: 7px; background: transparent; padding: 9px; color: #918272; }
 .persona-subject button[aria-pressed="true"] { background: #fffdfa; color: #65513e; box-shadow: 0 2px 5px #53422f09; }
-.persona-search, .persona-category-form input, .persona-move select { width: 100%; border: 1px solid #ded7cd; border-radius: 8px; background: #fffdfa; padding: 10px; font-size: 12px; color: #494039; }
+.persona-search, .persona-category-form input { width: 100%; border: 1px solid #ded7cd; border-radius: 8px; background: #fffdfa; padding: 10px; font-size: 12px; color: #494039; }
 .persona-categories { display: grid; gap: 5px; }
 .persona-categories button { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; padding: 12px; text-align: left; font-size: 12px; color: #827568; }
 .persona-categories button[aria-current="page"] { background: #e9e1d5; color: #604d3a; font-weight: 600; }
@@ -42,7 +42,6 @@
 .persona-edit-bottom { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .persona-edit-bottom > div { display: flex; gap: 17px; align-items: center; }
 .persona-edit-bottom .send-button { background: #82705c; color: #fffdfa; padding: 9px 13px; }
-.persona-entry-editor .persona-move { margin-top: 16px; }
 .persona-category-form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; padding: 18px; border-radius: 10px; background: #f1ebe1; margin-bottom: 25px; }
 .persona-category-form label { flex: 1; display: grid; gap: 8px; font-size: 12px; color: #8b735b; min-width: 160px; }
 .persona-status { position: fixed; bottom: 22px; right: 26px; z-index: 5; max-width: min(440px, calc(100vw - 90px)); margin: 0; padding: 12px 18px; border: 1px solid #dfd3c2; border-radius: 10px; background: #fffaf1; box-shadow: 0 4px 18px #5c49351a; color: #826951; font-size: 12px; line-height: 1.6; }

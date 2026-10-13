@@ -208,12 +208,7 @@ export function ProfilesPage() {
       <div className="persona-edit-bottom">
         <div><button type="button" disabled={busy} onClick={() => guard.proceed(()=>setEdit(null))}>取消</button>
           <button className="send-button" disabled={busy || !edit.content.trim()}><Save size={14}/>{busy?'保存中…':'保存词条'}</button></div></div>
-      {edit.id && <label className="persona-move">所属分类<select value={edit.path} disabled={busy}
-        onChange={event => setEdit({ ...edit, path: event.target.value })}>
-        <option value="">待归类</option>{!known.has(edit.path) && edit.path && <option value={edit.path}>{edit.path}</option>}
-        {categories.map(c => <optgroup key={c.id} label={c.name}><option value={c.name}>{c.name} · 综合</option>
-          {c.children.map(child => <option key={child.id} value={`${c.name}/${child.name}`}>{child.name}</option>)}</optgroup>)}
-      </select></label>}
+
     </form>;
   }
   function categoryEditor() {
