@@ -109,8 +109,8 @@ def memory_router(memory):
                 db.execute("UPDATE tulpa_scopes SET retry_at=0,status='collecting' WHERE id=? AND status='updating'",(sid,))
 
     @router.get('/items')
-    async def items(q: str='', subject: str='', category: str=''):
-        return {'items': memory.structured.items(q,subject=subject,category=category)}
+    async def items(q: str='', subject: str='', category: str='', peer: str | None=None):
+        return {'items': memory.structured.items(q,subject=subject,category=category,peer=peer)}
 
     @router.get('/objects')
     async def objects():

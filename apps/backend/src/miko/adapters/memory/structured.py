@@ -223,10 +223,16 @@ class StructuredMemory:
         day = day or datetime.now().astimezone().date().isoformat()
         start = int(datetime.fromisoformat(day).astimezone().timestamp() * 1000)
         with self.projection.source.connect() as db:
-            rows = [dict(r) for r in db.execute('''SELECT m.id,m.text,m.created_at,m.conversation_id,c.title
+            rows = [dict(r) for r in db.execute('''SELECT m.id,m.text,m.created_at,m.conversation_id,c.title,c.source
               FROM messages m JOIN conversations c ON c.id=m.conversation_id
               WHERE m.author_id='miko' AND m.status='completed' AND m.created_at>=? AND m.created_at<?
               ORDER BY m.created_at DESC''', (start, start + 86400000))]
+            for row in rows:
+                row['context'] = [dict(r) for r in db.execute('''SELECT m.text,p.display_name AS author
+                    FROM messages m JOIN people p ON p.id=m.author_id
+                    WHERE m.conversation_id=? AND m.author_id!='miko' AND m.sequence <
+                      (SELECT sequence FROM messages WHERE id=?)
+                    ORDER BY m.sequence DESC LIMIT 2''', (row['conversation_id'], row['id']))][::-1]
         with self.projection.connect() as db:
             notes = {r['message_id']: dict(r) for r in db.execute('SELECT * FROM memory_annotations')}
             for note in notes.values():

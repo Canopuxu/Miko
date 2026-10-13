@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
-import { LifeTree, goalStatus, type LifeGoal, type LifeEntry, type LifeEvent } from '../components/LifeTree';
+import { LifeTimeline, goalStatus, type LifeGoal, type LifeEntry, type LifeEvent } from '../components/LifeTimeline';
 import '../styles/life.css';
+import { Plus, RefreshCw, Save, X } from 'lucide-react';
+import { useDiscardGuard } from '../components/ui';
 
 type Entry = LifeEntry;
 type Listing = {
@@ -21,10 +23,11 @@ export function LifePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [mode, setMode] = useState<'tree' | 'day'>('tree');
+  const [mode, setMode] = useState<'timeline' | 'day'>('timeline');
   const [goal, setGoal] = useState<LifeGoal | null>(null);
   const [goalDirty, setGoalDirty] = useState(false);
   const unsaved = dirty || goalDirty;
+  const guard=useDiscardGuard(unsaved,()=>{setEntries(data?.record.entries ?? []);setDirty(false);setGoal(null);setGoalDirty(false);});
 
   async function load(selected = day) {
     try {
@@ -69,10 +72,12 @@ export function LifePage() {
   }
 
   function openGoal(value?: LifeGoal) {
-    if (busy || unsaved) return;
-    setMode('tree');
+    if (busy) return;
+    guard.proceed(()=>{
+    setMode('timeline');
     setGoal(value ?? {id: '', text: '', start_date: today(), target_date: today(), status: 'active'});
     setGoalDirty(false); setNotice(''); setError('');
+    });
   }
   async function saveGoal() {
     if (!data || !goal) return;
@@ -85,8 +90,8 @@ export function LifePage() {
     finally { setBusy(false); }
   }
   function showDay(value: string) {
-    if (busy || unsaved) return;
-    setDay(value); setMode('day'); setGoal(null);
+    if (busy) return;
+    guard.proceed(()=>{setDay(value);setMode('day');setGoal(null);});
   }
   async function toggle() {
     if (!data) return;
@@ -100,37 +105,37 @@ export function LifePage() {
   }
 
   const sidebar = <div className="life-navigation">
-    <div className="life-view-switch"><button className={mode === 'tree' ? 'selected' : ''} disabled={busy || unsaved}
-      onClick={() => setMode('tree')}>生活轨迹</button><button className={mode === 'day' ? 'selected' : ''}
-      disabled={busy || unsaved} onClick={() => setMode('day')}>按日记录</button></div>
+    <div className="life-view-switch"><button className={mode === 'timeline' ? 'selected' : ''} disabled={busy}
+      onClick={() => guard.proceed(()=>setMode('timeline'))}>生活轨迹</button><button className={mode === 'day' ? 'selected' : ''}
+      disabled={busy} onClick={() => guard.proceed(()=>setMode('day'))}>按日记录</button></div>
     <div className="life-goal-list"><div className="life-list-heading">想做的事<button aria-label="添加目标"
-      disabled={busy || unsaved} onClick={() => openGoal()}>＋</button></div>
+      disabled={busy} onClick={() => openGoal()}><Plus size={16}/></button></div>
       {data?.goals.map(value => <button key={value.id} className={`life-goal-link ${value.status}`}
-        disabled={busy || unsaved} onClick={() => openGoal(value)}><span>{value.text}</span><small>{goalStatus[value.status]}</small></button>)}
-      {!data?.goals.length && <p>先过平常的一天，也可以有新的打算。</p>}</div>
-    <label>查看日期<input aria-label="生活记录日期" type="date" value={day} disabled={busy || unsaved}
+        disabled={busy} onClick={() => openGoal(value)}><span>{value.text}</span><small>{goalStatus[value.status]}</small></button>)}
+      {!data?.goals.length && <p>暂无目标</p>}</div>
+    <label>查看日期<input aria-label="生活记录日期" type="date" value={day} disabled={busy}
       onChange={e => { if (e.target.value) showDay(e.target.value); }}/></label>
-    <button className="life-button" onClick={() => { showDay(today()); if (day === today()) void load(); }}
-      disabled={busy || unsaved}>回到今天</button>
+    <button className="life-button" onClick={() => showDay(today())}
+      disabled={busy}>回到今天</button>
     <div className="life-date-list">{data?.dates.map(value => <button key={value}
-      className={day === value ? 'selected' : ''} disabled={busy || unsaved} onClick={() => showDay(value)}>{value}</button>)}</div>
+      className={day === value ? 'selected' : ''} disabled={busy} onClick={() => showDay(value)}>{value}</button>)}</div>
     <div className="life-controls"><p>{data?.status.enabled ? '自动记录已开启' : '自动记录已暂停'}</p>
       <button className="life-button" disabled={busy || data?.status.generating || !data} onClick={() => void toggle()}>
         {data?.status.enabled ? '暂停自动记录' : '恢复自动记录'}</button></div>
   </div>;
 
   return <AppShell view="life" sidebar={sidebar}><main className="main-panel life-panel">
-    <header className="page-header"><div><h1>{mode === 'tree' ? '生活轨迹' : day === today() ? '今天' : day}</h1>
-      <p>{mode === 'tree' ? '一些想做的事，和每天的小片段' : 'Miko 在做的事 · 简短生活条目'}</p></div>
+    <header className="page-header"><h1>{mode === 'timeline' ? '生活轨迹' : day === today() ? '今天' : day}</h1>
       <button className="life-button" disabled={busy || unsaved || data?.status.generating} onClick={() => void generate()}>
         {busy || data?.status.generating ? '处理中…' : '推进今天'}</button>
     </header>
     {(error || data?.status.error) && <p className="profile-notice life-page-notice" role="alert">{error || data?.status.error}</p>}
-    {mode === 'tree' && data && <LifeTree goals={data.goals} events={data.trajectory} onGoal={openGoal} onDay={showDay}/>}
-    {mode === 'tree' && !goal && <span className="life-tree-notice" role="status">{notice}</span>}
+    {mode === 'timeline' && data && <LifeTimeline goals={data.goals} events={data.trajectory} onGoal={openGoal} onDay={showDay}/>}
+    {mode === 'timeline' && !goal && notice && <p className="life-timeline-notice" role="status">{notice}</p>}
     {goal && <aside className="life-goal-editor" aria-label="目标详情">
       <div className="life-record-header"><strong>{goal.id ? '想做的事' : '一个新目标'}</strong>
-        <button className="life-button" disabled={busy} onClick={() => {setGoal(null); setGoalDirty(false);}}>关闭</button></div>
+        <button className="icon-button" aria-label="关闭目标详情" title="关闭" disabled={busy}
+          onClick={() => guard.proceed(()=>{setGoal(null);setGoalDirty(false);})}><X size={17}/></button></div>
       <label>目标<textarea aria-label="目标内容" rows={3} maxLength={240} value={goal.text} disabled={busy}
         onChange={e => {setGoal({...goal, text: e.target.value}); setGoalDirty(true);}}/></label>
       <label>预计完成<input aria-label="目标预计完成日期" type="date" value={goal.target_date} disabled={busy}
@@ -140,11 +145,11 @@ export function LifePage() {
         {Object.entries(goalStatus).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
       <small>开始于 {goal.start_date}{goal.completed_date && ` · 完成于 ${goal.completed_date}`}</small>
       <button className="life-button life-save" disabled={busy || !goalDirty || !goal.text.trim() || !goal.target_date}
-        onClick={() => void saveGoal()}>保存目标</button>
+        onClick={() => void saveGoal()}><Save size={14}/>保存目标</button>
     </aside>}
     {mode === 'day' && <div className="life-workspace">
       <div className="life-record-header"><span>{data?.record.source === 'generated' ? 'Miko 的生活记录' : data?.record.source === 'manual' ? '你修正的记录' : '尚未记录'}</span>
-        <button className="life-button" disabled={busy || unsaved} onClick={() => void load()}>刷新</button></div>
+        <button className="life-button" disabled={busy} onClick={() => guard.proceed(()=>void load())}><RefreshCw size={14}/>刷新</button></div>
       {!entries.length && <div className="life-empty"><p>这一天还没有生活条目。</p><span>可以生成今天的记录，或直接写下简短的活动。</span></div>}
       <div className="life-entries">{entries.map((entry, index) => <article className="life-entry" key={index}>
         <textarea aria-label="生活条目" placeholder="如：练键盘，左手换和弦还是有点卡；慢速练了一会儿" rows={3} value={entry.text} maxLength={240}
@@ -154,14 +159,14 @@ export function LifePage() {
             {...r, goal_id: e.target.value || undefined} : r)); setDirty(true);}}>
           <option value="">日常片段</option>{data?.goals.map(g => <option value={g.id} key={g.id}>{g.text}</option>)}</select>
         <button className="life-remove" aria-label="移除条目" disabled={busy}
-          onClick={() => { setEntries(entries.filter((_, i) => i !== index)); setDirty(true); }}>×</button>
+          onClick={() => { setEntries(entries.filter((_, i) => i !== index)); setDirty(true); }}><X size={15}/></button>
       </article>)}</div>
       <div className="life-actions"><button className="life-button" disabled={busy || goalDirty || entries.length >= 100}
-        onClick={() => { setEntries([...entries, {text: ''}]); setDirty(true); }}>＋ 添加条目</button>
+        onClick={() => { setEntries([...entries, {text: ''}]); setDirty(true); }}><Plus size={15}/>添加条目</button>
         <button className="life-button life-save" disabled={busy || !dirty || entries.some(e => !e.text.trim())}
-          onClick={() => void save()}>保存修改</button>
+          onClick={() => void save()}><Save size={14}/>{busy?'保存中…':'保存修改'}</button>
         {dirty && <button className="life-button" disabled={busy} onClick={() => void load()}>撤销修改</button>}
         <span role="status">{dirty ? '有未保存的修改' : notice}</span></div>
     </div>}
-  </main></AppShell>;
+    {guard.dialog}</main></AppShell>;
 }

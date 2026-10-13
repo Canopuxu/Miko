@@ -8,7 +8,7 @@ foreach ($path in @($userConfig, $globalConfig)) {
     if (-not (Test-Path -LiteralPath $path)) { [IO.File]::WriteAllText($path, '') }
 }
 $previous = @{}
-foreach ($name in @('npm_config_userconfig','npm_config_globalconfig','npm_config_cache','npm_config_manage_package_manager_versions')) {
+foreach ($name in @('npm_config_userconfig','npm_config_globalconfig','npm_config_cache','npm_config_manage_package_manager_versions','PNPM_CONFIG_STORE_DIR')) {
     $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 try {
@@ -16,6 +16,7 @@ try {
     $env:npm_config_globalconfig = $globalConfig
     $env:npm_config_cache = Join-Path $mikoLocalRoot 'cache\npm'
     $env:npm_config_manage_package_manager_versions = 'false'
+    $env:PNPM_CONFIG_STORE_DIR = Join-Path $mikoLocalRoot 'cache\pnpm'
     Push-Location $mikoRepoRoot
     try {
         & $Pnpm install --frozen-lockfile --store-dir (Join-Path $mikoLocalRoot 'cache\pnpm') --registry https://registry.npmjs.org

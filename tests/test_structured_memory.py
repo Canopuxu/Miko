@@ -97,7 +97,12 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.memory.context('你好'))['owner_feedback'])
         self.memory.structured.annotate(reply['id'],note['note'],'global',note['revision'],False)
         self.assertFalse((await self.memory.context('你好'))['owner_feedback'])
-        self.assertTrue(self.memory.structured.review()['replies'])
+        reviewed=self.memory.structured.review()['replies']
+        self.assertTrue(reviewed)
+        self.assertEqual(reviewed[0]['conversation_id'],'example')
+        self.assertEqual(reviewed[0]['source'],'web')
+        self.assertIn('贝斯',reviewed[0]['context'][-1]['text'])
+        self.assertLessEqual(len(reviewed[0]['context']),2)
 
     async def test_changed_subtopic_updates_named_item_and_category_history(self):
         import ast

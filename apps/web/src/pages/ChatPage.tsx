@@ -1,22 +1,18 @@
-import { AppShell } from '../components/AppShell';
-import { useEffect, useRef, useState } from 'react';
+import { AppShell, NavigationContext } from '../components/AppShell';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { ArrowUp, NotebookPen, Plus, Square, X } from 'lucide-react';
+import { EmptyState, useDiscardGuard } from '../components/ui';
+import { useRuntime } from '../components/RuntimeStatus';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
 
-type Status = { chat: { configured: boolean; model: string | null }; dsh: { ready: boolean } };
 const note = { cancelled: '已停止', error: '生成失败', interrupted: '回复中断' };
 const dateTime = (stamp: number) => new Date(stamp).toLocaleString('zh-CN');
 const shortTime = (stamp: number) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(stamp);
 
-function remember(id: string | null) {
-  const url = new URL(window.location.href);
-  url.searchParams.delete('conversation'); url.searchParams.delete('new');
-  url.searchParams.set(id ? 'conversation' : 'new', id ?? '1');
-  window.history.replaceState(null, '', url);
-}
-
 export function ChatPage() {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [connected, setConnected] = useState(false);
+  const navigation = useContext(NavigationContext)!;
+  const {status, error:runtimeError} = useRuntime();
+  const connected = !!status?.dsh.ready && !runtimeError;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -33,6 +29,8 @@ export function ChatPage() {
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const generating = busy || observedTurn !== null;
+  const guard = useDiscardGuard(!!draft.trim());
+  function remember(id: string | null) {navigation.replace({conversation:id ?? undefined,new:id?undefined:'1'});}
 
   function applyDetail(detail: ConversationDetail) {
     conversation.current = detail.id; setSelected(detail.id); remember(detail.id);
@@ -51,12 +49,6 @@ export function ChatPage() {
 
   useEffect(() => {
     let alive = true;
-    async function refreshStatus() {
-      try {
-        const value = await getJson<Status>('/api/status');
-        if (alive) { setStatus(value); setConnected(value.dsh.ready); }
-      } catch { if (alive) setConnected(false); }
-    }
     async function restore() {
       try {
         const result = await getJson<{ conversations: Conversation[] }>('/api/conversations');
@@ -71,10 +63,15 @@ export function ChatPage() {
       } catch (cause) { if (alive) setError(String(cause)); }
       finally { if (alive) setLoading(false); }
     }
-    void refreshStatus(); void restore();
-    const timer = window.setInterval(refreshStatus, 5000);
-    return () => { alive = false; window.clearInterval(timer); controller.current?.abort(); };
+    void restore();
+    return () => { alive = false; controller.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    const id = navigation.search.get('conversation');
+    if(navigation.active==='chat' && id && id!==conversation.current && !loading && !generating)
+      guard.proceed(()=>void openConversation(id));
+  },[navigation.active,navigation.search,loading]);
 
   // A reload closes the old stream. Poll its saved state until cancellation finishes.
   useEffect(() => {
@@ -89,7 +86,12 @@ export function ChatPage() {
     return () => { alive = false; window.clearInterval(timer); };
   }, [observedTurn, busy]);
 
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
+  useEffect(() => {
+    if(navigation.active!=='chat')return;
+    const focus=navigation.search.get('message');
+    const target=focus?document.getElementById('message-'+focus):null;
+    if(target) target.scrollIntoView({block:'center'});else bottom.current?.scrollIntoView({block:'end'});
+  }, [messages,navigation.active,navigation.search]);
 
   async function openConversation(id: string) {
     if (generating || loading) return;
@@ -167,14 +169,13 @@ export function ChatPage() {
   }
 
   const enabled = connected && status?.chat.configured && !loading;
-  const today = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
   const title = conversations.find(item => item.id === selected)?.title;
 
   return <AppShell view="chat" sidebar={<>
-      <button className="new-chat" onClick={newConversation} disabled={generating || loading} aria-label="开启新对话" title="开启新对话"><span>＋</span><span className="new-chat-label"> 开启新对话</span></button>
+      <button className="new-chat" onClick={()=>guard.proceed(newConversation)} disabled={generating || loading} aria-label="开启新对话" title="开启新对话"><Plus size={17}/><span className="new-chat-label"> 开启新对话</span></button>
       <nav className="conversation-list" aria-label="历史对话">
         {conversations.map(item => <button key={item.id} className={`conversation-item ${selected === item.id ? 'active' : ''}`}
-          aria-current={selected === item.id ? 'page' : undefined} onClick={() => void openConversation(item.id)}
+          aria-current={selected === item.id ? 'page' : undefined} onClick={() => {if(item.id!==selected)guard.proceed(()=>void openConversation(item.id));}}
           disabled={generating || loading} title={item.title}>
           <span className="conversation-title">{item.title}</span>
           <span className="conversation-preview">{item.preview || '已保存的对话'}</span>
@@ -182,27 +183,31 @@ export function ChatPage() {
         {!conversations.length && <p className="no-history">还没有历史对话</p>}
       </nav>
       <div className="sidebar-footer"><span className={`status-dot ${connected ? 'online' : ''}`} />
-        {connected ? '已连接' : '连接中'}<small>私人的一隅</small></div>
+        {connected ? '已连接' : '连接中'}</div>
     </>}>
     <main className="main-panel">
-      <header className="page-header"><div><h1>{title ?? '和 Miko 聊聊'}</h1><p>{today}</p></div>
-        <span className="model-label">{status?.chat.model ?? '等待模型配置'}</span></header>
+      <header className="page-header"><h1>{title ?? '和 Miko 聊聊'}</h1>
+        <div className="header-actions"><button className="ui-button" onClick={()=>navigation.navigate('review',
+          {day:new Date().toLocaleDateString('sv-SE'),peer:selected ?? '',reply:undefined})}><NotebookPen size={16}/>回顾与批注</button>
+          <span className="model-label">{status?.chat.model ?? '等待模型配置'}</span></div></header>
       <section className="conversation" aria-label="聊天记录" aria-live="polite" aria-busy={loading}>
-        {loading ? <div className="welcome"><p>正在读取对话…</p></div>
-          : messages.length === 0 && <div className="welcome"><div className="welcome-orbit"><span>m</span></div>
-            <p className="eyebrow">HELLO, YOU</p><h2>从一句话开始。</h2><p>想说什么，就在这里告诉我。</p></div>}
+        {loading ? <EmptyState loading title="正在读取对话…"/>
+          : messages.length === 0 && <EmptyState title="新对话"/>}
         {!loading && <div className="message-list">{messages.map(message => <article key={message.id}
-          className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'}`}>
+          id={'message-'+message.id} className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'} ${navigation.search.get('message')===message.id?'message-highlight':''}`}>
           <div className="message-avatar">{message.author.kind === 'miko' ? 'm' : message.author.name.slice(0, 1)}</div>
           <div className="message-content"><div className="message-name">{message.author.name}
             <time dateTime={new Date(message.created_at).toISOString()} title={dateTime(message.created_at)}>{shortTime(message.created_at)}</time></div>
             <div className="message-text">{message.text || (message.status === 'running' ? <span className="thinking">正在想…</span> : '')}</div>
             {(message.status === 'cancelled' || message.status === 'error' || message.status === 'interrupted') &&
               <span className="message-note">{note[message.status]}{message.error && ` · ${message.error}`}</span>}
+            {message.author.kind==='miko' && message.status==='completed' && <button className="message-review-link text-button"
+              onClick={()=>navigation.navigate('review',{day:new Date(message.created_at).toLocaleDateString('sv-SE'),peer:selected ?? '',reply:message.id})}>
+              <NotebookPen size={13}/>批注</button>}
           </div></article>)}<div ref={bottom} /></div>}
       </section>
       <footer className="composer-area">
-        {error && <div role="alert" className="error-notice">{error}<button onClick={() => setError('')} aria-label="关闭提示">×</button></div>}
+        {error && <div role="alert" className="error-notice">{error}<button onClick={() => setError('')} aria-label="关闭提示"><X size={15}/></button></div>}
         {status && !status.chat.configured && <div className="error-notice">模型尚未配置，配置完成后就可以聊天。</div>}
         <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
           <textarea ref={input} value={draft} onChange={event => setDraft(event.target.value)}
@@ -212,12 +217,12 @@ export function ChatPage() {
             } }} />
           <div className="composer-bottom"><span>Enter 发送 <i>·</i> Shift + Enter 换行</span>
             {generating ? <button type="button" className="send-button stop-button" disabled={stopping} onClick={() => void cancelTurn()}>
-              <span>■</span> {stopping ? '正在停止' : '停止生成'}</button>
-              : <button type="submit" className="send-button" disabled={!enabled || !draft.trim()}>发送 <span>↑</span></button>}
+              <Square size={13}/> {stopping ? '正在停止' : '停止生成'}</button>
+              : <button type="submit" className="send-button" disabled={!enabled || !draft.trim()}>发送 <ArrowUp size={16}/></button>}
           </div>
         </form>
-        <p className="composer-caption">{generating ? 'Miko 正在回复你' : selected ? '这段对话已保存在这里。' : '一段对话，一点新的日常。'}</p>
+        {generating && <p className="composer-caption" role="status">Miko 正在回复你</p>}
       </footer>
-    </main>
+    {guard.dialog}</main>
   </AppShell>;
 }

@@ -33,30 +33,23 @@
 .life-goal-link.completed { border-color: #d8a784; }.life-goal-link.paused { border-color: #c5bfb6; }
 .life-goal-link small { color: #a89886; font-size: 10px; }
 .life-entry select { max-width: 100%; font: inherit; font-size: 12px; color: #92806a; border: 0; border-top: 1px solid #e5ded3; padding: 8px 0 0; background: transparent; }
-.life-tree { position: relative; flex: 1; min-height: 430px; height: calc(100vh - 180px); background: radial-gradient(ellipse at center, #f4efe7 0%, #fcfaf7 76%); }
-.life-tree .react-flow { height: 100%; }
-.life-tree-node { box-sizing: border-box; text-align: center; line-height: 1.5; color: #655748; box-shadow: 0 6px 24px #6655420d; }
-.life-tree-node .react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 1px; min-height: 1px; pointer-events: none; }
-.life-tree-node.root { display: grid; place-content: center; width: 106px; height: 106px; border-radius: 50%; background: #8b7c68; color: #fffaf2; box-shadow: 0 0 0 12px #e9dfd280; }
-.life-tree-monogram { font-family: Georgia, serif; font-style: italic; font-size: 42px; line-height: 1; }
-.life-tree-node.root strong { font-weight: 500; font-size: 14px; }
-.life-tree-node.goal, .life-tree-node.ordinary { width: 204px; min-height: 104px; padding: 14px 18px; border-radius: 24px; border: 1px solid #b2bfa7; background: #eff2e9; }
-.life-tree-node.goal.completed { border-color: #d5b29a; background: #f5eade; }.life-tree-node.goal.paused { background: #eeeae4; border-color: #ccc3b8; }
-.life-tree-node.ordinary { background: #f2ece2; border-color: #dbccba; }
-.life-tree-node small { display: block; font-size: 10px; color: #968776; }
-.life-tree-label { font-size: 15px; margin: 5px 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.life-tree-node button { border: 0; background: transparent; color: #8b7c67; font: inherit; font-size: 10px; cursor: pointer; padding: 3px 6px; }
-.life-tree-node.event { width: 154px; min-height: 70px; padding: 10px 14px; border-radius: 15px; border: 1px solid #e0d4c5; background: #fffdf9; cursor: pointer; }
-.life-tree-node.event .life-tree-label { font-size: 13px; }
-.life-tree-toolbar { position: absolute; z-index: 5; left: 22px; right: 22px; top: 18px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
-.life-tree-toolbar button { background: #faf8f1dd; pointer-events: auto; font-size: 11px; }
-.life-tree-toolbar span { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #a09281; }
-.life-tree-toolbar i { width: 7px; height: 7px; border-radius: 50%; background: #98aa8e; margin-left: 8px; }
-.life-tree-toolbar i.done { background: #d8a784; }.life-tree-toolbar i.paused { background: #c5bfb6; }
-.life-tree-caption { position: absolute; bottom: 16px; left: 62px; right: 16px; text-align: center; font-size: 11px; color: #a59684; pointer-events: none; }
-.life-tree-notice { display: block; padding: 10px 28px; min-height: 15px; color: #9a8874; font-size: 12px; }
-.life-goal-editor { position: absolute; z-index: 7; right: 20px; top: 110px; width: min(280px, calc(100% - 70px)); padding: 22px; border-radius: 16px; background: #fffdfaef; border: 1px solid #ded3c3; box-shadow: 0 12px 50px #75614b1c; display: grid; gap: 16px; backdrop-filter: blur(12px); }
+.life-timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 32px 40px; }
+.life-timeline-filter { margin-bottom: 20px; }
+.life-timeline-filter label { display: inline-flex; align-items: center; gap: 12px; color: #756f60; font-size: 13px; }
+.life-timeline-filter select { max-width: min(450px,60vw); border: 1px solid #e0ded2; border-radius: 6px; background: #fffdf9; padding: 8px 12px; color: #403b35; font-size: 13px; }
+.life-masonry { display: flex; width: auto; margin-left: -20px; }
+.life-masonry-column { padding-left: 20px; background-clip: padding-box; }
+.life-day-card { padding: 22px 24px; margin-bottom: 20px; border: 1px solid #e6e3d9; border-radius: 8px; background: #fffdf9; }
+.life-day-card > header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.life-day-card h2 { margin: 0; font-size: 17px; font-weight: 500; color: #403b35; }
+.life-activity-group + .life-activity-group { border-top: 1px solid #eeece4; margin-top: 18px; padding-top: 16px; }
+.life-goal-reference { display: block; padding: 0; border: 0; background: transparent; text-align: left; color: #5f735a; font-size: 14px; line-height: 1.7; }
+.life-goal-reference:hover { text-decoration: underline; }
+.life-activity-group ul { margin: 8px 0 0; padding-left: 18px; }
+.life-activity-group li { color: #403b35; font-size: 14px; line-height: 1.8; padding: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.life-timeline-notice { margin: 0; padding: 8px 32px; font-size: 12px; color: #667c5d; }
+.life-goal-editor { position: absolute; z-index: 7; right: 20px; top: 90px; width: min(280px, calc(100% - 70px)); padding: 22px; border-radius: 10px; background: #fffdf9; border: 1px solid #ded3c3; box-shadow: 0 6px 22px #75614b18; display: grid; gap: 16px; }
 .life-goal-editor label { display: grid; gap: 7px; font-size: 12px; color: #968570; }
 .life-goal-editor textarea, .life-goal-editor input, .life-goal-editor select { width: 100%; box-sizing: border-box; border: 1px solid #e2d8cb; border-radius: 8px; padding: 10px; background: #faf8f3; color: #6f604d; font: inherit; }
 .life-goal-editor small { color: #ab9d8b; font-size: 11px; }
-@media (max-width: 760px) { .life-tree { min-height: 500px; }.life-tree-toolbar span { display: none; }.life-tree-toolbar { justify-content: flex-end; } }
+@media (max-width: 760px) { .life-timeline { padding: 20px 18px; }.life-day-card { padding: 18px; } }

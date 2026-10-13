@@ -4,12 +4,15 @@ import { responseError } from '../api/chat';
 type Relationship = { account: string; friend: string; owner_relationship: string; miko_relationship: string;
   miko_introduced: number; intro_receipt_id: number | null };
 
-export function FriendRelationships({ friend }: { friend: Relationship }) {
+export function FriendRelationships({ friend,onDirty }: { friend: Relationship;onDirty?:(dirty:boolean)=>void }) {
   const [owner, setOwner] = useState('');
   const [miko, setMiko] = useState('');
   const [introduced, setIntroduced] = useState<boolean | undefined>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [baseline,setBaseline]=useState({owner:friend.owner_relationship,miko:friend.miko_relationship});
+  useEffect(()=>{onDirty?.(owner!==baseline.owner || miko!==baseline.miko ||
+    (introduced!==undefined && introduced!==!!friend.miko_introduced));},[owner,miko,introduced,baseline,friend.miko_introduced]);
   useEffect(() => {
     setOwner(friend.owner_relationship); setMiko(friend.miko_relationship);
     setIntroduced(undefined); setNotice('');
@@ -24,10 +27,11 @@ export function FriendRelationships({ friend }: { friend: Relationship }) {
       });
       if (!response.ok) throw new Error(await responseError(response));
       setNotice('已保存，将用于后续聊天');
+      setBaseline({owner,miko});setIntroduced(undefined);
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   return <details className="relationship-panel"><summary>关系与介绍状态</summary>
-    <p>分别整理你们各自与这位好友的交往。聊天记录已保存，自动整理关系记忆后续接入。</p>
+    <p>你与这位好友、Miko 与这位好友的关系分别保存；自动整理出的记忆可从页面上方进入查看。</p>
     <fieldset disabled={busy} className="profile-fields">
       <label>你与好友的关系<textarea value={owner} maxLength={3000} rows={3}
         onChange={event => setOwner(event.target.value)} /></label>

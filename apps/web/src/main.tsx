@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis';
 import * as UiRenderer from '@deepseek-ai/dsh-client-ui-renderer/client';
 import { App } from './App';
 import './styles/app.css';
+import './styles/system.css';
 
 async function start() {
   const context = new Context();

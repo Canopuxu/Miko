@@ -1,5 +1,7 @@
-import { AppShell } from '../components/AppShell';
-import { useEffect, useRef, useState } from 'react';
+import { AppShell, NavigationContext } from '../components/AppShell';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { BookOpen, NotebookPen, X } from 'lucide-react';
+import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerLibrary } from './StickerLibrary';
 import { FriendRelationships } from './FriendRelationships';
@@ -21,6 +23,7 @@ const states: Record<string, string> = { disabled: '已关闭', blocked: '等待
 const timeLabel = (stamp: number) => new Date(stamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function QqPage() {
+  const navigation = useContext(NavigationContext)!;
   const [status, setStatus] = useState<QqStatus | null>(null);
   const [selected, setSelected] = useState(new URLSearchParams(location.search).get('friend'));
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -28,6 +31,12 @@ export function QqPage() {
   const [changing, setChanging] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const friend = status?.friends.find(item => item.friend === selected);
+  const [relationshipDirty,setRelationshipDirty]=useState(false);
+  const guard = useDiscardGuard(relationshipDirty);
+  useEffect(()=>{
+    const id=navigation.search.get('friend');
+    if(navigation.active==='qq' && id && id!==selected) guard.proceed(()=>select(id,true));
+  },[navigation.active,navigation.search]);
 
   useEffect(() => {
     let alive = true;
@@ -48,12 +57,16 @@ export function QqPage() {
     return () => { alive = false; clearInterval(timer); };
   }, [selected]);
 
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [selected, detail?.messages.length]);
+  useEffect(() => {
+    if(navigation.active!=='qq')return;
+    const focus=navigation.search.get('message');
+    const target=focus?document.getElementById('message-'+focus):null;
+    if(target)target.scrollIntoView({block:'center'});else bottom.current?.scrollIntoView({block:'end'});
+  }, [selected, detail?.messages.length,navigation.active,navigation.search]);
 
-  function select(id: string) {
+  function select(id: string,preserveFocus=false) {
     setSelected(id); setDetail(null); setError('');
-    const url = new URL(location.href); url.searchParams.set('friend', id);
-    history.replaceState(null, '', url);
+    navigation.replace({friend:id,...(preserveFocus?{}:{message:undefined})});
   }
 
   async function toggle(enabled: boolean) {
@@ -72,7 +85,7 @@ export function QqPage() {
   return <AppShell view="qq" sidebar={<>
       <nav className="conversation-list" aria-label="QQ 好友">
         {status?.friends.map(item => <button key={`${item.account}:${item.friend}`}
-          className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => select(item.friend)}>
+          className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => {if(item.friend!==selected)guard.proceed(()=>select(item.friend));}}>
           <span className="conversation-title">{item.name}</span>
           <span className="conversation-preview">{states[item.state] ?? item.state}</span>
         </button>)}
@@ -81,8 +94,12 @@ export function QqPage() {
     <main className="main-panel">
       <header className="page-header"><div><h1>{friend?.name ?? 'QQ 好友'}</h1>
         <p>{friend?.friend ?? '选择一位好友查看接话状态'}</p></div>
-        <span className="model-label">{status?.receiver.note ?? '正在读取连接状态…'}</span></header>
-      {error && <div role="alert" className="qq-error error-notice">{error}</div>}
+        <div className="header-actions">{friend && <><button className="ui-button" onClick={()=>navigation.navigate('review',
+          {day:new Date().toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:undefined})}><NotebookPen size={15}/>回顾</button>
+          <button className="ui-button" onClick={()=>navigation.navigate('memory',
+            {person:'miko',relation:`qq:${friend.account}:${friend.friend}`})}><BookOpen size={15}/>关系记忆</button></>}
+          <span className="model-label">{status?.receiver.state==='connected'?'QQ 已连接':'QQ 未连接'}</span></div></header>
+      {error && <div role="alert" className="qq-error error-notice">{error}<button className="text-button" aria-label="关闭提示" onClick={()=>setError('')}><X size={15}/></button></div>}
       {friend ? <>
         <div className="friend-controls">
           <div><strong>{states[friend.state] ?? friend.state}</strong>
@@ -98,10 +115,11 @@ export function QqPage() {
           </div>
         </div>
         <section className="conversation" aria-label="QQ 聊天记录">
-          {!detail ? <div className="welcome"><p>正在读取聊天记录…</p></div>
+          {!detail ? <EmptyState loading title="正在读取聊天记录…"/>
             : <div className="message-list">
               {!detail.messages.length && <p className="no-history">这里会保存连接后的新消息。</p>}
-              {detail.messages.map(message => <article key={message.id} className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'}`}>
+              {detail.messages.map(message => <article key={message.id} id={'message-'+message.id}
+                className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'} ${navigation.search.get('message')===message.id?'message-highlight':''}`}>
                 <div className="message-avatar">{message.author.kind === 'miko' ? 'm' : message.author.name.slice(0, 1)}</div>
                 <div className="message-content"><div className="message-name">{message.author.name}
                   <time>{timeLabel(message.created_at)}</time></div>
@@ -111,6 +129,9 @@ export function QqPage() {
                   <div className="message-text">{message.recalled ? '这条消息已撤回' : message.text}</div>
                   {!message.recalled && message.segments.filter(s => s.sticker_id).map((s, i) => <img key={i} className="chat-sticker"
                     src={`/api/qq/stickers/${friend.account}/${s.sticker_id}/image`} alt={message.text} />)}
+                  {message.author.kind==='miko' && message.status==='completed' && <button className="text-button message-review-link"
+                    onClick={()=>navigation.navigate('review',{day:new Date(message.created_at).toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:message.id})}>
+                    <NotebookPen size={13}/>批注</button>}
                 </div>
               </article>)}
               {!!detail.runs.length && <details className="reply-runs"><summary>接话记录 · {detail.runs.length}</summary>
@@ -121,12 +142,13 @@ export function QqPage() {
                   {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
               <StickerLibrary key={friend.account} account={friend.account} />
-              <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} />
+              <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} onDirty={setRelationshipDirty}/>
               <div ref={bottom} />
             </div>}
         </section>
         <p className="qq-caption">你两分钟没有回复时，Miko 接话；你发言后重新由你主导。</p>
-      </> : <section className="conversation"><div className="welcome"><h2>让 Miko 帮你接话。</h2><p>为指定好友开启接话后，等待新的私聊消息。</p></div></section>}
+      </> : <section className="conversation"><EmptyState title="选择一位好友"/></section>}
+      {guard.dialog}
     </main>
   </AppShell>;
 }

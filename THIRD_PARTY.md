@@ -149,3 +149,40 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
   - [d3-transition 3.0.1](https://www.npmjs.com/package/d3-transition/v/3.0.1)：ISC。
   - [d3-zoom 3.0.0](https://www.npmjs.com/package/d3-zoom/v/3.0.0)：ISC。
   - [zustand 4.5.7](https://www.npmjs.com/package/zustand/v/4.5.7)：MIT。
+
+## 统一界面与交互
+
+- [Caveat](https://github.com/googlefonts/caveat)：SIL Open Font License 1.1；用于 Miko 手写字标。字体取自固定提交 `59745e818ef7973e11e70cb1358d0e902b56c5fc` 的 `fonts/variable/Caveat[wght].ttf`，原文件保存在 `apps/web/src/assets/fonts/Caveat.ttf`，许可副本见 `licenses/fonts/Caveat/OFL.txt`。
+
+- [Lucide](https://github.com/lucide-icons/lucide)：lucide-react 1.56.0，ISC；复用现成 SVG 图标。
+- [Radix Primitives](https://github.com/radix-ui/primitives)：Dialog 1.3.1、Alert Dialog 1.2.1，MIT；复用弹窗、键盘交互与焦点管理。
+- 固定版本与许可副本见 `config/web-dependencies.lock.json` 与 `licenses/npm/`。
+  - [@radix-ui/primitive 1.2.0](https://www.npmjs.com/package/@radix-ui/primitive/v/1.2.0)：MIT。
+  - [@radix-ui/react-alert-dialog 1.2.1](https://www.npmjs.com/package/@radix-ui/react-alert-dialog/v/1.2.1)：MIT。
+  - [@radix-ui/react-compose-refs 1.1.5](https://www.npmjs.com/package/@radix-ui/react-compose-refs/v/1.1.5)：MIT。
+  - [@radix-ui/react-context 1.3.0](https://www.npmjs.com/package/@radix-ui/react-context/v/1.3.0)：MIT。
+  - [@radix-ui/react-dialog 1.3.1](https://www.npmjs.com/package/@radix-ui/react-dialog/v/1.3.1)：MIT。
+  - [@radix-ui/react-dismissable-layer 1.2.1](https://www.npmjs.com/package/@radix-ui/react-dismissable-layer/v/1.2.1)：MIT。
+  - [@radix-ui/react-focus-guards 1.2.0](https://www.npmjs.com/package/@radix-ui/react-focus-guards/v/1.2.0)：MIT。
+  - [@radix-ui/react-focus-scope 1.3.1](https://www.npmjs.com/package/@radix-ui/react-focus-scope/v/1.3.1)：MIT。
+  - [@radix-ui/react-id 1.1.4](https://www.npmjs.com/package/@radix-ui/react-id/v/1.1.4)：MIT。
+  - [@radix-ui/react-portal 1.2.0](https://www.npmjs.com/package/@radix-ui/react-portal/v/1.2.0)：MIT。
+  - [@radix-ui/react-presence 1.1.11](https://www.npmjs.com/package/@radix-ui/react-presence/v/1.1.11)：MIT。
+  - [@radix-ui/react-primitive 2.2.0](https://www.npmjs.com/package/@radix-ui/react-primitive/v/2.2.0)：MIT。
+  - [@radix-ui/react-slot 1.5.0](https://www.npmjs.com/package/@radix-ui/react-slot/v/1.5.0)：MIT。
+  - [@radix-ui/react-use-callback-ref 1.1.5](https://www.npmjs.com/package/@radix-ui/react-use-callback-ref/v/1.1.5)：MIT。
+  - [@radix-ui/react-use-controllable-state 1.3.0](https://www.npmjs.com/package/@radix-ui/react-use-controllable-state/v/1.3.0)：MIT。
+  - [@radix-ui/react-use-effect-event 0.0.5](https://www.npmjs.com/package/@radix-ui/react-use-effect-event/v/0.0.5)：MIT。
+  - [@radix-ui/react-use-layout-effect 1.1.4](https://www.npmjs.com/package/@radix-ui/react-use-layout-effect/v/1.1.4)：MIT。
+  - [aria-hidden 1.2.6](https://www.npmjs.com/package/aria-hidden/v/1.2.6)：MIT。
+  - [detect-node-es 1.1.0](https://www.npmjs.com/package/detect-node-es/v/1.1.0)：MIT。
+  - [get-nonce 1.0.1](https://www.npmjs.com/package/get-nonce/v/1.0.1)：MIT。
+  - [lucide-react 1.56.0](https://www.npmjs.com/package/lucide-react/v/1.56.0)：ISC。
+  - [react-remove-scroll 2.7.2](https://www.npmjs.com/package/react-remove-scroll/v/2.7.2)：MIT。
+  - [react-remove-scroll-bar 2.3.8](https://www.npmjs.com/package/react-remove-scroll-bar/v/2.3.8)：MIT。
+  - [react-style-singleton 2.2.3](https://www.npmjs.com/package/react-style-singleton/v/2.2.3)：MIT。
+  - [tslib 2.8.1](https://www.npmjs.com/package/tslib/v/2.8.1)：0BSD。
+  - [use-callback-ref 1.3.3](https://www.npmjs.com/package/use-callback-ref/v/1.3.3)：MIT。
+  - [use-sidecar 1.1.3](https://www.npmjs.com/package/use-sidecar/v/1.1.3)：MIT。
+
+- [react-masonry-css](https://github.com/paulcollett/react-masonry-css)：1.0.16，MIT；复用按列排列的响应式卡片流。生活页已替换径向树图，React Flow、D3 Hierarchy 及其专用依赖已从当前前端移除，保留历史致谢与许可副本。

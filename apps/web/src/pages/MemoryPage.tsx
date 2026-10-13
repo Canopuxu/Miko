@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { AppShell } from '../components/AppShell';
+import { useContext, useEffect, useState } from 'react';
+import { AppShell, NavigationContext } from '../components/AppShell';
+import { ArrowUpRight, NotebookPen, Pause, Play, RefreshCw, Save } from 'lucide-react';
+import { EmptyState, useDiscardGuard, useNotice } from '../components/ui';
 import { getJson, responseError } from '../api/chat';
 
 type Person = {id:string;display_name:string};
@@ -8,7 +10,8 @@ type Source = {id:number;author:string;content:string;timestamp:number};
 type Detail = Item & {sources:Source[];history:{id:number;kind:string;snapshot:string;created_at:number}[]};
 type Day = {id:string;subject:string;day:string;text:string;sources:Source[]};
 type Note = {note:string;scope:string;enabled:number;revision:number;history?:{snapshot:string;created_at:number}[]};
-type Reply = {id:string;text:string;title:string;created_at:number;annotation:Note|null};
+type Reply = {id:string;text:string;title:string;created_at:number;annotation:Note|null;
+  conversation_id:string;source:string;context:{author:string;text:string}[]};
 type Scope = {id:number;name:string;conversation_id:string;total:number;processed:number;status:string};
 type Listing = {control:{enabled:number};scopes:Scope[];index:{memory_engine:string;error:string|null}};
 type Legacy = {id:number;automatic:string;manual:string;revision:number;valid:number;source_messages:Source[];history:{id:number;kind:string;body:string;created_at:number}[]};
@@ -27,34 +30,45 @@ function Sources({rows}:{rows:Source[]}) {
     <small>{r.author==='owner'?'你':r.author==='miko'?'Miko':'好友'} · {new Date(r.timestamp).toLocaleString()}</small><p>{r.content}</p>
   </article>)}</div></details>;
 }
-function ReplyCard({reply,save}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>}) {
+function ReplyCard({reply,save,open,onDirty}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>;
+  open:()=>void;onDirty:(id:string,dirty:boolean)=>void}) {
   const [note,setNote]=useState(reply.annotation?.note ?? '');
   const [scope,setScope]=useState(reply.annotation?.scope ?? 'example');
   const [busy,setBusy]=useState(false);
+  const dirty = note !== (reply.annotation?.note ?? '') || scope !== (reply.annotation?.scope ?? 'example');
+  useEffect(()=>{onDirty(reply.id,dirty);return()=>onDirty(reply.id,false);},[reply.id,dirty]);
   async function submit(enabled:boolean) {
     setBusy(true);
     try{await save('/api/memory/review/'+encodeURIComponent(reply.id),'PUT',{text:note,scope,revision:reply.annotation?.revision ?? 0,enabled});}
     finally{setBusy(false);}
   }
-  return <article className="review-card"><small>{reply.title} · {new Date(reply.created_at).toLocaleTimeString()}</small><p className="memory-body">{reply.text}</p>
+  return <article className="review-card" id={'review-'+reply.id}>
+    <header className="review-card-heading"><span className="review-avatar"><NotebookPen size={18}/></span><div>
+      <strong>{reply.source==='qq' ? reply.title : '你与 Miko'}</strong><small>{new Date(reply.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}
+      {reply.annotation?.enabled ? ' · 已批注' : reply.annotation ? ' · 批注已撤销' : ''}</small></div>
+      <button className="text-button" onClick={open}>原对话<ArrowUpRight size={14}/></button></header>
+    {!!reply.context?.length && <div className="review-context">{reply.context.map((r,i)=><p key={i}><small>{r.author}</small>{r.text}</p>)}</div>}
+    <p className="memory-body review-response">{reply.text}</p>
     <textarea aria-label="回复批注" rows={3} placeholder="写下你对这条回复的反馈" value={note} onChange={e=>setNote(e.target.value)}/>
     <div className="profile-actions"><select aria-label="批注适用范围" value={scope} onChange={e=>setScope(e.target.value)}>
       <option value="example">相关表达示例</option><option value="friend">当前聊天</option><option value="global">通用表达</option></select>
-      <button disabled={busy || !note.trim()} className="send-button" onClick={()=>void submit(true)}>保存批注</button>
+      <button disabled={busy || !note.trim() || (!dirty && !!reply.annotation?.enabled)} className="send-button" onClick={()=>void submit(true)}>
+        <Save size={14}/>{busy?'保存中…':'保存批注'}</button>
       {reply.annotation && <button disabled={busy} onClick={()=>void submit(!reply.annotation!.enabled)}>{reply.annotation.enabled?'撤销批注':'恢复批注'}</button>}
     </div>{reply.annotation && <small>{reply.annotation.enabled?'正在参考这条反馈':'已撤销，记录保留'}</small>}
     {reply.annotation?.history && <details><summary>批注历史</summary>{reply.annotation.history.map((h,i)=>{const previous=JSON.parse(h.snapshot) as Note;return <article key={i}><small>{new Date(h.created_at).toLocaleString()}</small><p>{previous.note}</p><button disabled={busy} onClick={()=>void save('/api/memory/review/'+encodeURIComponent(reply.id),'PUT',{text:previous.note,scope:previous.scope,revision:reply.annotation!.revision,enabled:true})}>恢复这份批注</button></article>;})}</details>}
   </article>;
 }
 
-export function MemoryPage() {
-  const [mode,setMode]=useState<Mode>('people');
+export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
+  const navigation = useContext(NavigationContext)!;
+  const [mode,setMode]=useState<Mode>(view==='review'?'review':'people');
   const [listing,setListing]=useState<Listing|null>(null);
   const [people,setPeople]=useState<Person[]>([]);
   const [subject,setSubject]=useState('');
   const [q,setQ]=useState('');
   const [category,setCategory]=useState('');
-  const [day,setDay]=useState(today);
+  const [day,setDay]=useState(()=>view==='review'?navigation.search.get('day') ?? today():today());
   const [items,setItems]=useState<Item[]>([]);
   const [days,setDays]=useState<Day[]>([]);
   const [replies,setReplies]=useState<Reply[]>([]);
@@ -64,59 +78,101 @@ export function MemoryPage() {
   const [legacy,setLegacy]=useState<Legacy|null>(null);
   const [brief,setBrief]=useState('');
   const [proposal,setProposal]=useState<Proposal|null>(null);
-  const [notice,setNotice]=useState('');
+  const {notice,setNotice,setFailure,failed}=useNotice();
+  const [recordsLoading,setRecordsLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [refresh,setRefresh]=useState(0);
+  const [peer,setPeer]=useState(view==='review' ? navigation.search.get('peer') ?? '' : '');
+  const [relation,setRelation]=useState(view==='memory'?navigation.search.get('relation') ?? '':'');
+  const [drafts,setDrafts]=useState<Record<string,boolean>>({});
+  const [discardVersion,setDiscardVersion]=useState(0);
+  const baseline = mode==='legacy' ? legacy?.manual ?? '' : detail?.manual || detail?.automatic || '';
+  const manualDirty = (mode==='people' || mode==='legacy') && manual!==baseline;
+  const guard = useDiscardGuard(manualDirty || Object.values(drafts).some(Boolean),()=>{
+    setManual(baseline);setDrafts({});setDiscardVersion(v=>v+1);
+  });
+  const onReplyDirty = (id:string,dirty:boolean)=>setDrafts(previous=>previous[id]===dirty?previous:{...previous,[id]:dirty});
+  function openReply(reply:Reply) {
+    const params = reply.source==='qq' ? {friend:reply.conversation_id.split(':')[2],message:reply.id}
+      : {conversation:reply.conversation_id,message:reply.id};
+    navigation.navigate(reply.source==='qq'?'qq':'chat',params);
+  }
+  useEffect(()=>{
+    if(navigation.active!==view)return;
+    const routeDay=navigation.search.get('day');const routePeer=navigation.search.get('peer');
+    if(view==='review' && ((routeDay && routeDay!==day) || (routePeer!==null && routePeer!==peer))) {
+      guard.proceed(()=>{if(routeDay)setDay(routeDay);if(routePeer!==null)setPeer(routePeer);});
+    }
+    const routePerson=navigation.search.get('person');const routeRelation=navigation.search.get('relation') ?? '';
+    if(view==='memory' && ((routePerson && routePerson!==subject) || routeRelation!==relation)) {
+      guard.proceed(()=>{if(routePerson)setSubject(routePerson);setRelation(routeRelation);setSelected('');setDetail(null);setManual('');});
+    }
+  },[navigation.active,navigation.search]);
+  useEffect(()=>{
+    const focus=navigation.search.get('reply');
+    if(navigation.active===view && view==='review' && focus && replies.length) document.getElementById('review-'+focus)?.scrollIntoView({block:'center'});
+  },[replies,navigation.active,navigation.search]);
   const name=(id:string)=>people.find(p=>p.id===id)?.display_name ?? id;
   useEffect(()=>{
     let alive=true;
     void Promise.all([getJson<Listing>('/api/memory'),getJson<{people:Person[]}>('/api/memory/objects'),
-      getJson<{items:Item[]}>('/api/memory/items?q='+encodeURIComponent(q)+'&subject='+encodeURIComponent(subject))])
-      .then(([a,b,c])=>{if(alive){setListing(a);setPeople(b.people);setItems(c.items);}}).catch(e=>setNotice(String(e)));
+      getJson<{items:Item[]}>('/api/memory/items?q='+encodeURIComponent(q)+'&subject='+encodeURIComponent(subject)+(relation?'&peer='+encodeURIComponent(relation):''))])
+      .then(([a,b,c])=>{if(alive){setListing(a);setPeople(b.people);setItems(c.items);}}).catch(e=>{if(alive)setFailure(e);});
     return ()=>{alive=false;};
-  },[q,subject,refresh]);
+  },[q,subject,refresh,relation]);
   useEffect(()=>{
     let alive=true;
-    if(mode==='days')void getJson<{days:Day[]}>('/api/memory/days?day='+day+'&subject='+encodeURIComponent(subject)).then(r=>{if(alive)setDays(r.days);}).catch(e=>setNotice(String(e)));
-    if(mode==='review')void getJson<{replies:Reply[]}>('/api/memory/review?day='+day).then(r=>{if(alive)setReplies(r.replies);}).catch(e=>setNotice(String(e)));
+    setRecordsLoading(true);
+    if(mode==='days')void getJson<{days:Day[]}>('/api/memory/days?day='+day+'&subject='+encodeURIComponent(subject)).then(r=>{if(alive)setDays(r.days);}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setRecordsLoading(false);});
+    if(mode==='review')void getJson<{replies:Reply[]}>('/api/memory/review?day='+day).then(r=>{if(alive)setReplies(r.replies);}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setRecordsLoading(false);});
     return ()=>{alive=false;};
   },[mode,day,subject,refresh]);
   useEffect(()=>{
     let alive=true;setDetail(null);setBrief('');
-    if(selected && mode==='people')void getJson<Detail>('/api/memory/items/'+selected).then(r=>{if(alive){setDetail(r);setManual(r.manual || r.automatic);}}).catch(e=>setNotice(String(e)));
+    if(selected && mode==='people')void getJson<Detail>('/api/memory/items/'+selected).then(r=>{if(alive){setDetail(r);setManual(r.manual || r.automatic);}}).catch(e=>{if(alive)setFailure(e);});
     return ()=>{alive=false;};
   },[selected,mode,refresh]);
   async function mutate(path:string,method:string,body?:object) {
     setBusy(true);setNotice('');
     try{await request(path,method,body);setRefresh(v=>v+1);setNotice('已保存');
       if(mode==='legacy' && legacy)setLegacy(await getJson<Legacy>('/api/memory/scopes/'+legacy.id));}
-    catch(e){setNotice(String(e));}finally{setBusy(false);}
+    catch(e){setFailure(e);}finally{setBusy(false);}
   }
   async function special(path:string,body?:object) {
     setBusy(true);setNotice('');
     try{const r=await request(path,'POST',body);if(path==='/api/memory/organize')setProposal(r as Proposal);else setBrief((r as {summary:string}).summary);}
-    catch(e){setNotice(String(e));}finally{setBusy(false);}
+    catch(e){setFailure(e);}finally{setBusy(false);}
   }
   async function openScope(id:number) {
     try{const r=await getJson<Legacy>('/api/memory/scopes/'+id);setLegacy(r);setManual(r.manual);}
-    catch(e){setNotice(String(e));}
+    catch(e){setFailure(e);}
   }
-  return <AppShell view="memory" sidebar={<section className="profile-browser" aria-label="记忆导航">
-    <div className="memory-modes">{Object.entries(modes).map(([id,label])=><button key={id} className={mode===id?'active':''} onClick={()=>{setMode(id as Mode);setProposal(null);}}>{label}</button>)}</div>
+  return <AppShell view={view} sidebar={<section className="profile-browser" aria-label={view==='review'?'回顾筛选':'记忆导航'}>
+    {view==='memory' && <div className="memory-modes">{Object.entries(modes).filter(([id])=>id!=='review').map(([id,label])=><button key={id} className={mode===id?'active':''}
+      onClick={()=>guard.proceed(()=>{setMode(id as Mode);setManual('');setDetail(null);setSelected('');setProposal(null);})}>{label}</button>)}</div>}
+    {relation && <div className="relation-filter"><span>当前好友：{name('qq:'+relation.split(':')[2])}</span>
+      <button className="text-button" onClick={()=>guard.proceed(()=>{setRelation('');navigation.replace({relation:undefined});})}>查看全部</button></div>}
     {mode==='people' && <><div className="profile-filters"><input aria-label="搜索人物记忆" placeholder="搜索记忆" value={q} onChange={e=>setQ(e.target.value)}/>
-      <select aria-label="记忆人物" value={subject} onChange={e=>{setSubject(e.target.value);setCategory('');}}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>
+      <select aria-label="记忆人物" value={subject} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setSubject(value);setCategory('');setSelected('');setDetail(null);setManual('');});}}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>
       <select aria-label="记忆分类" value={category} onChange={e=>setCategory(e.target.value)}><option value="">全部分类</option>{[...new Set(items.map(r=>r.category))].map(c=><option key={c}>{c}</option>)}</select></div>
-      {items.filter(r=>!category || r.category===category).map(r=><button key={r.id} className={'profile-card '+(selected===r.id?'active':'')} onClick={()=>setSelected(r.id)}><strong>{name(r.subject)} · {r.topic}</strong><small>{r.category}{r.manual?' · 已有你的修正':''}{!r.enabled?' · 已停用':''}</small><small>{r.content.slice(0,70)}</small></button>)}
+      {items.filter(r=>!category || r.category===category).map(r=><button key={r.id} className={'profile-card '+(selected===r.id?'active':'')} onClick={()=>guard.proceed(()=>{setManual('');setDetail(null);setSelected(r.id);})}><strong>{name(r.subject)} · {r.topic}</strong><small>{r.category}{r.manual?' · 已有你的修正':''}{!r.enabled?' · 已停用':''}</small><small>{r.content.slice(0,70)}</small></button>)}
       {!items.length && <p>聊天整理后，人物记忆会出现在这里。核心设定仍在“设定与资料”中。</p>}</>}
-    {(mode==='days' || mode==='review') && <div className="profile-filters"><label>日期<input aria-label="回顾日期" type="date" value={day} onChange={e=>setDay(e.target.value)}/></label>
+    {(mode==='days' || mode==='review') && <div className="profile-filters"><label>日期<input aria-label="回顾日期" type="date" value={day} onChange={e=>{const value=e.target.value;if(value)guard.proceed(()=>{setDay(value);if(view==='review')navigation.replace({day:value,reply:undefined});});}}/></label>
+      {mode==='review' && <><label>对话<select aria-label="回顾对话" value={peer} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setPeer(value);navigation.replace({peer:value,reply:undefined});});}}>
+        <option value="">全部对话</option>{peer && !replies.some(r=>r.conversation_id===peer) && <option value={peer}>当前对话</option>}
+        {[...new Map(replies.map(r=>[r.conversation_id,r.title])).entries()].map(([id,title])=><option key={id} value={id}>{title}</option>)}</select></label>
+        <div className="review-day-summary"><NotebookPen size={20}/><strong>{replies.filter(r=>!peer || r.conversation_id===peer).length}</strong><span>条回复</span></div></>}
       {mode==='days' && <select aria-label="经历人物" value={subject} onChange={e=>setSubject(e.target.value)}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>}
-      <p>{mode==='days'?'按提及日期查看经历，正文保留事件发生时间。':'查看当天已完成的 Miko 回复，并留下可撤销的批注。'}</p></div>}
-    {mode==='legacy' && listing?.scopes.map(s=><button key={s.id} className={'profile-card '+(legacy?.id===s.id?'active':'')} onClick={()=>void openScope(s.id)}><strong>{s.name}</strong><small>{s.conversation_id.startsWith('owner|')?'旧版关系记录':'待整理 '+(s.total-s.processed)+' 条 · '+(s.status==='updating'?'正在整理':s.status==='update_failed'?'整理失败':'收集中')}</small></button>)}
-  </section>}><main className="main-panel memory-panel"><header className="page-header"><div><h1>{modes[mode]}</h1><p>人物认识、共同经历与原文依据</p></div>
-    <div className="profile-actions"><button disabled={busy} onClick={()=>setRefresh(v=>v+1)}>刷新</button><button disabled={busy || !listing} className="send-button" onClick={()=>void mutate('/api/memory/control','POST',{enabled:!listing?.control.enabled})}>{listing?.control.enabled?'暂停自动记忆':'开启自动记忆'}</button></div></header>
-    {(notice || listing?.index.error) && <p className="profile-notice" role="status">{notice || listing?.index.error}</p>}
+      </div>}
+    {mode==='legacy' && listing?.scopes.map(s=><button key={s.id} className={'profile-card '+(legacy?.id===s.id?'active':'')} onClick={()=>guard.proceed(()=>void openScope(s.id))}><strong>{s.name}</strong><small>{s.conversation_id.startsWith('owner|')?'旧版关系记录':'待整理 '+(s.total-s.processed)+' 条 · '+(s.status==='updating'?'正在整理':s.status==='update_failed'?'整理失败':'收集中')}</small></button>)}
+  </section>}><main className="main-panel memory-panel"><header className="page-header"><h1>{modes[mode]}</h1>
+    <div className="profile-actions"><button disabled={busy} onClick={()=>guard.proceed(()=>setRefresh(v=>v+1))}><RefreshCw size={14}/>刷新</button>
+      {view==='memory' && <button disabled={busy || !listing} className="send-button" onClick={()=>void mutate('/api/memory/control','POST',{enabled:!listing?.control.enabled})}>
+      {listing?.control.enabled?<Pause size={14}/>:<Play size={14}/>} {listing?.control.enabled?'暂停自动记忆':'开启自动记忆'}</button>}</div></header>
+    {(notice || listing?.index.error) && <p className={failed || listing?.index.error?'profile-notice error-notice':'profile-notice'}
+      role={failed || listing?.index.error?'alert':'status'}>{notice || listing?.index.error}</p>}
     <div className="profile-workspace"><section className="profile-editor">
-      {mode==='people' && (!detail?<p>选择人物条目，查看自动认识、原文和历史。</p>:<>
+      {mode==='people' && (!detail?<EmptyState title="选择一条记忆"/>:<>
         <h2>{name(detail.subject)} · {detail.category} / {detail.topic}</h2><small>更新于 {new Date(detail.updated_at).toLocaleString()}</small>
         <h3>自动认识</h3><p className="memory-body">{detail.automatic}</p>{!detail.valid && <p>原文已变化，自动认识暂不用于聊天。你的修正仍保留。</p>}
         <h3>我的修正</h3><textarea aria-label="人物记忆修正" rows={5} value={manual} onChange={e=>setManual(e.target.value)}/>
@@ -130,10 +186,13 @@ export function MemoryPage() {
         {proposal && <article><h3>分类整理方案</h3>{proposal.items.map(r=><p key={r.sub_topic}><strong>{r.sub_topic}</strong> · {r.memo}</p>)}<button disabled={busy || !proposal.items.length} className="send-button" onClick={()=>{void mutate('/api/memory/organize/apply','POST',proposal);setProposal(null);}}>采用方案并保留旧版本</button></article>}
       </>)}
       {mode==='days' && (days.length?days.map(r=><article className="review-card" key={r.id}><h2>{name(r.subject)}</h2><p className="memory-body">{r.text}</p><Sources rows={r.sources}/></article>):<p>这一天尚无整理出的经历。</p>)}
-      {mode==='review' && (replies.length?replies.map(r=><ReplyCard key={r.id+':'+(r.annotation?.revision ?? 0)} reply={r} save={mutate}/>):<p>这一天尚无已完成的回复。</p>)}
+      {mode==='review' && (recordsLoading?<EmptyState loading title="正在读取回复…"/>:replies.filter(r=>!peer || r.conversation_id===peer).length?
+        replies.filter(r=>!peer || r.conversation_id===peer).map(r=><ReplyCard key={r.id+':'+(r.annotation?.revision ?? 0)+':'+discardVersion}
+          reply={r} save={mutate} open={()=>openReply(r)} onDirty={onReplyDirty}/>):
+        <EmptyState title="这一天暂无已完成的回复"/>)}
       {mode==='legacy' && (!legacy?<p>选择一段关系，查看整理进度和原有记录。</p>:<><h2>关系整理记录</h2><p className="memory-body">{legacy.automatic || '尚无整理记录'}</p>
         <h3>我的关系补充</h3><textarea rows={5} value={manual} onChange={e=>setManual(e.target.value)}/><div className="profile-actions"><button disabled={busy} className="send-button" onClick={()=>void mutate('/api/memory/scopes/'+legacy.id,'PATCH',{text:manual,revision:legacy.revision})}>保存补充</button>
           <button disabled={busy || !listing?.control.enabled || !listing.scopes.find(s=>s.id===legacy.id)?.conversation_id.startsWith('miko|')} onClick={()=>void mutate('/api/memory/scopes/'+legacy.id+'/consolidate','POST')}>现在整理待处理消息</button></div>
         <Sources rows={legacy.source_messages}/>{legacy.history.map(h=><details key={h.id}><summary>{h.kind==='manual'?'关系补充':'自动整理'} · {new Date(h.created_at*1000).toLocaleString()}</summary><p className="memory-body">{h.body}</p></details>)}</>)}
-    </section></div></main></AppShell>;
+    </section></div>{guard.dialog}</main></AppShell>;
 }
