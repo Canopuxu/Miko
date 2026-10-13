@@ -24,7 +24,7 @@ export function AppShell({ view, sidebar, children }: { view: View; sidebar: Rea
   return <div className={`workspace-frame ${navigation.expanded ? '' : 'sidebar-collapsed'}`}>
     <aside className="primary-sidebar">
       <button className="brand" onClick={() => navigation.select('chat')} aria-label="Miko 首页">
-        <span className="brand-mark">Miko</span>
+        <span className="brand-mark"><span className="brand-wordmark" aria-hidden="true">Miko</span></span>
       </button>
       <nav className="primary-navigation" aria-label="一级导航">
         {views.map(view => <button key={view.id} className={`primary-item ${view.id === navigation.active ? 'selected' : ''}`}
