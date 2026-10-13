@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { Maximize, Minus, Plus } from 'lucide-react';
 import { EmptyState } from './ui';
 
 export type LifeEntry = {text: string; goal_id?: string};
@@ -33,6 +34,7 @@ const nodeTypes={life:LifeNodeView};
 
 export function LifeTimeline({goals, events, onGoal, onDay}: {goals: LifeGoal[]; events: LifeEvent[];
   onGoal: (goal: LifeGoal) => void; onDay: (day: string) => void}) {
+  const [flow,setFlow]=useState<ReactFlowInstance<LifeNode,Edge> | null>(null);
   const [day,setDay]=useState('');
   const [query,setQuery]=useState('');
   const [selection,setSelection]=useState('');
@@ -93,6 +95,7 @@ export function LifeTimeline({goals, events, onGoal, onDay}: {goals: LifeGoal[];
     edges.forEach(edge=>{edge.className=picked?.data.branch===edge.data?.branch?'life-branch-edge active':'life-branch-edge';});
     return {nodes,edges,width,height:Math.max(300,y),picked,empty:!shown.length};
   },[goals,events,day,query,selection,availableWidth,clear]);
+  useEffect(()=>{ if(flow && !graph.empty) void flow.fitView({padding:0.12,maxZoom:1}); },[flow,day,query,availableWidth,graph.width,graph.height,graph.nodes.length,graph.empty]);
   const selected=graph.picked?.data;
   return <section className="life-timeline" aria-label="生活轨迹">
     <div className="life-timeline-filter">
@@ -100,11 +103,17 @@ export function LifeTimeline({goals, events, onGoal, onDay}: {goals: LifeGoal[];
       <input type="search" aria-label="搜索生活记录" placeholder="搜索目标或活动" value={query} onChange={e=>{setQuery(e.target.value);setSelection('');}}/>
     </div>
     {!hasContent?<EmptyState title="暂无生活记录"/>:<>
-      <div ref={container} className="life-branch-container">{graph.empty?<EmptyState title="没有匹配的生活记录"/>:<div style={{width:graph.width,height:graph.height}}>
+      <div ref={container} className="life-branch-container">{graph.empty?<EmptyState title="没有匹配的生活记录"/>:<div className="life-canvas">
         <ReactFlow nodes={graph.nodes} edges={graph.edges} nodeTypes={nodeTypes} nodesDraggable={false}
           nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} elementsSelectable={false}
-          panOnDrag={false} zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false}
-          preventScrolling={false} onPaneClick={clear} proOptions={{hideAttribution:true}}/>
+          onInit={setFlow} fitView fitViewOptions={{padding:0.12,maxZoom:1}} minZoom={0.1} maxZoom={2}
+          panOnDrag zoomOnScroll zoomOnPinch zoomOnDoubleClick={false}
+          preventScrolling onPaneClick={clear} proOptions={{hideAttribution:true}}/>
+        <div className="life-canvas-controls" aria-label="画布控制">
+          <button aria-label="放大轨迹" title="放大" onClick={()=>void flow?.zoomIn()}><Plus size={16}/></button>
+          <button aria-label="缩小轨迹" title="缩小" onClick={()=>void flow?.zoomOut()}><Minus size={16}/></button>
+          <button aria-label="适配全部轨迹" title="适配全部" onClick={()=>void flow?.fitView({padding:0.12,maxZoom:1})}><Maximize size={16}/></button>
+        </div>
       </div>}</div>
       {selected && selected.kind!=='root' && <div className="life-branch-detail" aria-live="polite">
         {selected?.kind==='goal'?<><span>{selected.label}{selected.goal&&` · ${goalStatus[selected.goal.status]} · 预计 ${selected.goal.target_date}`}</span>
