@@ -19,6 +19,8 @@ class ProfileStore:
             return dict(row) if row else None
 
     def save(self, value, entry_id=None):
+        if value['kind'] in ('overview', 'fact'):
+            value = {**value, 'enabled': True}
         if entry_id and not self.get(entry_id):
             raise ValueError('找不到这条资料')
         if value['account'] or value['friend']:

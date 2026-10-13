@@ -36,7 +36,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         await self.memory.close()
         self.tmp.cleanup()
 
-    async def test_memu_retrieval_scope_disable_and_restart(self):
+    async def test_memu_retrieval_scope_saved_profiles_and_restart(self):
         first = self.chat.profiles.save(ProfileInput(subject='miko', kind='fact', title='日常穿着',
             content='白色体恤，红白格子长衫').record())
         second = self.chat.profiles.save(ProfileInput(subject='owner', kind='fact', title='乙的资料',
@@ -52,6 +52,8 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.memory.context('服装', ('123','456')))['role_material']), 1)
         body = ProfileInput(subject='miko', kind='fact', title='日常穿着', content='白色体恤', enabled=False).record()
         self.chat.profiles.save(body, first['id'])
+        self.assertEqual([r['id'] for r in (await self.memory.context('服装', ('123','456')))['role_material']], [first['id']])
+        self.chat.profiles.delete(first['id'])
         self.assertEqual((await self.memory.context('服装', ('123','456')))['role_material'], [])
 
     async def test_tulpa_authors_batches_corrections_evidence_and_recall(self):

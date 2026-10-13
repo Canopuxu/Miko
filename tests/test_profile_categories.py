@@ -31,7 +31,7 @@ class CategoryTests(unittest.TestCase):
                 result = client.put('/api/profiles/categories', json={'subject': 'miko', 'categories': edited})
                 self.assertEqual(result.status_code, 200, result.text)
                 row = profiles.get(original['id'])
-                self.assertEqual((row['category'], row['content'], row['enabled']), ('偏好/零食', '喜欢嚼橄榄', 0))
+                self.assertEqual((row['category'], row['content'], row['enabled']), ('偏好/零食', '喜欢嚼橄榄', 1))
                 self.assertEqual(profiles.list('零食')[0]['id'], original['id'])
                 group['children'] = [c for c in group['children'] if c['id'] != food['id']]
                 self.assertEqual(client.put('/api/profiles/categories', json={'subject': 'miko', 'categories': edited}).status_code, 200)

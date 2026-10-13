@@ -2,16 +2,16 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowUpRight, Plus, Save, Search } from 'lucide-react';
+import { ArrowUpRight, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { useDiscardGuard, useNotice } from '../components/ui';
 
 type Subject = 'miko' | 'owner';
 type Entry = { id: string; subject: Subject; kind: 'overview' | 'fact' | 'recent' | 'excerpt';
   category: string; title: string; content: string; keywords: string; account: string; friend: string;
-  as_of: string | null; enabled: number };
+  as_of: string | null };
 type Child = { id: string; name: string };
 type Category = Child & { children: Child[] };
-type Edit = { id: string | null; path: string; content: string; enabled: boolean; original?: Entry };
+type Edit = { id: string | null; path: string; content: string; original?: Entry };
 type CategoryEdit = { id?: string; parent?: string; name: string };
 type Friend = { account: string; friend: string; name: string };
 type Context = { role_material: Entry[]; retrieval?: { engine: string; error?: string } };
@@ -62,17 +62,19 @@ export function ProfilesPage() {
     return () => { alive = false; };
   }, []);
 
-  const editDirty=!!edit && (edit.id ? edit.content!==edit.original?.content || edit.path!==edit.original?.category ||
-    edit.enabled!==!!edit.original?.enabled : !!edit.content.trim());
+  const editDirty=!!edit && (edit.id ? edit.content!==edit.original?.content || edit.path!==edit.original?.category : !!edit.content.trim());
   const originalCategory=categoryEdit?.parent ? categories.find(c=>c.id===categoryEdit.parent)?.children.find(c=>c.id===categoryEdit.id)
     : categories.find(c=>c.id===categoryEdit?.id);
   const categoryDirty=!!categoryEdit && categoryEdit.name!==(originalCategory?.name ?? '');
   const guard=useDiscardGuard(editDirty || categoryDirty);
-  function choose(id: string) {
+  function choose(id: string, action?: 'rename' | 'delete') {
     guard.proceed(()=>{
     savedScroll.current = null;
     if (contentRef.current) contentRef.current.scrollTop = 0;
-    setSelected(id); setEdit(null); setCategoryEdit(null); setDeleting(null); setNotice('');
+    const category=categories.find(c=>c.id===id);
+    setSelected(id); setEdit(null); setNotice('');
+    setCategoryEdit(action==='rename' && category ? {id:category.id,name:category.name} : null);
+    setDeleting(action==='delete' ? {kind:'category',id} : null);
     });
   }
   function chooseSubject(value: Subject) {
@@ -107,7 +109,7 @@ export function ProfilesPage() {
         subject, kind: original?.kind ?? (root?.id === `${subject}-core` && edit.path === root.name ? 'overview' : 'fact'),
         category: edit.path, title: edit.content.trim().split('\n')[0].slice(0, 80), content: edit.content.trim(),
         keywords: original?.keywords ?? '', account: original?.account ?? '', friend: original?.friend ?? '',
-        as_of: original?.as_of ?? null, enabled: edit.enabled,
+        as_of: original?.as_of ?? null,
       });
       preservePosition();
       setEdit(null); setRevision(v => v + 1); setPreview(null); setNotice('词条已保存');
@@ -164,8 +166,7 @@ export function ProfilesPage() {
       onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); guard.proceed(()=>setEdit(null)); } }}>
       <label>词条内容<textarea autoFocus aria-label="词条内容" rows={4} maxLength={6000} value={edit.content}
         onChange={event => setEdit({ ...edit, content: event.target.value })} disabled={busy} placeholder="写下一条具体的设定" /></label>
-      <div className="persona-edit-bottom"><label className="persona-check"><input type="checkbox" checked={edit.enabled}
-        onChange={event => setEdit({ ...edit, enabled: event.target.checked })} disabled={busy} />用于聊天</label>
+      <div className="persona-edit-bottom">
         <div><button type="button" disabled={busy} onClick={() => guard.proceed(()=>setEdit(null))}>取消</button>
           <button className="send-button" disabled={busy || !edit.content.trim()}><Save size={14}/>{busy?'保存中…':'保存词条'}</button></div></div>
       {edit.id && <label className="persona-move">所属分类<select value={edit.path} disabled={busy}
@@ -197,9 +198,14 @@ export function ProfilesPage() {
       onClick={() => chooseSubject('miko')}>Miko</button><button aria-pressed={subject === 'owner'} disabled={busy}
       onClick={() => chooseSubject('owner')}>我</button></div>
     <div className="search-field"><Search size={15}/><input className="persona-search" aria-label="搜索词条" value={q} onChange={event => setQ(event.target.value)} placeholder="搜索词条内容" /></div>
-    <nav className="persona-categories" aria-label="大分类">{categories.map(c => <button key={c.id} disabled={busy}
-      aria-current={selected === c.id ? 'page' : undefined} onClick={() => choose(c.id)}><span>{c.name}</span>
-      <small>{settings.filter(e => (e.category === c.name || e.category.startsWith(c.name + '/')) && matches(e)).length}</small></button>)}
+    <nav className="persona-categories" aria-label="大分类">{categories.map(c => <div key={c.id} className={`persona-category-row ${selected===c.id?'selected':''}`}>
+      <button className="persona-category-label" disabled={busy} aria-current={selected === c.id ? 'page' : undefined}
+        onClick={() => choose(c.id)}><span>{c.name}</span>
+        <small>{settings.filter(e => (e.category === c.name || e.category.startsWith(c.name + '/')) && matches(e)).length}</small></button>
+      <div className="persona-category-tools">
+        <button disabled={busy} aria-label={`重命名分类 ${c.name}`} title="重命名分类" onClick={()=>choose(c.id,'rename')}><Pencil size={14} aria-hidden="true"/></button>
+        <button disabled={busy} aria-label={`删除分类 ${c.name}`} title="删除分类" onClick={()=>choose(c.id,'delete')}><Trash2 size={14} aria-hidden="true"/></button>
+      </div></div>)}
       <button aria-current={selected === 'unfiled' ? 'page' : undefined} disabled={busy} onClick={() => choose('unfiled')}>
         <span>待归类</span><small>{unfiled.filter(matches).length}</small></button></nav>
     <button className="persona-add-category" disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({name:''});})}><Plus size={14}/>新增大分类</button>
@@ -218,14 +224,14 @@ export function ProfilesPage() {
           return <section className="persona-section" key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
             <div>{root && section.id !== root.id && <><button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({id:section.id,parent:root.id,name:section.name});})}>重命名</button>
               <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: section.id })}>删除小分类</button></>}
-              <button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:null,path:section.path,content:'',enabled:true});})}><Plus size={14}/>添加词条</button></div></header>
+              <button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:null,path:section.path,content:''});})}><Plus size={14}/>添加词条</button></div></header>
             {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
             {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
-            {items.map(entry => <article className={`persona-entry ${!entry.enabled ? 'inactive' : ''}`} key={entry.id}>
-              {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer><span>{entry.enabled ? '用于聊天' : '暂未启用'}{entry.account && ' · 指定好友'}</span>
+            {items.map(entry => <article className="persona-entry" key={entry.id}>
+              {edit?.id === entry.id ? editor() : <><p>{entry.content}</p><footer><span>{entry.account && '指定好友'}</span>
                 <div><button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:entry.id,path:entry.category,
-                  content:entry.content,enabled:!!entry.enabled,original:entry});})}>编辑</button>
+                  content:entry.content,original:entry});})}>编辑</button>
                   <button disabled={busy} onClick={() => setDeleting({ kind: 'entry', id: entry.id })}>删除</button></div></footer></>}
               {deleting?.kind === 'entry' && deleting.id === entry.id && deleteConfirmation()}
             </article>)}

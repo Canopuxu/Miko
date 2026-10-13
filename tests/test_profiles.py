@@ -31,7 +31,7 @@ class ProfilesTests(unittest.TestCase):
         return self.profiles.save(ProfileInput(subject='miko', kind='fact', title='测试资料',
                                                content='用于验证检索', **fields).record())
 
-    def test_chinese_search_scope_edit_disable_and_reopen(self):
+    def test_chinese_search_scope_edit_and_saved_profiles_reopen(self):
         value = ProfileInput(subject='miko', kind='fact', category='外貌', title='日常穿着',
             content='白色体恤，红白格子长衫', keywords='衣服 服装').record()
         clothing = self.profiles.save(value)
@@ -44,7 +44,14 @@ class ProfilesTests(unittest.TestCase):
         self.assertEqual(reopened.list('深蓝')[0]['content'], '深蓝衬衫')
         self.assertEqual(reopened.list('红白'), [])
         reopened.save({**value, 'enabled': False}, clothing['id'])
-        self.assertEqual(reopened.context('衣服', ('123','456'))['role_material'], [])
+        self.assertEqual([r['id'] for r in reopened.context('衣服', ('123','456'))['role_material']], [clothing['id']])
+        legacy = self.profiles.save(ProfileInput(subject='owner', kind='recent', title='旧近况', content='旧记录', as_of='2026-10-12', enabled=False).record())
+        with self.chat.connect() as db:
+            db.execute('UPDATE profile_entries SET enabled=0 WHERE id=?', (clothing['id'],))
+            db.execute('PRAGMA user_version=4')
+        migrated = ProfileStore(ChatStore(self.path))
+        self.assertEqual(migrated.get(clothing['id'])['enabled'], 1)
+        self.assertEqual(migrated.get(legacy['id'])['enabled'], 0)
         self.assertFalse(updated['id'] == scoped['id'])
 
     def test_core_dated_activity_excerpt_and_two_relationships(self):
