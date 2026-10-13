@@ -3,7 +3,7 @@ import { AppShell } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
 import '../styles/life.css';
 
-type Entry = {topic: string; text: string};
+type Entry = {text: string};
 type Listing = {
   day: string; dates: string[];
   record: {date: string; entries: Entry[]; revision: number; source: string};
@@ -96,16 +96,14 @@ export function LifePage() {
         <button className="life-button" disabled={busy || dirty} onClick={() => void load()}>刷新</button></div>
       {!entries.length && <div className="life-empty"><p>这一天还没有生活条目。</p><span>可以生成今天的记录，或直接写下简短的活动。</span></div>}
       <div className="life-entries">{entries.map((entry, index) => <article className="life-entry" key={index}>
-        <input aria-label="活动或兴趣" placeholder="活动或兴趣，如摄影" value={entry.topic} maxLength={80}
-          onChange={e => update(index, 'topic', e.target.value)} disabled={busy}/>
-        <textarea aria-label="生活条目" placeholder="如：开始学摄影；练构图" rows={2} value={entry.text} maxLength={240}
+        <textarea aria-label="生活条目" placeholder="如：练键盘，左手换和弦还是有点卡；慢速练了一会儿" rows={3} value={entry.text} maxLength={240}
           onChange={e => update(index, 'text', e.target.value)} disabled={busy}/>
         <button className="life-remove" aria-label="移除条目" disabled={busy}
           onClick={() => { setEntries(entries.filter((_, i) => i !== index)); setDirty(true); }}>×</button>
       </article>)}</div>
       <div className="life-actions"><button className="life-button" disabled={busy || entries.length >= 20}
-        onClick={() => { setEntries([...entries, {topic: '', text: ''}]); setDirty(true); }}>＋ 添加条目</button>
-        <button className="life-button life-save" disabled={busy || !dirty || entries.some(e => !e.topic.trim() || !e.text.trim())}
+        onClick={() => { setEntries([...entries, {text: ''}]); setDirty(true); }}>＋ 添加条目</button>
+        <button className="life-button life-save" disabled={busy || !dirty || entries.some(e => !e.text.trim())}
           onClick={() => void save()}>保存修改</button>
         {dirty && <button className="life-button" disabled={busy} onClick={() => void load()}>撤销修改</button>}
         <span role="status">{dirty ? '有未保存的修改' : notice}</span></div>

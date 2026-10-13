@@ -14,7 +14,6 @@ from miko.storage.search import terms
 
 class LifeEntry(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    topic: str = Field(min_length=1, max_length=80)
     text: str = Field(min_length=1, max_length=240)
 
 
@@ -38,8 +37,8 @@ class Life:
         result = []
         for day, row in sorted(self.store.all().items(), reverse=True):
             for entry in row.entries:
-                if not selected or selected & terms(entry['topic'] + ' ' + entry['text']):
-                    result.append({'day': day, **entry})
+                if not selected or selected & terms(entry['text']):
+                    result.append({'day': day, 'text': entry['text']})
         return result
 
     def context(self, query=''):
@@ -90,10 +89,7 @@ class Life:
             material['role_material'] = [r for r in material.get('role_material', [])
                                          if r['subject'] == 'miko' or r['kind'] == 'recent']
             material.pop('friend_relationships', None)
-            material['生活条目'] = [
-                {k: v for k, v in row.items() if not (k == 'topic' and v == '活动或兴趣')}
-                for row in self.records()[:40] if row['day'] <= day.isoformat()
-            ]
+            material['生活条目'] = [row for row in self.records()[:40] if row['day'] <= day.isoformat()]
             material['日期'] = day.isoformat()
             prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
             value = await self.chat.complete_memory(prompt, json.dumps(material, ensure_ascii=False), json_output=True)

@@ -31,7 +31,7 @@ def reply_context(context):
         'people_memory': ('subject', 'peer', 'category', 'topic', 'content'),
         'dated_experiences': ('subject', 'day', 'text'),
         'owner_feedback': ('reply', 'feedback'),
-        'life_entries': ('day', 'topic', 'text'),
+        'life_entries': ('day', 'text'),
     }
     for group, names in fields.items():
         rows = []

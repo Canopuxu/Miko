@@ -62,7 +62,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             if len(inputs) > 1:
                 self.assertIn('摄影', json.dumps(material['生活条目'], ensure_ascii=False))
             self.assertIn('前端配色', json.dumps(material['role_material'], ensure_ascii=False))
-            return {'text': json.dumps({'entries': [{'topic': '摄影', 'text': '开始学摄影' if len(inputs) == 1 else '练构图'}]}, ensure_ascii=False)}
+            return {'text': json.dumps({'entries': [{'text': '开始学摄影' if len(inputs) == 1 else '练构图'}]}, ensure_ascii=False)}
 
         self.chat.complete_memory = generate
         with patch('miko.domain.life.date', SimulatedDay):
@@ -87,7 +87,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         with TestClient(app) as client:
             row = client.get('/api/life?day=2026-10-12').json()['record']
             changed = client.put('/api/life', json={'day': '2026-10-12', 'revision': row['revision'],
-                'entries': [{'topic': '摄影', 'text': '练光影；构图暂停'}]})
+                'entries': [{'text': '练光影；构图暂停'}]})
             self.assertEqual(changed.status_code, 200, changed.text)
             self.assertIn('光影', self.life.context('摄影')[0]['text'])
             self.assertEqual(client.put('/api/life/control', json={'enabled': False}).status_code, 200)
@@ -97,7 +97,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_or_superseded_generation_preserves_owner_edits(self):
         day = date.today()
-        self.life.save(day, [{'topic': '键盘', 'text': '练和弦'}], 0)
+        self.life.save(day, [{'text': '练和弦'}], 0)
         async def fail(*args, **kwargs):
             raise ValueError('模拟生成失败')
         self.chat.complete_memory = fail
@@ -105,8 +105,8 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             await self.life.generate()
         self.assertEqual(self.life.store.get(day).entries[0]['text'], '练和弦')
         async def concurrent(*args, **kwargs):
-            self.life.save(day, [{'topic': '键盘', 'text': '号主修正：今天休息'}], 1)
-            return {'text': '{"entries":[{"topic":"键盘","text":"练新曲"}]}'}
+            self.life.save(day, [{'text': '号主修正：今天休息'}], 1)
+            return {'text': '{"entries":[{"text":"练新曲"}]}'}
         self.chat.complete_memory = concurrent
         with self.assertRaises(ValueError):
             await self.life.generate()
@@ -116,7 +116,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         async def complete(*args, **kwargs):
             calls.append(1)
-            return {'text': '{"entries":[{"topic":"设计","text":"练配色"}]}'}
+            return {'text': '{"entries":[{"text":"练配色"}]}'}
         self.chat.complete_memory = complete
         self.life.start()
         for _ in range(30):
@@ -129,3 +129,11 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.life.start()
         await asyncio.sleep(.03)
         self.assertEqual(len(calls), 1)
+        await self.life.close()
+        # Existing topic-based records retain their useful information on load.
+        path = self.local / 'data/life/entries.json'
+        day = date.today().isoformat()
+        path.write_text(json.dumps({day: {'date': day, 'revision': 1, 'source': 'manual',
+            'entries': [{'topic': '摄影', 'text': '练构图'}]}}), encoding='utf-8')
+        reopened = Life(self.chat)
+        self.assertEqual(reopened.listing()['record']['entries'], [{'text': '摄影：练构图'}])

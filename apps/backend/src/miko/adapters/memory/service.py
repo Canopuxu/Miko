@@ -59,7 +59,7 @@ class Memory:
                     continue
                 name = 'life:' + day
                 result[name] = {'name': name, 'track': 'memory', 'description': 'Miko 生活 · ' + day,
-                    'content': '\n'.join(r['topic'] + '：' + r['text'] for r in row.entries),
+                    'content': '\n'.join(r['text'] for r in row.entries),
                     'subject': 'miko', 'peer': '', 'entry_id': name}
         for row in self.chat.profiles.list(active=True):
             name = 'profile:' + row['id']

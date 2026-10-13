@@ -272,7 +272,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(relation['miko_introduced'])
 
     async def test_web_and_qq_read_the_same_dated_life_entries(self):
-        entries = [{'day': '2026-10-13', 'topic': '摄影', 'text': '练构图'}]
+        entries = [{'day': '2026-10-13', 'text': '摄影：练构图'}]
         self.service.life = SimpleNamespace(context=lambda query: entries)
         await self.collect('你最近在做什么')
         web_prompt = self.requests[-1]['messages'][0]['content']

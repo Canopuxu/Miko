@@ -53,7 +53,10 @@ class ScheduleData:
         """允许未来字段扩展"""
         return cls(
             date=data["date"],
-            entries=data.get("entries", []),
+            entries=[{"text": (row["topic"] + "：" + row["text"]
+                               if row.get("topic") and row["topic"] != "活动或兴趣"
+                               and row["topic"] not in row["text"] else row["text"])}
+                     for row in data.get("entries", [])],
             revision=data.get("revision", 1),
             source=data.get("source", "generated"),
         )
