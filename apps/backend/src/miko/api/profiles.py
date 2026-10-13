@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from miko.api.local import local_request
+from miko.storage.profile_categories import ProfileCategories
 
 
 class ProfileInput(BaseModel):
@@ -40,9 +41,45 @@ class RelationshipInput(BaseModel):
     miko_introduced: StrictBool | None = None
 
 
+class Subcategory(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=36, pattern=r'^[^/]+$')
+
+
+class Category(Subcategory):
+    children: list[Subcategory] = Field(default_factory=list)
+
+
+class LibraryInput(BaseModel):
+    subject: Literal['miko', 'owner']
+    categories: list[Category]
+
+    @model_validator(mode='after')
+    def unique_names(self):
+        ids = [node.id for root in self.categories for node in [root, *root.children]]
+        names = [root.name for root in self.categories]
+        if len(ids) != len(set(ids)) or len(names) != len(set(names)):
+            raise ValueError('分类名称或编号重复')
+        for root in self.categories:
+            names = [child.name for child in root.children]
+            if len(names) != len(set(names)):
+                raise ValueError('小分类名称重复')
+        return self
+
+
 def profiles_router(chat, qq):
     router = APIRouter(prefix='/api/profiles', dependencies=[Depends(local_request)])
     store = chat.profiles
+    library = ProfileCategories(store.chat)
+
+    @router.get('/categories')
+    async def categories(subject: Literal['miko', 'owner'] = 'miko'):
+        return {'categories': library.get(subject)}
+
+    @router.put('/categories')
+    async def update_categories(body: LibraryInput):
+        return {'categories': library.save(body.subject, body.model_dump()['categories'])}
 
     @router.get('')
     async def listing(q: str = '', subject: str = '', kind: str = '', category: str = ''):
