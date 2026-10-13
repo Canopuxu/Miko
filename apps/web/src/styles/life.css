@@ -1,0 +1,22 @@
+.life-navigation { display: flex; flex-direction: column; gap: 16px; height: 100%; }
+.life-navigation label { display: grid; gap: 8px; font-size: 12px; color: #8c8073; }
+.life-navigation input { width: 100%; box-sizing: border-box; border: 1px solid #ddd5c9; border-radius: 8px; padding: 10px; background: transparent; color: inherit; font: inherit; }
+.life-button { border: 1px solid #d9d3c8; border-radius: 8px; padding: 9px 13px; background: transparent; color: #776a5c; font: inherit; cursor: pointer; }
+.life-button:disabled, .life-remove:disabled { opacity: .45; cursor: default; }
+.life-date-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.life-date-list button { text-align: left; padding: 12px; border: 0; border-radius: 8px; color: #776a5c; background: transparent; font: inherit; cursor: pointer; }
+.life-date-list button.selected { background: #e6e0d5; }
+.life-controls { border-top: 1px solid #e5ded3; padding: 12px 0; font-size: 12px; color: #8c8073; }
+.life-workspace { width: min(740px, 100%); box-sizing: border-box; padding: 32px; }
+.life-record-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; color: #938577; font-size: 12px; }
+.life-entry { position: relative; padding: 16px 42px 16px 18px; border: 1px solid #e5ded3; border-radius: 12px; margin-bottom: 12px; background: #f7f4ef; }
+.life-entry input, .life-entry textarea { box-sizing: border-box; width: 100%; padding: 6px 0; border: 0; background: transparent; color: #655545; font: inherit; }
+.life-entry input { font-weight: 600; }
+.life-entry textarea { resize: vertical; line-height: 1.7; }
+.life-remove { position: absolute; right: 12px; top: 15px; border: 0; background: transparent; color: #a69583; font-size: 22px; cursor: pointer; }
+.life-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.life-actions span { color: #9a8874; font-size: 12px; }
+.life-save { background: #e8e0d5; }
+.life-empty { padding: 34px 0; color: #9a8874; line-height: 1.8; }
+.life-empty span { font-size: 12px; }
+@media (max-width: 760px) { .life-workspace { padding: 24px 18px; } }

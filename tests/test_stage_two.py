@@ -271,6 +271,21 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data['friend_relationships']), 1)
         self.assertTrue(relation['miko_introduced'])
 
+    async def test_web_and_qq_read_the_same_dated_life_entries(self):
+        entries = [{'day': '2026-10-13', 'topic': '摄影', 'text': '练构图'}]
+        self.service.life = SimpleNamespace(context=lambda query: entries)
+        await self.collect('你最近在做什么')
+        web_prompt = self.requests[-1]['messages'][0]['content']
+        web = json.loads(web_prompt.split('\n\n', 2)[2])
+        turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'}, 'text': '你在做什么'}])
+        await asyncio.wait_for(turn.task, 10)
+        qq_prompt = self.requests[-1]['messages'][0]['content']
+        qq = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
+        self.assertEqual(web['life_entries'], qq['life_entries'])
+        self.assertEqual(web['life_entries'], entries)
+        self.assertIn('日期表示记录时间', web_prompt)
+        self.assertIn('日期表示记录时间', qq_prompt)
+
     async def test_reply_uses_compact_memory_and_preserves_review_data(self):
         from copy import deepcopy
         material = self.service.profiles.context('摄影')

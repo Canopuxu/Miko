@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+from datetime import date
 
 from memu.app.service import MemoryService
 from pydantic import BaseModel
@@ -52,6 +53,14 @@ class Memory:
 
     def documents(self):
         result = {}
+        if self.chat.life:
+            for day, row in self.chat.life.store.all().items():
+                if day > date.today().isoformat() or not row.entries:
+                    continue
+                name = 'life:' + day
+                result[name] = {'name': name, 'track': 'memory', 'description': 'Miko 生活 · ' + day,
+                    'content': '\n'.join(r['topic'] + '：' + r['text'] for r in row.entries),
+                    'subject': 'miko', 'peer': '', 'entry_id': name}
         for row in self.chat.profiles.list(active=True):
             name = 'profile:' + row['id']
             peer = f"qq:{row['account']}:{row['friend']}" if row['account'] else ''
@@ -113,6 +122,8 @@ class Memory:
     async def context(self, query, key=None, conversation_id=None):
         await self.sync()
         context = self.chat.profiles.context(query, key)
+        if self.chat.life:
+            context['life_entries'] = self.chat.life.context(query)
         context['social_memory'] = self.social.context(query, key)
         peer = f'qq:{key[0]}:{key[1]}' if key else ''
         context['people_memory'] = [{k: r[k] for k in ('id','subject','peer','category','topic','content','updated_at')}
@@ -155,6 +166,12 @@ class Memory:
                         row = next((r for r in self.structured.days(peer=peer) if r['id']==name), None)
                         if row and not any(r['id']==name for r in context['dated_experiences']):
                             context['dated_experiences'].append(row)
+                    elif name.startswith('life:') and self.chat.life:
+                        rows = [r for r in self.chat.life.records() if r['day'] == name[5:]]
+                        entries = context.setdefault('life_entries', [])
+                        for row in rows:
+                            if row not in entries and len(entries) < 20:
+                                entries.append(row)
                 context['retrieval'] = {'engine': 'memU Embedding + Tulpa FTS', 'model': self.model,
                                         'hits': [{k: h[k] for k in ('name','score')} for h in hits['files']]}
             except Exception as exc:

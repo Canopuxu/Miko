@@ -1,0 +1,17 @@
+{
+  "project": "AstrBot Life Scheduler",
+  "repository": "https://github.com/muyouzhi6/astrbot_plugin_life_scheduler",
+  "commit": "1dc2f674f70c0470274b1cd5abdc4a8d4ed79167",
+  "license": "MIT",
+  "source": "core/data.py",
+  "source_sha256": "d44e94df8ffca7e527fba813bd49decfc65b6eb5c05fc5afcb339561893b3625",
+  "reused": [
+    "to_date_str",
+    "ScheduleDataManager"
+  ],
+  "adaptations": [
+    "Replace outfit and prose schedule fields with entries, revision and source",
+    "Exclude unused wardrobe code",
+    "Report malformed JSON instead of clearing stored history"
+  ]
+}

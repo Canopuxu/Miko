@@ -31,6 +31,7 @@ def reply_context(context):
         'people_memory': ('subject', 'peer', 'category', 'topic', 'content'),
         'dated_experiences': ('subject', 'day', 'text'),
         'owner_feedback': ('reply', 'feedback'),
+        'life_entries': ('day', 'topic', 'text'),
     }
     for group, names in fields.items():
         rows = []
@@ -90,6 +91,7 @@ class ChatService:
         self.store.recover_interrupted()
         self.turns: dict[str, Turn] = {}
         self.memory = None
+        self.life = None
         # SDK carrier includes coding tools by default. Chat has no tool calls in this stage.
         self.patch = settings.local_root / "runtime/dsh/chat.patch.json"
         self.patch.parent.mkdir(parents=True, exist_ok=True)
@@ -128,6 +130,10 @@ class ChatService:
     def compose_prompt(self, base, query, key=None):
         instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
         context = self.profiles.context(query, key)
+        if self.life:
+            context['life_entries'] = self.life.context(query)
+            if context['life_entries']:
+                instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
         return base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
 
     async def run(self, turn: Turn):
@@ -137,6 +143,8 @@ class ChatService:
                 context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
+                if context.get('life_entries'):
+                    instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
                 turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
                 if context.get('owner_feedback'):
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()
@@ -222,9 +230,10 @@ class ChatService:
                 await self.cancel(turn)
                 await turn.task
 
-    async def complete_memory(self, system, message, model=None):
+    async def complete_memory(self, system, message, model=None, json_output=False):
         turn = Turn(uuid.uuid4().hex, 'memory', message,
-                    context=[{'role': 'user', 'content': message}], system_prompt=system, model=model)
+                    context=[{'role': 'user', 'content': message}], system_prompt=system, model=model,
+                    json_output=json_output)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         try:

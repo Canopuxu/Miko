@@ -1,5 +1,7 @@
 # 开源来源
 
+- [AstrBot Life Scheduler](https://github.com/muyouzhi6/astrbot_plugin_life_scheduler)：MIT，复用 `core/data.py` 的日期归一化、单日记录与 JSON 原子存取，适配为 Miko 简短生活条目。固定提交及改动见 `apps/backend/src/miko/adapters/life/source-manifest.json`，许可随模块保存。
+
 本清单记录 Miko 使用及调研的开源源码。具体提交、模块路径与本地位置见
 [`config/upstream.lock.json`](config/upstream.lock.json)。DSH 发行包、Tulpa QQ 与记忆流程、memU 检索、jieba 分词及 Memobase 中文整理模块已接入。实际使用的发行包记录在下表。
 

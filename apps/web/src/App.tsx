@@ -4,12 +4,13 @@ import { ChatPage } from './pages/ChatPage';
 import { QqPage } from './pages/QqPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { MemoryPage } from './pages/MemoryPage';
+import { LifePage } from './pages/LifePage';
 
 function currentView(): View {
   const view = new URLSearchParams(location.search).get('view');
   return views.find(item => item.id === view)?.id ?? 'chat';
 }
-const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: MemoryPage };
+const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: MemoryPage, life: LifePage };
 
 export function App() {
   const [active, setActive] = useState<View>(currentView);

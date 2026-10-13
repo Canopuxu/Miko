@@ -1,8 +1,9 @@
 import { createContext, useContext, type ReactNode } from 'react';
 
-export type View = 'chat' | 'qq' | 'profiles' | 'memory';
+export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life';
 export const views: { id: View; label: string; icon: string; title: string }[] = [
   { id: 'chat', label: '聊天', icon: '◌', title: '最近对话' },
+  { id: 'life', label: '今天', icon: '☀', title: '生活记录' },
   { id: 'qq', label: 'QQ 好友', icon: '♧', title: 'QQ 好友' },
   { id: 'profiles', label: '设定与资料', icon: '▤', title: '资料库' },
   { id: 'memory', label: '关系与经历记忆', icon: '◇', title: '记忆对象' },
