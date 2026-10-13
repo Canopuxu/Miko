@@ -32,6 +32,7 @@ def reply_context(context):
         'dated_experiences': ('subject', 'day', 'text'),
         'owner_feedback': ('reply', 'feedback'),
         'life_entries': ('day', 'text'),
+        'life_goals': ('text', 'start_date', 'target_date', 'status', 'completed_date'),
     }
     for group, names in fields.items():
         rows = []
@@ -132,7 +133,8 @@ class ChatService:
         context = self.profiles.context(query, key)
         if self.life:
             context['life_entries'] = self.life.context(query)
-            if context['life_entries']:
+            context['life_goals'] = self.life.goals_context(query)
+            if context['life_entries'] or context['life_goals']:
                 instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
         return base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
 
@@ -143,7 +145,7 @@ class ChatService:
                 context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
-                if context.get('life_entries'):
+                if context.get('life_entries') or context.get('life_goals'):
                     instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
                 turn.system_prompt = base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
                 if context.get('owner_feedback'):

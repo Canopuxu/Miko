@@ -53,7 +53,8 @@ class ScheduleData:
         """允许未来字段扩展"""
         return cls(
             date=data["date"],
-            entries=[{"text": (row["topic"] + "：" + row["text"]
+            entries=[{**({'goal_id': row['goal_id']} if row.get('goal_id') else {}),
+                      "text": (row["topic"] + "：" + row["text"]
                                if row.get("topic") and row["topic"] != "活动或兴趣"
                                and row["topic"] not in row["text"] else row["text"])}
                      for row in data.get("entries", [])],
@@ -77,6 +78,8 @@ class ScheduleDataManager:
     def __init__(self, json_path: Path):
         self._path = json_path
         self._data: dict[str, ScheduleData] = {}
+        self.goals: dict[str, dict] = {}
+        self.revision = 0
 
         self.load()
 
@@ -111,6 +114,10 @@ class ScheduleDataManager:
         raw = json.loads(self._path.read_text(encoding="utf-8"))
 
         data: dict[str, ScheduleData] = {}
+        if 'days' in raw:
+            self.goals = raw.get('goals', {})
+            self.revision = raw.get('revision', 0)
+            raw = raw['days']
         for date_str, item in raw.items():
             if not isinstance(item, dict):
                 continue
@@ -126,18 +133,35 @@ class ScheduleDataManager:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         tmp_path = self._path.with_suffix(".tmp")
-        payload = {date: asdict(data) for date, data in self._data.items()}
+        payload = {'days': {date: asdict(data) for date, data in self._data.items()},
+                   'goals': self.goals, 'revision': self.revision + 1}
 
         tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         tmp_path.replace(self._path)
+        self.revision += 1
+
+    def commit(self, data: ScheduleData | None, goals: dict[str, dict], revision: int) -> None:
+        """Publish one generation's goals and activities in the same atomic file."""
+        if self.revision != revision:
+            raise ValueError('生活记录或目标已更新，请刷新后再生成')
+        previous_data, previous_goals = dict(self._data), self.goals
+        if data:
+            self._data[data.date] = data
+        self.goals = goals
+        try:
+            self.save()
+        except Exception:
+            self._data, self.goals = previous_data, previous_goals
+            raise
 
     # ---------- 工具方法 ----------
 
     def clear(self, *, save: bool = True) -> None:
         """清空所有数据"""
         self._data.clear()
+        self.goals.clear()
         if save:
             self.save()

@@ -7,7 +7,7 @@
 .life-date-list button { text-align: left; padding: 12px; border: 0; border-radius: 8px; color: #776a5c; background: transparent; font: inherit; cursor: pointer; }
 .life-date-list button.selected { background: #e6e0d5; }
 .life-controls { border-top: 1px solid #e5ded3; padding: 12px 0; font-size: 12px; color: #8c8073; }
-.life-workspace { width: min(740px, 100%); box-sizing: border-box; padding: 32px; }
+.life-workspace { width: min(740px, 100%); box-sizing: border-box; padding: 32px; flex: 1; min-height: 0; overflow-y: auto; }
 .life-record-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; color: #938577; font-size: 12px; }
 .life-entry { position: relative; padding: 16px 42px 16px 18px; border: 1px solid #e5ded3; border-radius: 12px; margin-bottom: 12px; background: #f7f4ef; }
 .life-entry input, .life-entry textarea { box-sizing: border-box; width: 100%; padding: 6px 0; border: 0; background: transparent; color: #655545; font: inherit; }
@@ -20,3 +20,43 @@
 .life-empty { padding: 34px 0; color: #9a8874; line-height: 1.8; }
 .life-empty span { font-size: 12px; }
 @media (max-width: 760px) { .life-workspace { padding: 24px 18px; } }
+.life-panel { position: relative; }
+.life-page-notice { margin: 0 28px; }
+.life-view-switch { display: flex; background: #e9e3d9; padding: 4px; border-radius: 10px; }
+.life-view-switch button { flex: 1; padding: 10px 4px; border: 0; border-radius: 7px; background: transparent; color: #857664; cursor: pointer; font: inherit; font-size: 12px; }
+.life-view-switch button.selected { background: #faf8f4; color: #584c3e; box-shadow: 0 1px 4px #776a5c15; }
+.life-list-heading { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #938577; }
+.life-list-heading button { background: transparent; border: 0; font-size: 20px; color: #857664; cursor: pointer; }
+.life-goal-list { max-height: 34%; overflow: auto; flex-shrink: 0; }
+.life-goal-list p { color: #ac9c8c; font-size: 12px; line-height: 1.7; }
+.life-goal-link { display: grid; width: 100%; gap: 5px; text-align: left; padding: 12px 8px; border: 0; border-left: 3px solid #98aa8e; background: transparent; margin-top: 8px; color: #685e50; font: inherit; font-size: 12px; cursor: pointer; }
+.life-goal-link.completed { border-color: #d8a784; }.life-goal-link.paused { border-color: #c5bfb6; }
+.life-goal-link small { color: #a89886; font-size: 10px; }
+.life-entry select { max-width: 100%; font: inherit; font-size: 12px; color: #92806a; border: 0; border-top: 1px solid #e5ded3; padding: 8px 0 0; background: transparent; }
+.life-tree { position: relative; flex: 1; min-height: 430px; height: calc(100vh - 180px); background: radial-gradient(ellipse at center, #f4efe7 0%, #fcfaf7 76%); }
+.life-tree .react-flow { height: 100%; }
+.life-tree-node { box-sizing: border-box; text-align: center; line-height: 1.5; color: #655748; box-shadow: 0 6px 24px #6655420d; }
+.life-tree-node .react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 1px; min-height: 1px; pointer-events: none; }
+.life-tree-node.root { display: grid; place-content: center; width: 106px; height: 106px; border-radius: 50%; background: #8b7c68; color: #fffaf2; box-shadow: 0 0 0 12px #e9dfd280; }
+.life-tree-monogram { font-family: Georgia, serif; font-style: italic; font-size: 42px; line-height: 1; }
+.life-tree-node.root strong { font-weight: 500; font-size: 14px; }
+.life-tree-node.goal, .life-tree-node.ordinary { width: 204px; min-height: 104px; padding: 14px 18px; border-radius: 24px; border: 1px solid #b2bfa7; background: #eff2e9; }
+.life-tree-node.goal.completed { border-color: #d5b29a; background: #f5eade; }.life-tree-node.goal.paused { background: #eeeae4; border-color: #ccc3b8; }
+.life-tree-node.ordinary { background: #f2ece2; border-color: #dbccba; }
+.life-tree-node small { display: block; font-size: 10px; color: #968776; }
+.life-tree-label { font-size: 15px; margin: 5px 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.life-tree-node button { border: 0; background: transparent; color: #8b7c67; font: inherit; font-size: 10px; cursor: pointer; padding: 3px 6px; }
+.life-tree-node.event { width: 154px; min-height: 70px; padding: 10px 14px; border-radius: 15px; border: 1px solid #e0d4c5; background: #fffdf9; cursor: pointer; }
+.life-tree-node.event .life-tree-label { font-size: 13px; }
+.life-tree-toolbar { position: absolute; z-index: 5; left: 22px; right: 22px; top: 18px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+.life-tree-toolbar button { background: #faf8f1dd; pointer-events: auto; font-size: 11px; }
+.life-tree-toolbar span { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #a09281; }
+.life-tree-toolbar i { width: 7px; height: 7px; border-radius: 50%; background: #98aa8e; margin-left: 8px; }
+.life-tree-toolbar i.done { background: #d8a784; }.life-tree-toolbar i.paused { background: #c5bfb6; }
+.life-tree-caption { position: absolute; bottom: 16px; left: 62px; right: 16px; text-align: center; font-size: 11px; color: #a59684; pointer-events: none; }
+.life-tree-notice { display: block; padding: 10px 28px; min-height: 15px; color: #9a8874; font-size: 12px; }
+.life-goal-editor { position: absolute; z-index: 7; right: 20px; top: 110px; width: min(280px, calc(100% - 70px)); padding: 22px; border-radius: 16px; background: #fffdfaef; border: 1px solid #ded3c3; box-shadow: 0 12px 50px #75614b1c; display: grid; gap: 16px; backdrop-filter: blur(12px); }
+.life-goal-editor label { display: grid; gap: 7px; font-size: 12px; color: #968570; }
+.life-goal-editor textarea, .life-goal-editor input, .life-goal-editor select { width: 100%; box-sizing: border-box; border: 1px solid #e2d8cb; border-radius: 8px; padding: 10px; background: #faf8f3; color: #6f604d; font: inherit; }
+.life-goal-editor small { color: #ab9d8b; font-size: 11px; }
+@media (max-width: 760px) { .life-tree { min-height: 500px; }.life-tree-toolbar span { display: none; }.life-tree-toolbar { justify-content: flex-end; } }

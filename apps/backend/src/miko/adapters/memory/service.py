@@ -54,6 +54,11 @@ class Memory:
     def documents(self):
         result = {}
         if self.chat.life:
+            for goal in self.chat.life.store.goals.values():
+                name = 'life-goal:' + goal['id']
+                result[name] = {'name': name, 'track': 'memory', 'description': 'Miko 生活目标',
+                    'content': json.dumps({k: v for k, v in goal.items() if k != 'id'}, ensure_ascii=False),
+                    'subject': 'miko', 'peer': '', 'entry_id': name}
             for day, row in self.chat.life.store.all().items():
                 if day > date.today().isoformat() or not row.entries:
                     continue
@@ -124,6 +129,7 @@ class Memory:
         context = self.chat.profiles.context(query, key)
         if self.chat.life:
             context['life_entries'] = self.chat.life.context(query)
+            context['life_goals'] = self.chat.life.goals_context(query)
         context['social_memory'] = self.social.context(query, key)
         peer = f'qq:{key[0]}:{key[1]}' if key else ''
         context['people_memory'] = [{k: r[k] for k in ('id','subject','peer','category','topic','content','updated_at')}
@@ -166,6 +172,16 @@ class Memory:
                         row = next((r for r in self.structured.days(peer=peer) if r['id']==name), None)
                         if row and not any(r['id']==name for r in context['dated_experiences']):
                             context['dated_experiences'].append(row)
+                    elif name.startswith('life-goal:') and self.chat.life:
+                        goal = self.chat.life.store.goals.get(name[10:])
+                        goals = context.setdefault('life_goals', [])
+                        if goal and goal not in goals and len(goals) < 20:
+                            goals.append(goal)
+                        rows = [r for r in self.chat.life.records() if r.get('goal_id') == name[10:]]
+                        entries = context.setdefault('life_entries', [])
+                        for row in rows[:6]:
+                            if row not in entries and len(entries) < 20:
+                                entries.append(row)
                     elif name.startswith('life:') and self.chat.life:
                         rows = [r for r in self.chat.life.records() if r['day'] == name[5:]]
                         entries = context.setdefault('life_entries', [])
@@ -174,6 +190,12 @@ class Memory:
                                 entries.append(row)
                 context['retrieval'] = {'engine': 'memU Embedding + Tulpa FTS', 'model': self.model,
                                         'hits': [{k: h[k] for k in ('name','score')} for h in hits['files']]}
+                if self.chat.life:
+                    goals = context.setdefault('life_goals', [])
+                    for entry in context.get('life_entries', []):
+                        goal = self.chat.life.store.goals.get(entry.get('goal_id'))
+                        if goal and goal not in goals and len(goals) < 20:
+                            goals.append(goal)
             except Exception as exc:
                 self.error = '语义检索失败（' + type(exc).__name__ + '），本次使用原有关键词检索'
                 context['retrieval']['error'] = self.error

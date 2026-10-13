@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from miko.api.life import life_router
 from miko.api.profiles import ProfileInput
 from miko.domain.conversation.chat import ChatService, reply_context
-from miko.domain.life import Life
+from miko.domain.life import Life, GoalInput
 from miko.settings import Settings
 from miko.adapters.memory.service import Memory
 
@@ -137,3 +137,75 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             'entries': [{'topic': '摄影', 'text': '练构图'}]}}), encoding='utf-8')
         reopened = Life(self.chat)
         self.assertEqual(reopened.listing()['record']['entries'], [{'text': '摄影：练构图'}])
+
+    async def test_goal_cycle_and_shared_semantic_memory(self):
+        outputs = [
+            {'new_goals': [{'ref': 'new1', 'text': '拍一组窗边的照片', 'target_date': '2026-10-08'}],
+             'entries': [{'text': '练摄影，用窗边的杯子试构图', 'goal_id': 'new1'}, {'text': '泡茶，听雨'}]},
+            {'goal_updates': [], 'entries': [{'text': '阴天，今天没拿相机'}]},
+        ]
+        inputs = []
+        async def complete(system, message, **kwargs):
+            inputs.append(json.loads(message))
+            return {'text': json.dumps(outputs.pop(0), ensure_ascii=False)}
+        self.chat.complete_memory = complete
+        with patch('miko.domain.life.date', SimulatedDay):
+            SimulatedDay.current = date(2026, 10, 6)
+            self.life.save(SimulatedDay.today(), [{'text': '午后小憩'}], 0)
+            await self.life.generate()
+            goal_id = next(iter(self.life.store.goals))
+            self.assertEqual(len(self.life.listing()['record']['entries']), 3)
+            self.assertEqual(self.life.store.get(SimulatedDay.today()).entries[1]['goal_id'], goal_id)
+            # Passing an estimate does not change the goal's state.
+            SimulatedDay.current = date(2026, 10, 9)
+            await self.life.generate()
+            self.assertEqual(self.life.store.goals[goal_id]['status'], 'active')
+            self.assertEqual(inputs[-1]['生活目标'][0]['id'], goal_id)
+            outputs.append({'goal_updates': [{'id': goal_id, 'status': 'paused', 'target_date': '2026-10-12'}],
+                            'entries': [{'text': '收起相机，改天再拍', 'goal_id': goal_id}]})
+            await self.life.generate()
+            self.assertEqual(self.life.store.goals[goal_id]['status'], 'paused')
+            outputs.append({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
+                            'new_goals': [{'ref': 'next', 'text': '给照片做一张双颜色海报', 'target_date': '2026-10-18'}],
+                            'entries': [{'text': '选好了窗边那组摄影照片', 'goal_id': goal_id},
+                                        {'text': '试海报配色', 'goal_id': 'next'}]})
+            SimulatedDay.current = date(2026, 10, 12)
+            await self.life.generate()
+        restarted = Life(self.chat)
+        self.assertEqual(restarted.store.goals[goal_id]['status'], 'completed')
+        self.assertEqual(restarted.store.goals[goal_id]['completed_date'], '2026-10-12')
+        self.assertEqual(len(restarted.store.goals), 2)
+        self.assertEqual(len(restarted.listing()['trajectory']), 7)
+        context = await self.memory.context('相机')
+        self.assertTrue(any(g['id'] == goal_id and g['status'] == 'completed' for g in context['life_goals']))
+        self.assertTrue(any(r.get('goal_id') == goal_id for r in context['life_entries']))
+        compact = reply_context(context)
+        self.assertNotIn('goal_id', json.dumps(compact))
+        self.assertNotIn('id', compact['life_goals'][0])
+        app = FastAPI(); app.include_router(life_router(self.life))
+        with TestClient(app) as client:
+            body = {'text': '给照片做一张双颜色海报', 'target_date': '2026-10-20',
+                    'status': 'paused', 'revision': self.life.store.revision}
+            other = next(g for g in self.life.store.goals if g != goal_id)
+            self.assertEqual(client.put('/api/life/goals/' + other, json=body).status_code, 200)
+            self.assertEqual(client.put('/api/life/goals/' + other, json=body).status_code, 409)
+
+    async def test_goal_generation_is_atomic_and_owner_edit_wins(self):
+        self.life.save_goal(GoalInput(text='练和弦', target_date=date.today()), self.life.store.revision)
+        goal_id = next(iter(self.life.store.goals))
+        async def invalid(*args, **kwargs):
+            return {'text': json.dumps({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
+                'entries': [{'text': '随手写了几个字', 'goal_id': 'missing'}]})}
+        self.chat.complete_memory = invalid
+        with self.assertRaises(ValueError): await self.life.generate()
+        self.assertEqual(Life(self.chat).store.goals[goal_id]['status'], 'active')
+        self.assertFalse(self.life.store.has(date.today()))
+        async def concurrent(*args, **kwargs):
+            self.life.save_goal(GoalInput(text='练和弦，先搁置', target_date=date.today(), status='paused'),
+                                self.life.store.revision, goal_id)
+            return {'text': json.dumps({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
+                                       'entries': [{'text': '练和弦', 'goal_id': goal_id}]})}
+        self.chat.complete_memory = concurrent
+        with self.assertRaises(ValueError): await self.life.generate()
+        self.assertEqual(Life(self.chat).store.goals[goal_id]['status'], 'paused')
+        self.assertFalse(self.life.store.has(date.today()))

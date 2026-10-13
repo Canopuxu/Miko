@@ -12,6 +12,7 @@
   "adaptations": [
     "Replace outfit and prose schedule fields with entries, revision and source",
     "Exclude unused wardrobe code",
-    "Report malformed JSON instead of clearing stored history"
+    "Report malformed JSON instead of clearing stored history",
+    "Persist goals and dated activity links in one atomic snapshot, with revision checking and legacy date-map reading"
   ]
 }

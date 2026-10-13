@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, StrictBool
 
 from miko.api.local import local_request
-from miko.domain.life import LifeEntries
+from miko.domain.life import LifeEntries, GoalInput
 
 
 class LifeSave(LifeEntries):
@@ -14,6 +14,10 @@ class LifeSave(LifeEntries):
 
 class LifeControl(BaseModel):
     enabled: StrictBool
+
+
+class GoalSave(GoalInput):
+    revision: int
 
 
 def life_router(life):
@@ -38,6 +42,20 @@ def life_router(life):
             raise HTTPException(409, str(exc)) from None
         except Exception:
             raise HTTPException(502, '生成未完成，原生活条目已保留') from None
+
+    @router.post('/goals')
+    async def create_goal(body: GoalSave):
+        try:
+            return life.save_goal(GoalInput(**body.model_dump(exclude={'revision'})), body.revision)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @router.put('/goals/{goal_id}')
+    async def update_goal(goal_id: str, body: GoalSave):
+        try:
+            return life.save_goal(GoalInput(**body.model_dump(exclude={'revision'})), body.revision, goal_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @router.put('/control')
     async def control(body: LifeControl):

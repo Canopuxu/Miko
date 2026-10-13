@@ -122,3 +122,30 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 - [sqlmodel 0.0.48](https://pypi.org/project/sqlmodel/0.0.48/)
 - [truststore 0.10.4](https://pypi.org/project/truststore/0.10.4/)
 - [tzdata 2026.5](https://pypi.org/project/tzdata/2026.5/)
+
+## 生活轨迹图
+
+- [React Flow](https://github.com/xyflow/xyflow)：@xyflow/react 12.12.0，MIT；复用画布、节点交互、连线、缩放与平移。
+- [d3-hierarchy](https://github.com/d3/d3-hierarchy)：3.1.2，ISC；复用 tree / hierarchy，转换为径向坐标。
+- 新增直接与传递依赖的固定版本及许可副本记录在 `config/web-dependencies.lock.json` 与 `licenses/npm/`。
+  - [@types/d3-color 3.1.3](https://www.npmjs.com/package/@types/d3-color/v/3.1.3)：MIT。
+  - [@types/d3-drag 3.0.7](https://www.npmjs.com/package/@types/d3-drag/v/3.0.7)：MIT。
+  - [@types/d3-hierarchy 3.1.7](https://www.npmjs.com/package/@types/d3-hierarchy/v/3.1.7)：MIT。
+  - [@types/d3-interpolate 3.0.4](https://www.npmjs.com/package/@types/d3-interpolate/v/3.0.4)：MIT。
+  - [@types/d3-selection 3.0.12](https://www.npmjs.com/package/@types/d3-selection/v/3.0.12)：MIT。
+  - [@types/d3-transition 3.0.9](https://www.npmjs.com/package/@types/d3-transition/v/3.0.9)：MIT。
+  - [@types/d3-zoom 3.0.9](https://www.npmjs.com/package/@types/d3-zoom/v/3.0.9)：MIT。
+  - [@xyflow/react 12.12.0](https://www.npmjs.com/package/@xyflow/react/v/12.12.0)：MIT。
+  - [@xyflow/system 0.0.83](https://www.npmjs.com/package/@xyflow/system/v/0.0.83)：MIT。
+  - [classcat 5.0.5](https://www.npmjs.com/package/classcat/v/5.0.5)：MIT。
+  - [d3-color 3.1.0](https://www.npmjs.com/package/d3-color/v/3.1.0)：ISC。
+  - [d3-dispatch 3.0.1](https://www.npmjs.com/package/d3-dispatch/v/3.0.1)：ISC。
+  - [d3-drag 3.0.0](https://www.npmjs.com/package/d3-drag/v/3.0.0)：ISC。
+  - [d3-ease 3.0.1](https://www.npmjs.com/package/d3-ease/v/3.0.1)：BSD-3-Clause。
+  - [d3-hierarchy 3.1.2](https://www.npmjs.com/package/d3-hierarchy/v/3.1.2)：ISC。
+  - [d3-interpolate 3.0.1](https://www.npmjs.com/package/d3-interpolate/v/3.0.1)：ISC。
+  - [d3-selection 3.0.0](https://www.npmjs.com/package/d3-selection/v/3.0.0)：ISC。
+  - [d3-timer 3.0.1](https://www.npmjs.com/package/d3-timer/v/3.0.1)：ISC。
+  - [d3-transition 3.0.1](https://www.npmjs.com/package/d3-transition/v/3.0.1)：ISC。
+  - [d3-zoom 3.0.0](https://www.npmjs.com/package/d3-zoom/v/3.0.0)：ISC。
+  - [zustand 4.5.7](https://www.npmjs.com/package/zustand/v/4.5.7)：MIT。

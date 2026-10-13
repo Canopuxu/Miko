@@ -273,7 +273,9 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_web_and_qq_read_the_same_dated_life_entries(self):
         entries = [{'day': '2026-10-13', 'text': '摄影：练构图'}]
-        self.service.life = SimpleNamespace(context=lambda query: entries)
+        goals = [{'id': 'private-goal-id', 'text': '拍一组窗边照片', 'start_date': '2026-10-13',
+                  'target_date': '2026-10-20', 'status': 'active'}]
+        self.service.life = SimpleNamespace(context=lambda query: entries, goals_context=lambda query: goals)
         await self.collect('你最近在做什么')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
@@ -283,6 +285,9 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         qq = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
         self.assertEqual(web['life_entries'], qq['life_entries'])
         self.assertEqual(web['life_entries'], entries)
+        self.assertEqual(web['life_goals'], qq['life_goals'])
+        self.assertEqual(web['life_goals'][0]['status'], 'active')
+        self.assertNotIn('id', web['life_goals'][0])
         self.assertIn('日期表示记录时间', web_prompt)
         self.assertIn('日期表示记录时间', qq_prompt)
 

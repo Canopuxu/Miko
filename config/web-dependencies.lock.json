@@ -313,6 +313,216 @@
         "licenses/npm/vite/LICENSE.md"
       ],
       "licenseFrom": "vite"
+    },
+    {
+      "name": "@types/d3-color",
+      "version": "3.1.3",
+      "source": "https://www.npmjs.com/package/@types/d3-color/v/3.1.3",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-color/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-color"
+    },
+    {
+      "name": "@types/d3-drag",
+      "version": "3.0.7",
+      "source": "https://www.npmjs.com/package/@types/d3-drag/v/3.0.7",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-drag/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-drag"
+    },
+    {
+      "name": "@types/d3-hierarchy",
+      "version": "3.1.7",
+      "source": "https://www.npmjs.com/package/@types/d3-hierarchy/v/3.1.7",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-hierarchy/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-hierarchy"
+    },
+    {
+      "name": "@types/d3-interpolate",
+      "version": "3.0.4",
+      "source": "https://www.npmjs.com/package/@types/d3-interpolate/v/3.0.4",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-interpolate/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-interpolate"
+    },
+    {
+      "name": "@types/d3-selection",
+      "version": "3.0.12",
+      "source": "https://www.npmjs.com/package/@types/d3-selection/v/3.0.12",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-selection/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-selection"
+    },
+    {
+      "name": "@types/d3-transition",
+      "version": "3.0.9",
+      "source": "https://www.npmjs.com/package/@types/d3-transition/v/3.0.9",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-transition/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-transition"
+    },
+    {
+      "name": "@types/d3-zoom",
+      "version": "3.0.9",
+      "source": "https://www.npmjs.com/package/@types/d3-zoom/v/3.0.9",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@types/d3-zoom/LICENSE"
+      ],
+      "licenseFrom": "@types/d3-zoom"
+    },
+    {
+      "name": "@xyflow/react",
+      "version": "12.12.0",
+      "source": "https://www.npmjs.com/package/@xyflow/react/v/12.12.0",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@xyflow/react/LICENSE"
+      ],
+      "licenseFrom": "@xyflow/react"
+    },
+    {
+      "name": "@xyflow/system",
+      "version": "0.0.83",
+      "source": "https://www.npmjs.com/package/@xyflow/system/v/0.0.83",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/@xyflow/system/LICENSE"
+      ],
+      "licenseFrom": "@xyflow/system"
+    },
+    {
+      "name": "classcat",
+      "version": "5.0.5",
+      "source": "https://www.npmjs.com/package/classcat/v/5.0.5",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/classcat/LICENSE.md"
+      ],
+      "licenseFrom": "classcat"
+    },
+    {
+      "name": "d3-color",
+      "version": "3.1.0",
+      "source": "https://www.npmjs.com/package/d3-color/v/3.1.0",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-color/LICENSE"
+      ],
+      "licenseFrom": "d3-color"
+    },
+    {
+      "name": "d3-dispatch",
+      "version": "3.0.1",
+      "source": "https://www.npmjs.com/package/d3-dispatch/v/3.0.1",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-dispatch/LICENSE"
+      ],
+      "licenseFrom": "d3-dispatch"
+    },
+    {
+      "name": "d3-drag",
+      "version": "3.0.0",
+      "source": "https://www.npmjs.com/package/d3-drag/v/3.0.0",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-drag/LICENSE"
+      ],
+      "licenseFrom": "d3-drag"
+    },
+    {
+      "name": "d3-ease",
+      "version": "3.0.1",
+      "source": "https://www.npmjs.com/package/d3-ease/v/3.0.1",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        "licenses/npm/d3-ease/LICENSE"
+      ],
+      "licenseFrom": "d3-ease"
+    },
+    {
+      "name": "d3-hierarchy",
+      "version": "3.1.2",
+      "source": "https://www.npmjs.com/package/d3-hierarchy/v/3.1.2",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-hierarchy/LICENSE"
+      ],
+      "licenseFrom": "d3-hierarchy"
+    },
+    {
+      "name": "d3-interpolate",
+      "version": "3.0.1",
+      "source": "https://www.npmjs.com/package/d3-interpolate/v/3.0.1",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-interpolate/LICENSE"
+      ],
+      "licenseFrom": "d3-interpolate"
+    },
+    {
+      "name": "d3-selection",
+      "version": "3.0.0",
+      "source": "https://www.npmjs.com/package/d3-selection/v/3.0.0",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-selection/LICENSE"
+      ],
+      "licenseFrom": "d3-selection"
+    },
+    {
+      "name": "d3-timer",
+      "version": "3.0.1",
+      "source": "https://www.npmjs.com/package/d3-timer/v/3.0.1",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-timer/LICENSE"
+      ],
+      "licenseFrom": "d3-timer"
+    },
+    {
+      "name": "d3-transition",
+      "version": "3.0.1",
+      "source": "https://www.npmjs.com/package/d3-transition/v/3.0.1",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-transition/LICENSE"
+      ],
+      "licenseFrom": "d3-transition"
+    },
+    {
+      "name": "d3-zoom",
+      "version": "3.0.0",
+      "source": "https://www.npmjs.com/package/d3-zoom/v/3.0.0",
+      "license": "ISC",
+      "licenseFiles": [
+        "licenses/npm/d3-zoom/LICENSE"
+      ],
+      "licenseFrom": "d3-zoom"
+    },
+    {
+      "name": "zustand",
+      "version": "4.5.7",
+      "source": "https://www.npmjs.com/package/zustand/v/4.5.7",
+      "license": "MIT",
+      "licenseFiles": [
+        "licenses/npm/zustand/LICENSE"
+      ],
+      "licenseFrom": "zustand"
     }
   ]
 }
