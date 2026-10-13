@@ -185,4 +185,5 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
   - [use-callback-ref 1.3.3](https://www.npmjs.com/package/use-callback-ref/v/1.3.3)：MIT。
   - [use-sidecar 1.1.3](https://www.npmjs.com/package/use-sidecar/v/1.1.3)：MIT。
 
-- [react-masonry-css](https://github.com/paulcollett/react-masonry-css)：1.0.16，MIT；复用按列排列的响应式卡片流。生活页已替换径向树图，React Flow、D3 Hierarchy 及其专用依赖已从当前前端移除，保留历史致谢与许可副本。
+- [react-masonry-css](https://github.com/paulcollett/react-masonry-css)：1.0.16，MIT；曾用于生活页卡片流，已从当前前端移除，保留历史致谢与许可副本。
+- [React Flow](https://github.com/xyflow/xyflow)：@xyflow/react 12.12.0，MIT；生活页复用节点、连线和交互，适配为顶部汇总、按日期对齐的纵向目标分支；继续使用既有许可副本。

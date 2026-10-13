@@ -37,19 +37,28 @@
 .life-timeline-filter { margin-bottom: 20px; }
 .life-timeline-filter label { display: inline-flex; align-items: center; gap: 12px; color: #756f60; font-size: 13px; }
 .life-timeline-filter select { max-width: min(450px,60vw); border: 1px solid #e0ded2; border-radius: 6px; background: #fffdf9; padding: 8px 12px; color: #403b35; font-size: 13px; }
-.life-masonry { display: flex; width: auto; margin-left: -20px; }
-.life-masonry-column { padding-left: 20px; background-clip: padding-box; }
-.life-day-card { padding: 22px 24px; margin-bottom: 20px; border: 1px solid #e6e3d9; border-radius: 8px; background: #fffdf9; }
-.life-day-card > header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
-.life-day-card h2 { margin: 0; font-size: 17px; font-weight: 500; color: #403b35; }
-.life-activity-group + .life-activity-group { border-top: 1px solid #eeece4; margin-top: 18px; padding-top: 16px; }
-.life-goal-reference { display: block; padding: 0; border: 0; background: transparent; text-align: left; color: #5f735a; font-size: 14px; line-height: 1.7; }
-.life-goal-reference:hover { text-decoration: underline; }
-.life-activity-group ul { margin: 8px 0 0; padding-left: 18px; }
-.life-activity-group li { color: #403b35; font-size: 14px; line-height: 1.8; padding: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.life-branch-container { width: 100%; min-width: 0; overflow-x: auto; }
+.life-branch-container .react-flow__handle { opacity: 0; pointer-events: none; width: 1px; height: 1px; border: 0; min-width: 0; min-height: 0; }
+.life-branch-root { pointer-events: auto; width: 100%; height: 34px; border: 0; border-radius: 20px; background: var(--sage); color: #fffdf9; font: 500 16px/1.5 'Segoe UI','Microsoft YaHei',sans-serif; }
+.life-branch-date { display: block; text-align: right; color: #706b62; font-size: 12px; line-height: 1.7; }
+.life-branch-date strong { display: block; font-weight: 500; }.life-branch-date small { font-size: 12px; }
+.life-branch-node { pointer-events: auto; width: 100%; height: 100%; position: relative; border: 0; background: transparent; color: var(--ink); text-align: left; padding: 0; font: inherit; }
+.life-branch-node.goal { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.life-branch-dot { display: block; background: var(--sage); border-radius: 50%; }
+.goal .life-branch-dot { width: 24px; height: 24px; border: 5px solid var(--sage); background: var(--page); flex-shrink: 0; }
+.goal.ordinary .life-branch-dot { border: 2px solid #8d887d; }
+.life-branch-copy { display: block; min-width: 0; }.life-branch-copy > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
+.goal .life-branch-copy > span { font-size: 16px; font-weight: 600; -webkit-line-clamp: 2; }.life-branch-copy small { display: block; font-size: 12px; line-height: 1.5; color: #706b62; margin-top: 6px; }
+.life-branch-node.activity { padding: 6px 6px 6px 30px; display: flex; align-items: flex-start; border-radius: 6px; }
+.activity .life-branch-dot { position: absolute; left: 8px; top: 15px; width: 8px; height: 8px; box-shadow: 0 0 0 4px var(--page); }
+.activity.ordinary .life-branch-dot { background: #8d887d; }
+.life-branch-node.activity.is-selected, .life-branch-node.activity:hover { background: var(--sage-wash); }
+.goal.is-selected .life-branch-dot { box-shadow: 0 0 0 3px var(--sage-wash); }.goal:hover .life-branch-copy > span { color: var(--sage); }
+.life-branch-edge .react-flow__edge-path { stroke: #c8cfc0; stroke-width: 1.2; }.life-branch-edge.active .react-flow__edge-path { stroke: var(--sage); stroke-width: 2; }
+.life-branch-detail { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #706b62; font-size: 12px; min-height: 42px; margin-bottom: 8px; }.life-branch-detail > span { white-space: pre-wrap; overflow-wrap: anywhere; }.life-branch-detail > button { flex-shrink: 0; }
 .life-timeline-notice { margin: 0; padding: 8px 32px; font-size: 12px; color: #667c5d; }
 .life-goal-editor { position: absolute; z-index: 7; right: 20px; top: 90px; width: min(280px, calc(100% - 70px)); padding: 22px; border-radius: 10px; background: #fffdf9; border: 1px solid #ded3c3; box-shadow: 0 6px 22px #75614b18; display: grid; gap: 16px; }
 .life-goal-editor label { display: grid; gap: 7px; font-size: 12px; color: #968570; }
 .life-goal-editor textarea, .life-goal-editor input, .life-goal-editor select { width: 100%; box-sizing: border-box; border: 1px solid #e2d8cb; border-radius: 8px; padding: 10px; background: #faf8f3; color: #6f604d; font: inherit; }
 .life-goal-editor small { color: #ab9d8b; font-size: 11px; }
-@media (max-width: 760px) { .life-timeline { padding: 20px 18px; }.life-day-card { padding: 18px; } }
+@media (max-width: 760px) { .life-timeline { padding: 20px 18px; } }

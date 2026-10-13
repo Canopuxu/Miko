@@ -323,7 +323,7 @@
         "licenses/npm/@types/d3-color/LICENSE"
       ],
       "licenseFrom": "@types/d3-color",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@types/d3-drag",
@@ -334,7 +334,7 @@
         "licenses/npm/@types/d3-drag/LICENSE"
       ],
       "licenseFrom": "@types/d3-drag",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@types/d3-hierarchy",
@@ -356,7 +356,7 @@
         "licenses/npm/@types/d3-interpolate/LICENSE"
       ],
       "licenseFrom": "@types/d3-interpolate",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@types/d3-selection",
@@ -367,7 +367,7 @@
         "licenses/npm/@types/d3-selection/LICENSE"
       ],
       "licenseFrom": "@types/d3-selection",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@types/d3-transition",
@@ -378,7 +378,7 @@
         "licenses/npm/@types/d3-transition/LICENSE"
       ],
       "licenseFrom": "@types/d3-transition",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@types/d3-zoom",
@@ -389,7 +389,7 @@
         "licenses/npm/@types/d3-zoom/LICENSE"
       ],
       "licenseFrom": "@types/d3-zoom",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@xyflow/react",
@@ -400,7 +400,7 @@
         "licenses/npm/@xyflow/react/LICENSE"
       ],
       "licenseFrom": "@xyflow/react",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@xyflow/system",
@@ -411,7 +411,7 @@
         "licenses/npm/@xyflow/system/LICENSE"
       ],
       "licenseFrom": "@xyflow/system",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "classcat",
@@ -422,7 +422,7 @@
         "licenses/npm/classcat/LICENSE.md"
       ],
       "licenseFrom": "classcat",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-color",
@@ -433,7 +433,7 @@
         "licenses/npm/d3-color/LICENSE"
       ],
       "licenseFrom": "d3-color",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-dispatch",
@@ -444,7 +444,7 @@
         "licenses/npm/d3-dispatch/LICENSE"
       ],
       "licenseFrom": "d3-dispatch",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-drag",
@@ -455,7 +455,7 @@
         "licenses/npm/d3-drag/LICENSE"
       ],
       "licenseFrom": "d3-drag",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-ease",
@@ -466,7 +466,7 @@
         "licenses/npm/d3-ease/LICENSE"
       ],
       "licenseFrom": "d3-ease",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-hierarchy",
@@ -488,7 +488,7 @@
         "licenses/npm/d3-interpolate/LICENSE"
       ],
       "licenseFrom": "d3-interpolate",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-selection",
@@ -499,7 +499,7 @@
         "licenses/npm/d3-selection/LICENSE"
       ],
       "licenseFrom": "d3-selection",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-timer",
@@ -510,7 +510,7 @@
         "licenses/npm/d3-timer/LICENSE"
       ],
       "licenseFrom": "d3-timer",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-transition",
@@ -521,7 +521,7 @@
         "licenses/npm/d3-transition/LICENSE"
       ],
       "licenseFrom": "d3-transition",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "d3-zoom",
@@ -532,7 +532,7 @@
         "licenses/npm/d3-zoom/LICENSE"
       ],
       "licenseFrom": "d3-zoom",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "zustand",
@@ -543,7 +543,7 @@
         "licenses/npm/zustand/LICENSE"
       ],
       "licenseFrom": "zustand",
-      "usage": "Previous radial life view; no longer a frontend dependency"
+      "usage": "Life branch timeline; React Flow and its dependencies"
     },
     {
       "name": "@radix-ui/primitive",
@@ -823,7 +823,8 @@
       "licenseFiles": [
         "licenses/npm/react-masonry-css/LICENSE"
       ],
-      "licenseFrom": "react-masonry-css"
+      "licenseFrom": "react-masonry-css",
+      "usage": "Previous life card view; no longer a frontend dependency"
     }
   ]
 }
