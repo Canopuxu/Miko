@@ -3,7 +3,7 @@ import { AppShell } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
 import { LifeTimeline, goalStatus, type LifeGoal, type LifeEntry, type LifeEvent } from '../components/LifeTimeline';
 import '../styles/life.css';
-import { Plus, RefreshCw, Save, X } from 'lucide-react';
+import { Plus, RefreshCw, Save, X, Pencil, Trash2, CalendarDays } from 'lucide-react';
 import { useDiscardGuard } from '../components/ui';
 
 type Entry = LifeEntry;
@@ -20,6 +20,7 @@ export function LifePage() {
   const [data, setData] = useState<Listing | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -32,7 +33,7 @@ export function LifePage() {
   async function load(selected = day) {
     try {
       const value = await getJson<Listing>('/api/life?day=' + selected);
-      setData(value); setEntries(value.record.entries); setDirty(false); setError('');
+      setData(value); setEntries(value.record.entries); setDirty(false); setEditing(null); setError('');
     } catch (e) { setError(String(e)); }
   }
   useEffect(() => { void load(day); }, [day]);
@@ -57,7 +58,7 @@ export function LifePage() {
     setBusy(true); setError('');
     try {
       const value = await request('/api/life', 'PUT', {day, revision: data.record.revision, entries});
-      setData(value); setEntries(value.record.entries); setDirty(false); setNotice('已保存');
+      setData(value); setEntries(value.record.entries); setDirty(false); setEditing(null); setNotice('已保存');
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }
@@ -65,7 +66,7 @@ export function LifePage() {
     setBusy(true); setError(''); setNotice('');
     try {
       const value = await request('/api/life/generate', 'POST');
-      setDay(value.day); setData(value); setEntries(value.record.entries); setDirty(false);
+      setDay(value.day); setData(value); setEntries(value.record.entries); setDirty(false); setEditing(null);
       setNotice('目标与今天的小事已更新');
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
@@ -107,18 +108,18 @@ export function LifePage() {
   const sidebar = <div className="life-navigation">
     <div className="life-view-switch"><button className={mode === 'timeline' ? 'selected' : ''} disabled={busy}
       onClick={() => guard.proceed(()=>setMode('timeline'))}>生活轨迹</button><button className={mode === 'day' ? 'selected' : ''}
-      disabled={busy} onClick={() => guard.proceed(()=>setMode('day'))}>按日记录</button></div>
-    <div className="life-goal-list"><div className="life-list-heading">想做的事<button aria-label="添加目标"
+      disabled={busy} onClick={() => guard.proceed(()=>{setMode('day');setGoal(null);})}>按日记录</button></div>
+    {mode === 'timeline' && <div className="life-goal-list"><div className="life-list-heading">想做的事<button aria-label="添加目标"
       disabled={busy} onClick={() => openGoal()}><Plus size={16}/></button></div>
       {data?.goals.map(value => <button key={value.id} className={`life-goal-link ${value.status}`}
-        disabled={busy} onClick={() => openGoal(value)}><span>{value.text}</span><small>{goalStatus[value.status]}</small></button>)}
-      {!data?.goals.length && <p>暂无目标</p>}</div>
-    <label>查看日期<input aria-label="生活记录日期" type="date" value={day} disabled={busy}
+        disabled={busy} onClick={() => openGoal(value)}><span>{value.text}</span><small>{goalStatus[value.status]} · {value.target_date.slice(5).replace('-','/')}</small></button>)}
+      {!data?.goals.length && <p>暂无目标</p>}</div>}
+    {mode === 'day' && <><label>查看日期<input aria-label="生活记录日期" type="date" value={day} disabled={busy}
       onChange={e => { if (e.target.value) showDay(e.target.value); }}/></label>
     <button className="life-button" onClick={() => showDay(today())}
       disabled={busy}>回到今天</button>
     <div className="life-date-list">{data?.dates.map(value => <button key={value}
-      className={day === value ? 'selected' : ''} disabled={busy} onClick={() => showDay(value)}>{value}</button>)}</div>
+      className={day === value ? 'selected' : ''} disabled={busy} onClick={() => showDay(value)}><CalendarDays size={15}/><span>{value}</span><small>{data.trajectory.filter(e=>e.day===value).length} 条</small></button>)}</div></>}
     <div className="life-controls"><p>{data?.status.enabled ? '自动记录已开启' : '自动记录已暂停'}</p>
       <button className="life-button" disabled={busy || data?.status.generating || !data} onClick={() => void toggle()}>
         {data?.status.enabled ? '暂停自动记录' : '恢复自动记录'}</button></div>
@@ -151,18 +152,22 @@ export function LifePage() {
       <div className="life-record-header"><span>{data?.record.source === 'generated' ? 'Miko 的生活记录' : data?.record.source === 'manual' ? '你修正的记录' : '尚未记录'}</span>
         <button className="life-button" disabled={busy} onClick={() => guard.proceed(()=>void load())}><RefreshCw size={14}/>刷新</button></div>
       {!entries.length && <div className="life-empty"><p>这一天还没有生活条目。</p><span>可以生成今天的记录，或直接写下简短的活动。</span></div>}
-      <div className="life-entries">{entries.map((entry, index) => <article className="life-entry" key={index}>
+      <div className="life-entries">{entries.map((entry, index) => <article className={`life-entry ${editing === index ? 'editing' : 'reading'}`} key={index}>
+        <span className="life-entry-number">{String(index+1).padStart(2,'0')}</span>
+        {editing === index ? <div className="life-entry-fields">
         <textarea aria-label="生活条目" placeholder="如：练键盘，左手换和弦还是有点卡；慢速练了一会儿" rows={3} value={entry.text} maxLength={240}
           onChange={e => update(index, 'text', e.target.value)} disabled={busy}/>
         <select aria-label="条目关联目标" value={entry.goal_id ?? ''} disabled={busy || goalDirty}
           onChange={e => {setEntries(rows => rows.map((r, i) => i === index ?
             {...r, goal_id: e.target.value || undefined} : r)); setDirty(true);}}>
           <option value="">日常片段</option>{data?.goals.map(g => <option value={g.id} key={g.id}>{g.text}</option>)}</select>
-        <button className="life-remove" aria-label="移除条目" disabled={busy}
-          onClick={() => { setEntries(entries.filter((_, i) => i !== index)); setDirty(true); }}><X size={15}/></button>
+        <button className="life-entry-done" onClick={()=>setEditing(null)}>完成编辑</button></div> : <div className="life-entry-content"><p>{entry.text || '尚未填写'}</p><small>{data?.goals.find(g=>g.id===entry.goal_id)?.text ?? '日常片段'}</small></div>}
+        <div className="life-entry-tools"><button className="icon-button" aria-label="编辑生活条目" title="编辑" disabled={busy} onClick={()=>setEditing(editing===index?null:index)}><Pencil size={16}/></button>
+        <button className="icon-button" aria-label="移除条目" title="移除" disabled={busy}
+          onClick={() => { setEntries(entries.filter((_, i) => i !== index)); setEditing(null); setDirty(true); }}><Trash2 size={16}/></button></div>
       </article>)}</div>
       <div className="life-actions"><button className="life-button" disabled={busy || goalDirty || entries.length >= 100}
-        onClick={() => { setEntries([...entries, {text: ''}]); setDirty(true); }}><Plus size={15}/>添加条目</button>
+        onClick={() => { setEntries([...entries, {text: ''}]); setEditing(entries.length); setDirty(true); }}><Plus size={15}/>添加条目</button>
         <button className="life-button life-save" disabled={busy || !dirty || entries.some(e => !e.text.trim())}
           onClick={() => void save()}><Save size={14}/>{busy?'保存中…':'保存修改'}</button>
         {dirty && <button className="life-button" disabled={busy} onClick={() => void load()}>撤销修改</button>}

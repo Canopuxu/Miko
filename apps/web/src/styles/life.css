@@ -68,3 +68,28 @@
 .life-canvas-controls button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); }
 .life-canvas-controls button:hover { background: var(--sage-wash); }
 .life-timeline-filter, .life-branch-detail { flex-shrink: 0; }
+
+.life-navigation { min-height: 0; gap: 16px; }
+.life-goal-list { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+.life-goal-list .life-list-heading { position: sticky; top: 0; z-index: 1; background: var(--page); padding: 0 0 10px; }
+.life-goal-link { border: 1px solid transparent; border-radius: 9px; padding: 12px; margin: 0 0 6px; gap: 8px; }
+.life-goal-link:hover { background: var(--sage-wash); }
+.life-goal-link > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.6; }
+.life-goal-link small { color: #706b62; font-size: 12px; }
+.life-date-list { min-height: 0; }
+.life-date-list button { display: flex; align-items: center; gap: 10px; }
+.life-date-list button small { margin-left: auto; font-size: 12px; }
+.life-controls { margin-top: auto; flex-shrink: 0; padding-bottom: 0; }
+.life-workspace { width: 100%; padding: 28px 32px; }
+.life-entries { max-width: 880px; }
+.life-entry { display: flex; align-items: flex-start; gap: 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 20px 0; margin: 0; }
+.life-entry-number { font-size: 12px; color: #878478; padding-top: 4px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.life-entry-content, .life-entry-fields { flex: 1; min-width: 0; }
+.life-entry-content p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; color: var(--ink); }
+.life-entry-content small { color: #74796c; font-size: 12px; line-height: 1.6; display: block; }
+.life-entry-tools { display: flex; gap: 4px; flex-shrink: 0; }
+.life-entry-tools .icon-button { width: 32px; height: 32px; }
+.life-entry.editing textarea { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--surface); min-height: 100px; }
+.life-entry-fields select { display: block; width: 100%; padding: 10px 0; }
+.life-entry-done { border: 0; background: transparent; color: var(--sage); padding: 8px 0; font-size: 12px; }
+.life-actions { position: sticky; bottom: -28px; background: var(--page); padding: 14px 0; border-top: 1px solid var(--line); }
