@@ -60,6 +60,7 @@ class Life:
         self.store = ScheduleDataManager(chat.settings.local_root / 'data/life/entries.json')
         self.config_path = chat.settings.local_root / 'config/life.local.json'
         self.enabled = json.loads(self.config_path.read_text(encoding='utf-8-sig')).get('enabled', True) if self.config_path.exists() else True
+        self.model = json.loads(self.config_path.read_text(encoding='utf-8-sig')).get('model') if self.config_path.exists() else None
         self.generating = False
         self.error = None
         self.task = None
@@ -132,7 +133,7 @@ class Life:
     def toggle(self, enabled):
         self.enabled = enabled
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps({'enabled': enabled}), encoding='utf-8')
+        self.config_path.write_text(json.dumps({'enabled': enabled, 'model': self.model}), encoding='utf-8')
         return self.status()
 
     async def generate(self, day=None):
@@ -154,7 +155,7 @@ class Life:
             material['生活目标'] = list(self.store.goals.values())
             material['日期'] = day.isoformat()
             prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
-            value = await self.chat.complete_memory(prompt, json.dumps(material, ensure_ascii=False), json_output=True)
+            value = await self.chat.complete_memory(prompt, json.dumps(material, ensure_ascii=False), model=self.model or None, json_output=True)
             output = LifeGeneration.model_validate_json(value['text'])
             goals = deepcopy(self.store.goals)
             for update in output.goal_updates:

@@ -7,6 +7,7 @@ import { MemoryPage } from './pages/MemoryPage';
 import { LifePage } from './pages/LifePage';
 import { RuntimeProvider } from './components/RuntimeStatus';
 import { Workbench } from './components/Workbench';
+import { SettingsPage } from './pages/SettingsPage';
 import './styles/workbench.css';
 
 function currentView(): View {
@@ -14,7 +15,7 @@ function currentView(): View {
   return views.find(item => item.id === view)?.id ?? 'chat';
 }
 const ReviewPage = () => <MemoryPage view="review"/>;
-const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: MemoryPage, life: LifePage, review: ReviewPage };
+const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: MemoryPage, life: LifePage, review: ReviewPage, settings: SettingsPage };
 
 export function App() {
   const [workbench, setWorkbench] = useState(false);
@@ -49,6 +50,13 @@ export function App() {
     }
     history.replaceState(null,'',url);setSearch(new URLSearchParams(url.search));
   }
+  useEffect(() => {
+    let alive = true;
+    void fetch('/api/settings').then(r=>r.ok?r.json():null).then(config=>{
+      if(alive && config && !config.configured) navigate('settings');
+    }).catch(()=>{});
+    return ()=>{alive=false;};
+  }, []);
   useEffect(() => {
     const restore = () => {activate(currentView()); setSearch(new URLSearchParams(location.search));};
     window.addEventListener('popstate', restore);

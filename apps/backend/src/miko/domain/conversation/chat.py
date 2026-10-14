@@ -117,7 +117,7 @@ class ChatService:
 
     def begin(self, message: str, conversation_id: str | None) -> Turn:
         if self.provider is None:
-            raise HTTPException(503, "尚未配置模型，请填写 MikoLocal/config/provider.local.json")
+            raise HTTPException(503, "尚未配置模型，请到设置中填写 API 与模型")
         if not message.strip():
             raise HTTPException(422, "消息不能为空")
         if conversation_id is not None:

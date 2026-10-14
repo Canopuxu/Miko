@@ -31,14 +31,25 @@ class Memory:
         self.error = None
         self.lock = asyncio.Lock()
         self.task = None
+        self.configure_index()
+
+    def configure_index(self):
+        chat = self.chat
+        local = chat.settings.local_root
+        if self.index:
+            self.index.database.close()
+        self.index = None
+        self.error = None
         path = local / 'config/embedding.local.json'
         self.model = None
         if path.exists() and chat.provider:
             config = json.loads(path.read_text(encoding='utf-8-sig'))
             self.model = config['model']
+            if not self.model:
+                return
             self.index = MemoryService(
                 database_config={'metadata_store': {'provider': 'sqlite',
-                    'dsn': 'sqlite:///' + (local / 'data/database/memu.sqlite3').as_posix()}},
+                    'dsn': 'sqlite:///' + (local / 'data/database' / config.get('index_file', 'memu.sqlite3')).as_posix()}},
                 embedding_profiles={'default': {'provider': 'openai', 'client_backend': 'httpx',
                     'base_url': chat.provider.api_base, 'api_key': chat.provider.api_key.get_secret_value(),
                     'embed_model': self.model}},

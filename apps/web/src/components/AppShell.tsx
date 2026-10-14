@@ -1,10 +1,10 @@
 import { createContext, useContext, type ReactNode } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight, MessageCircle, NotebookPen, Sprout, Users, UserRound, type LucideIcon } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, MessageCircle, NotebookPen, Sprout, Users, UserRound, Settings, type LucideIcon } from 'lucide-react';
 import { RuntimeStatus } from './RuntimeStatus';
 import mikoAvatar from '../assets/miko-avatar.svg';
 import mikoLogo from '../assets/miko-logo.svg';
 
-export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life' | 'review';
+export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life' | 'review' | 'settings';
 export const views: { id: View; label: string; icon: LucideIcon; title: string }[] = [
   { id: 'chat', label: '聊天', icon: MessageCircle, title: '最近对话' },
   { id: 'life', label: '生活', icon: Sprout, title: '生活记录' },
@@ -12,6 +12,7 @@ export const views: { id: View; label: string; icon: LucideIcon; title: string }
   { id: 'review', label: '回复回顾', icon: NotebookPen, title: '回顾与批注' },
   { id: 'profiles', label: '设定与资料', icon: UserRound, title: '资料库' },
   { id: 'memory', label: '记忆', icon: BookOpen, title: '记忆对象' },
+  { id: 'settings', label: '设置', icon: Settings, title: '设置' },
 ];
 export const NavigationContext = createContext<{
   active: View; expanded: boolean; select: (view: View) => void; toggle: () => void;
