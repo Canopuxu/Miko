@@ -1,6 +1,7 @@
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { ArrowUp, NotebookPen, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, NotebookPen, Plus, Square, Trash2, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { useRuntime } from '../components/RuntimeStatus';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
@@ -22,6 +23,8 @@ export function ChatPage() {
   const [observedTurn, setObservedTurn] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState<Conversation | null>(null);
+  const [removing, setRemoving] = useState(false);
   const conversation = useRef<string | null>(null);
   const turn = useRef<string | null>(null);
   const cancelRequested = useRef(false);
@@ -101,6 +104,22 @@ export function ChatPage() {
     finally { setLoading(false); }
   }
 
+  async function deleteConversation() {
+    if (!deleting) return;
+    setRemoving(true); setError('');
+    try {
+      const response = await fetch(`/api/conversations/${deleting.id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(await responseError(response));
+      if (conversation.current === deleting.id) {
+        conversation.current = null; turn.current = null; setSelected(null); remember(null);
+        setMessages([]); setDraft(''); setObservedTurn(null);
+      }
+      setConversations(rows => rows.filter(row => row.id !== deleting.id));
+      setDeleting(null);
+    } catch (cause) { setError(String(cause)); }
+    finally { setRemoving(false); }
+  }
+
   async function cancelTurn() {
     cancelRequested.current = true; setStopping(true);
     if (!turn.current) return;
@@ -174,12 +193,13 @@ export function ChatPage() {
   return <AppShell view="chat" sidebar={<>
       <button className="new-chat" onClick={()=>guard.proceed(newConversation)} disabled={generating || loading} aria-label="开启新对话" title="开启新对话"><Plus size={17}/><span className="new-chat-label"> 开启新对话</span></button>
       <nav className="conversation-list" aria-label="历史对话">
-        {conversations.map(item => <button key={item.id} className={`conversation-item ${selected === item.id ? 'active' : ''}`}
+        {conversations.map(item => <div key={item.id} className="conversation-row"><button className={`conversation-item ${selected === item.id ? 'active' : ''}`}
           aria-current={selected === item.id ? 'page' : undefined} onClick={() => {if(item.id!==selected)guard.proceed(()=>void openConversation(item.id));}}
           disabled={generating || loading} title={item.title}>
           <span className="conversation-title">{item.title}</span>
           <span className="conversation-preview">{item.preview || '已保存的对话'}</span>
-        </button>)}
+        </button><button className="conversation-delete" disabled={generating || loading || removing}
+          aria-label={`删除对话：${item.title}`} title="删除对话" onClick={() => setDeleting(item)}><Trash2 size={16}/></button></div>)}
         {!conversations.length && <p className="no-history">还没有历史对话</p>}
       </nav>
       <div className="sidebar-footer"><span className={`status-dot ${connected ? 'online' : ''}`} />
@@ -223,6 +243,16 @@ export function ChatPage() {
         </form>
         {generating && <p className="composer-caption" role="status">Miko 正在回复你</p>}
       </footer>
-    {guard.dialog}</main>
+    {guard.dialog}
+    <AlertDialog.Root open={!!deleting} onOpenChange={open => { if (!open && !removing) setDeleting(null); }}>
+      <AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay"/>
+        <AlertDialog.Content className="confirm-dialog">
+          <AlertDialog.Title>删除这段对话？</AlertDialog.Title>
+          <AlertDialog.Description>“{deleting?.title}”及其聊天记录将被删除，无法撤销。已整理的长期记忆可在记忆页单独管理。</AlertDialog.Description>
+          <div className="dialog-actions"><AlertDialog.Cancel className="ui-button" disabled={removing}>取消</AlertDialog.Cancel>
+            <button className="ui-button warning" disabled={removing} onClick={() => void deleteConversation()}>{removing ? '正在删除…' : '确认删除'}</button></div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root></main>
   </AppShell>;
 }

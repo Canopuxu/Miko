@@ -42,6 +42,7 @@ class RelationshipInput(BaseModel):
 
 
 class Subcategory(BaseModel):
+    pinned: StrictBool = False
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=36, pattern=r'^[^/]+$')
@@ -79,7 +80,12 @@ def profiles_router(chat, qq):
 
     @router.put('/categories')
     async def update_categories(body: LibraryInput):
-        return {'categories': library.save(body.subject, body.model_dump()['categories'])}
+        tree = body.model_dump()['categories']
+        for root in tree:
+            for node in [root, *root['children']]:
+                if not node['pinned']:
+                    node.pop('pinned')
+        return {'categories': library.save(body.subject, tree)}
 
     @router.get('')
     async def listing(q: str = '', subject: str = '', kind: str = '', category: str = ''):

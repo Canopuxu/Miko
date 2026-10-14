@@ -70,14 +70,14 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
                 SimulatedDay.current = date(2026, 10, day)
                 await self.life.generate()
             self.assertEqual(len(self.life.store.all()), 7)
-            self.assertEqual(self.life.context('摄影')[0]['day'], '2026-10-12')
+            self.assertEqual(self.life.context('摄影')[0]['day'], '2026-10-06')
         restarted = Life(self.chat)
         self.assertEqual(restarted.records(), self.life.records())
         context = await self.memory.context('摄影')
-        self.assertEqual(context['life_entries'][0]['text'], '练构图')
+        self.assertTrue(any(r['text']=='开始学摄影' for r in context['life_entries']))
         compact = reply_context(context)
         self.assertNotIn('revision', json.dumps(compact['life_entries']))
-        self.assertIn('life:2026-10-12', self.memory.documents())
+        self.assertIn('life:2026-10-12:0', self.memory.documents())
         # A related question with no matching keyword recalls an earlier day.
         semantic = await self.memory.context('相机')
         self.assertEqual(semantic['retrieval']['engine'], 'memU Embedding + Tulpa FTS')
@@ -89,11 +89,20 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             changed = client.put('/api/life', json={'day': '2026-10-12', 'revision': row['revision'],
                 'entries': [{'text': '练光影；构图暂停'}]})
             self.assertEqual(changed.status_code, 200, changed.text)
-            self.assertIn('光影', self.life.context('摄影')[0]['text'])
+            self.assertIn('光影', self.life.context('光影')[0]['text'])
             self.assertEqual(client.put('/api/life/control', json={'enabled': False}).status_code, 200)
             self.assertFalse(Life(self.chat).enabled)
             self.assertTrue(self.life.context('摄影'))
             self.assertEqual(client.get('/api/life?day=2026-10-06').json()['record']['entries'][0]['text'], '开始学摄影')
+
+    async def test_life_retrieval_selects_activity_without_entire_day(self):
+        self.life.save(date.today(), [{'text': '摄影：练构图'}, {'text': '网球：练正手'}], 0)
+        self.life.save_goal(GoalInput(text='练习网球', target_date=date.today()), self.life.store.revision)
+        self.assertEqual(self.life.context('录屏软件'), [])
+        self.assertEqual(self.life.goals_context('录屏软件'), [])
+        context = await self.memory.context('相机')
+        self.assertEqual([r['text'] for r in context['life_entries']], ['摄影：练构图'])
+        self.assertEqual(context['life_goals'], [])
 
     async def test_failed_or_superseded_generation_preserves_owner_edits(self):
         day = date.today()
@@ -118,6 +127,15 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             calls.append(1)
             return {'text': '{"entries":[{"text":"练配色"}]}'}
         self.chat.complete_memory = complete
+        from datetime import datetime, time
+        from zoneinfo import ZoneInfo
+        before = datetime.combine(date.today(), time(21, 59), ZoneInfo('Asia/Shanghai'))
+        after = before.replace(hour=22, minute=0)
+        self.assertFalse(self.life.automatic_due(before))
+        self.assertTrue(self.life.automatic_due(after))
+        clock = patch('miko.domain.life.datetime')
+        mocked = clock.start(); self.addCleanup(clock.stop)
+        mocked.now.return_value = after
         self.life.start()
         for _ in range(30):
             if self.life.store.has(date.today()):

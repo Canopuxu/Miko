@@ -95,6 +95,10 @@ class Settings:
         path = self.local_root / 'config/qq.local.json'
         return QqConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
 
+    def load_qq_provider(self) -> ProviderConfig | None:
+        path = self.local_root / 'config/qq-provider.local.json'
+        return ProviderConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
+
 
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(".tmp")

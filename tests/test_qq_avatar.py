@@ -9,7 +9,7 @@ import test_qq_replies as fixtures
 class AvatarTests(unittest.IsolatedAsyncioTestCase):
     async def test_overlapping_replies_keep_avatar_until_last_release(self):
         client = AsyncMock()
-        avatar = ReplyAvatar(client, 'miko.png', 'owner.png')
+        avatar = ReplyAvatar(client, 'miko.png', 'owner.png', restore_seconds=0)
         await asyncio.gather(avatar.acquire('a'), avatar.acquire('b'))
         self.assertEqual(client.avatar.await_count, 1)
         await avatar.release('a')
@@ -23,7 +23,7 @@ class AvatarTests(unittest.IsolatedAsyncioTestCase):
         try:
             service, client = fixture.service, fixture.client
             client.avatar = AsyncMock()
-            service.avatar = ReplyAvatar(client, 'miko.png', 'owner.png')
+            service.avatar = ReplyAvatar(client, 'miko.png', 'owner.png', restore_seconds=0)
             service.store.add_friend('123', '789', '第二位好友')
             await service.configure(('123', '789'), True)
             client.gate = asyncio.Event()
@@ -51,7 +51,7 @@ class AvatarTests(unittest.IsolatedAsyncioTestCase):
         try:
             service, client = fixture.service, fixture.client
             client.avatar = AsyncMock()
-            service.avatar = ReplyAvatar(client, 'miko.png', 'owner.png')
+            service.avatar = ReplyAvatar(client, 'miko.png', 'owner.png', restore_seconds=0)
             client.uncertain = True
             await fixture.receive(2)
             fixture.now = 1120

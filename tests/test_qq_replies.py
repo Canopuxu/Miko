@@ -28,7 +28,7 @@ class FakeChat:
 
     def begin_qq(self, cid, records, stickers=None):
         self.calls.append(records)
-        turn = SimpleNamespace(text=json.dumps({'bubbles': self.bubbles or [{'kind': 'text', 'text': self.text}]}, ensure_ascii=False), status='completed', error=None)
+        turn = SimpleNamespace(text=json.dumps({'bubbles': self.bubbles if self.bubbles is not None else [{'kind': 'text', 'text': self.text}]}, ensure_ascii=False), status='completed', error=None)
         async def run():
             if self.gate:
                 await self.gate.wait()
@@ -123,6 +123,24 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent), 2)
         self.assertIn('miko', [r['author']['kind'] for r in self.chat.calls[-1]])
 
+    async def test_silence_is_success_without_sending_retry_or_taking_over(self):
+        self.chat.bubbles = []
+        await self.receive(1, '好，那就这样')
+        self.now = 1120
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        self.assertEqual(self.service.store.friend(self.key)['mode'], 'owner')
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT state FROM qq_runs').fetchone()[0], 'skipped')
+        self.now = 1300
+        await self.due()
+        self.assertEqual(len(self.chat.calls), 1)
+        self.chat.bubbles = None
+        await self.receive(2, 'Miko，明天有什么安排？')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+
     async def test_owner_reply_clears_pending_then_next_message_waits_again(self):
         await self.receive(1)
         self.now = 1005
@@ -137,6 +155,60 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.now = 1320
         await self.due()
         self.assertEqual(len(self.client.sent), 1)
+
+    async def test_named_miko_skips_wait_and_keeps_following_batch(self):
+        await self.receive(1, 'MiKo在吗')
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1002)
+        self.now = 1001
+        await self.receive(2, '最近听什么歌')
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1003)
+        self.now = 1002
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        self.now = 1003
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+
+    async def test_unintroduced_context_excludes_previous_activation_messages(self):
+        await self.receive(1, '旧测试对话')
+        self.now = 1005
+        await self.service.configure(self.key, True)
+        await self.receive(2, '睡了吗')
+        self.assertEqual([r['text'] for r in self.service.store.context(self.key)], ['睡了吗'])
+        self.assertEqual(len(self.service.store.messages(self.key)), 2)
+
+    async def test_normal_reply_drops_latest_quote_before_dispatch(self):
+        self.chat.bubbles = [{'kind': 'text', 'text': '准备睡啦', 'quote_message_id': 1}]
+        await self.receive(1, '早点睡吧')
+        self.now = 1120
+        await self.due()
+        self.assertEqual(self.client.quoted, [])
+        self.assertEqual(self.client.payloads, [[{'type': 'text', 'data': {'text': '准备睡啦'}}]])
+
+    async def test_reply_to_earlier_message_keeps_quote(self):
+        self.chat.bubbles = [{'kind': 'text', 'text': '听夜鹿', 'quote_message_id': 1}]
+        await self.receive(1, '最近听谁的歌')
+        await self.receive(3, '稍等', own=True)
+        await self.receive(2, '我刚吃完饭')
+        self.now = 1120
+        await self.due()
+        self.assertEqual(self.client.quoted, [1])
+
+    async def test_name_does_not_override_disabled_blocked_or_manual(self):
+        await self.receive(1, 'komiko')
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1120)
+        await self.receive(2, 'Miko')
+        await self.receive(3, '我来', own=True)
+        self.now = 1003
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        await self.service.configure(self.key, False)
+        await self.receive(4, 'Miko')
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+        await self.service.configure(self.key, True)
+        self.service.store.update_friend(self.key, blocked=1)
+        await self.receive(5, 'Miko')
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
 
     async def test_new_message_invalidates_generating_reply_and_rebuilds_context(self):
         self.chat.gate = asyncio.Event()
@@ -194,12 +266,58 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent),1)
 
     async def test_length_check_blocks_overlong_reply(self):
-        self.chat.text = '字'*81
+        self.chat.text = '字'*401
         await self.receive(1)
         self.now = 1120
         await self.due()
         self.assertEqual(self.client.sent,[])
         self.assertEqual(self.service.store.runs()[0]['state'],'error')
+
+    async def test_format_retry_succeeds_on_third_retry_without_duplicate_send(self):
+        original = self.chat.begin_qq
+        def begin(*args):
+            self.chat.bubbles = [{'text': '缺少类型'}] if len(self.chat.calls) < 3 else None
+            return original(*args)
+        self.chat.begin_qq = begin
+        await self.receive(1, 'Miko，你这是夸我还是骂我')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.chat.calls), 4)
+        self.assertEqual(len(self.client.sent), 1)
+
+    async def test_exhausted_format_retries_preserve_miko_mode_for_next_message(self):
+        self.chat.bubbles = [{'text': '缺少类型'}]
+        await self.receive(1, 'Miko，你这是夸我还是骂我')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.chat.calls), 4)
+        self.assertEqual(self.client.sent, [])
+        self.assertEqual(self.service.store.friend(self.key)['mode'], 'miko')
+        self.chat.bubbles = None
+        await self.receive(2, '那你说出我十个优点')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+
+    async def test_manual_reply_during_format_retry_stops_generation(self):
+        original = self.chat.begin_qq
+        self.chat.bubbles = [{'text': '缺少类型'}]
+        async def cancel(turn):
+            turn.status = 'cancelled'
+        self.chat.cancel = cancel
+        def begin(*args):
+            turn = original(*args)
+            if len(self.chat.calls) == 2:
+                turn.task.cancel()
+                turn.task = asyncio.create_task(self.receive(2, '我来回', own=True))
+            return turn
+        self.chat.begin_qq = begin
+        await self.receive(1, 'Miko，在吗')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.chat.calls), 2)
+        self.assertEqual(self.client.sent, [])
+        self.assertEqual(self.service.store.friend(self.key)['mode'], 'owner')
 
     async def test_disconnect_and_restart_do_not_send_stale_pending_or_unknown_run(self):
         await self.receive(1)
@@ -286,10 +404,12 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.chat.bubbles = [{'kind':'text','text':'这件事我记得','quote_message_id':1},
                              {'kind':'face','face_id':'76'}, {'kind':'sticker','sticker_id':digest}]
         async def no_delay(*args): pass
-        with patch.object(self.service, 'pause_between', side_effect=no_delay):
+        with patch.object(self.service, 'pause_between', side_effect=no_delay), \
+                patch('miko.adapters.qq.messages.FACES', [{'face_id': '76', 'name': '赞'}]), \
+                patch('miko.domain.conversation.qq.FACES', [{'face_id': '76', 'name': '赞'}]):
             self.now = 1120
             await self.due()
-        self.assertEqual(self.client.quoted, [1])
+        self.assertEqual(self.client.quoted, [])
         self.assertEqual(self.chat.calls[0][1]['quoted_message']['text'], '原话')
         self.assertEqual([p[-1]['type'] for p in self.client.payloads], ['text','face','image'])
         encoded = self.client.payloads[2][0]['data']['file'].removeprefix('base64://')

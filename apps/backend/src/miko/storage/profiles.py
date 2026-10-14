@@ -5,6 +5,7 @@ Uses Tulpa's bounded Chinese FTS matching, not owner speech imitation.
 from datetime import datetime
 import uuid
 
+from miko.storage.profile_categories import ProfileCategories, paths
 from miko.storage.chat import now_ms
 from miko.storage.search import fts_query, terms
 
@@ -67,8 +68,15 @@ class ProfileStore:
             where.append('profile_fts MATCH ?'); args.append(match)
             order = 'bm25(profile_fts), p.updated_at DESC'
         with self.chat.connect() as db:
-            return [dict(row) for row in db.execute('SELECT p.* FROM profile_entries p' + join
+            rows = [dict(row) for row in db.execute('SELECT p.* FROM profile_entries p' + join
                 + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY ' + order + ' LIMIT 200', args)]
+        library = ProfileCategories(self.chat)
+        pinned = {}
+        for who in {r['subject'] for r in rows}:
+            tree = library.get(who)
+            labels = paths(tree)
+            pinned[who] = {labels[node['id']] for root in tree for node in [root, *root['children']] if node.get('pinned')}
+        return [{**r, 'pinned': r['kind'] in ('overview', 'fact') and r['category'] in pinned[r['subject']]} for r in rows]
 
     def relationships(self, query, key):
         with self.chat.connect() as db:
@@ -82,16 +90,17 @@ class ProfileStore:
 
     def context(self, query, key=None):
         # Core descriptions and latest manually dated activities accompany relevant entries.
+        pinned = [r for r in self.list(key=key, active=True) if r.get('pinned')]
         overviews = self.list(kind='overview', key=key, active=True)[:4]
         recent = sorted(self.list(kind='recent', key=key, active=True),
                         key=lambda r: (r['as_of'] or '', r['updated_at']), reverse=True)[:5]
         matches = [r for r in self.list(query, key=key, active=True) if r['kind'] not in ('overview', 'recent')][:12]
         rows, used, remaining = [], set(), 20000
-        for row in overviews + recent + matches:
-            if row['id'] in used or len(row['content']) > remaining:
+        for row in pinned + overviews + recent + matches:
+            if row['id'] in used or (not row.get('pinned') and len(row['content']) > remaining):
                 continue
             used.add(row['id']); remaining -= len(row['content'])
             rows.append({name: row[name] for name in ('id', 'subject', 'kind', 'category', 'title', 'content',
-                                                    'account', 'friend', 'as_of', 'source')})
+                                                    'account', 'friend', 'as_of', 'source', 'pinned')})
         return {'current_time': datetime.now().astimezone().isoformat(timespec='minutes'),
                 'role_material': rows, 'friend_relationships': self.relationships(query, key)}

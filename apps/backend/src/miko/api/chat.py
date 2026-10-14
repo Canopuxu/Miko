@@ -3,7 +3,8 @@ import json
 import secrets
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from miko.api.local import local_request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -65,6 +66,16 @@ def chat_router(service: ChatService) -> APIRouter:
     @router.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
     async def conversation(conversation_id: str):
         return service.conversation_detail(conversation_id)
+
+    @router.delete('/api/conversations/{conversation_id}', dependencies=[Depends(local_request)])
+    async def delete_conversation(conversation_id: str):
+        if any(t.conversation_id == conversation_id for t in service.turns.values()):
+            raise HTTPException(409, '请先停止生成，再删除对话')
+        try:
+            service.store.delete_conversation(conversation_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+        return {'deleted': True}
 
     @router.post("/api/chat")
     async def chat(body: ChatInput, request: Request):

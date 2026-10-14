@@ -14,7 +14,7 @@
 .persona-category-label > span { min-width: 0; overflow-wrap: anywhere; }.persona-category-label > small { flex-shrink: 0; }
 .persona-category-row .persona-category-label[aria-current='page'], .persona-category-row .persona-category-label:hover { background: transparent; }
 .persona-category-tools { display: flex; gap: 2px; padding-right: 4px; }
-.persona-category-tools button { display: grid; place-items: center; width: 28px; height: 32px; padding: 0; color: #706b62; }
+.persona-category-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 0; width: 28px; height: 32px; padding: 0; line-height: 1; color: #706b62; }
 .persona-category-tools button:hover { background: #dfe6d8; color: #52664a; }
 @media (pointer: coarse) { .persona-category-tools button { min-width: 36px; height: 44px; } }
 .persona-add-category { text-align: left; border: 1px dashed #d7caba; border-radius: 9px; background: none; padding: 12px; font-size: 12px; color: #8c7862; }
@@ -24,7 +24,7 @@
 .persona-category-heading small { font-size: 10px; color: #aa9b89; }
 .persona-category-heading h2 { margin: 7px 0 0; font-size: 23px; font-weight: 500; color: #685541; }
 .persona-category-actions, .persona-section header > div { display: flex; gap: 9px; flex-wrap: wrap; }
-.persona-category-actions button, .persona-section button, .persona-category-form button:not(.send-button), .persona-delete button { border: 0; background: transparent; padding: 5px 0; font-size: 11px; color: #9d8873; }
+.persona-category-actions button, .persona-section button, .persona-category-form button:not(.send-button) { border: 0; background: transparent; padding: 5px 0; font-size: 11px; color: #9d8873; }
 .persona-section { margin-bottom: 28px; }
 .persona-section > header { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 13px; }
 .persona-section h3 { margin: 0; font-size: 14px; color: #7c6853; font-weight: 600; }
@@ -46,9 +46,6 @@
 .persona-category-form label { flex: 1; display: grid; gap: 8px; font-size: 12px; color: #8b735b; min-width: 160px; }
 .persona-status { position: fixed; bottom: 22px; right: 26px; z-index: 5; max-width: min(440px, calc(100vw - 90px)); margin: 0; padding: 12px 18px; border: 1px solid #dfd3c2; border-radius: 10px; background: #fffaf1; box-shadow: 0 4px 18px #5c49351a; color: #826951; font-size: 12px; line-height: 1.6; }
 .persona-section .persona-category-form .send-button { background: #82705c; color: #fffdfa; padding: 9px 13px; }
-.persona-delete { padding: 15px 19px; border: 1px solid #e2ccbc; border-radius: 10px; background: #f6ede5; margin-bottom: 20px; }
-.persona-delete p { margin: 0 0 10px; font-size: 12px; color: #9d7256; }
-.persona-delete button { margin-right: 18px; color: #946b51; }
 .persona-preview { border-top: 1px solid #e7dfd3; padding-top: 19px; margin-top: 28px; font-size: 12px; color: #9a8873; }
 .persona-preview summary { cursor: pointer; }
 .persona-preview > p { font-size: 12px; line-height: 1.8; }
@@ -60,3 +57,13 @@
 .persona-drop-children { grid-column: 1 / -1; display: grid; gap: 3px; padding: 0 6px 8px 20px; }
 .persona-drop-children > div { padding: 8px 10px; font-size: 12px; color: #706b62; border-radius: 6px; }
 .persona-category-row.drop-target, .persona-categories button.drop-target, .persona-drop-children > .drop-target, .persona-section.drop-target { background: #e1e9da; outline: 2px solid #6d8068; outline-offset: -2px; border-radius: 9px; }
+
+.persona-panel { position: relative; isolation: isolate; }
+.persona-panel > .persona-delete-overlay { position: absolute; inset: 0; backdrop-filter: blur(5px); background: #403b3526; }
+.persona-panel > .persona-delete-dialog { position: absolute; width: min(400px, calc(100% - 40px)); max-height: calc(100% - 40px); border-radius: 16px; padding: 24px; }
+
+.persona-section > header h3 { display: flex; align-items: center; gap: 8px; }
+.persona-pin { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #8b877e; cursor: pointer; }
+.persona-pin:hover { background: #ebece4; color: #52684e; }
+.persona-pin[aria-pressed="true"] { background: #e1e8d9; color: #52684e; }
+.persona-pin[aria-pressed="true"] svg { fill: currentColor; }

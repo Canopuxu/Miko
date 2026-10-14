@@ -180,7 +180,10 @@ class QqStore:
 
     def context(self, key):
         # Recent messages include confirmed owner / Miko sends, independent of QQ account identity.
-        rows = [r for r in self.messages(key) if not r['recalled']][-40:]
+        friend = self.friend(key)
+        # A fresh introduction must not inherit old test exchanges claiming they already met.
+        since = friend['activated_at'] * 1000 if not friend['miko_introduced'] else 0
+        rows = [r for r in self.messages(key) if not r['recalled'] and r['created_at'] >= since][-40:]
         return [{'author': r['author'], 'text': r['text'], 'created_at': r['created_at'],
                  'message_id': r['message_id'], 'segments': model_message(r),
                  **({'quoted_message': r['quoted_message']} if r['quoted_message'] else {})} for r in rows]

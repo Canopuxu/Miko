@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { NavigationContext, views, type View } from './components/AppShell';
+import { BrandButton, NavigationContext, views, type View } from './components/AppShell';
 import { ChatPage } from './pages/ChatPage';
 import { QqPage } from './pages/QqPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { MemoryPage } from './pages/MemoryPage';
 import { LifePage } from './pages/LifePage';
 import { RuntimeProvider } from './components/RuntimeStatus';
+import { Workbench } from './components/Workbench';
+import './styles/workbench.css';
 
 function currentView(): View {
   const view = new URLSearchParams(location.search).get('view');
@@ -15,6 +17,9 @@ const ReviewPage = () => <MemoryPage view="review"/>;
 const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: MemoryPage, life: LifePage, review: ReviewPage };
 
 export function App() {
+  const [workbench, setWorkbench] = useState(false);
+  const [workbenchVisited, setWorkbenchVisited] = useState(false);
+  function toggleWorkbench() { setWorkbenchVisited(true); setWorkbench(value => !value); }
   const [active, setActive] = useState<View>(currentView);
   const [visited, setVisited] = useState<View[]>([active]);
   const [expanded, setExpanded] = useState(true);
@@ -50,9 +55,17 @@ export function App() {
     return () => window.removeEventListener('popstate', restore);
   }, []);
   // Keep visited pages mounted so navigation preserves drafts and live streams.
-  return <RuntimeProvider><NavigationContext.Provider value={{ active, expanded, select, navigate, replace, search, toggle: () => setExpanded(value => !value) }}>
+  return <RuntimeProvider><NavigationContext.Provider value={{ active, expanded, select, navigate, replace, search, workbench, toggleWorkbench, toggle: () => setExpanded(value => !value) }}>
+    <div className={`surface-switch ${workbench ? 'show-workbench' : ''}`}>
+    <div className="persistent-brand"><BrandButton /></div>
+    <div className="miko-surface" ref={element => { if (element) element.inert = workbench; }} aria-hidden={workbench}>
     {visited.map(view => { const Page = pages[view];
       return <div className="page-host" key={view} hidden={view !== active}><Page /></div>;
     })}
+    </div>
+    <div className="workbench-surface" ref={element => { if (element) element.inert = !workbench; }} aria-hidden={!workbench}>
+      {workbenchVisited && <Workbench/>}
+    </div>
+    </div>
   </NavigationContext.Provider></RuntimeProvider>;
 }

@@ -1,15 +1,12 @@
 """Embed Memobase's reviewed extraction and merge modules in Miko."""
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, date
 import json
 import re
 
 from miko.settings import REPO_ROOT
 from .memobase_upstream.prompts import (
-    zh_summary_entry_chats as summary,
-    zh_extract_profile as extract,
     zh_merge_profile_yolo as merge,
-    zh_user_profile_topics as topics,
     organize_profile as organize,
     summary_profile as abstract,
     utils as parser,
@@ -22,57 +19,45 @@ class MemobasePipeline:
         self.social, self.chat = social, chat
         path = chat.settings.local_root / 'config/memory.local.json'
         self.model = json.loads(path.read_text(encoding='utf-8-sig')).get('model') if path.exists() else None
-        self.guidance = (REPO_ROOT / 'config/defaults/memory-guidance.txt').read_text(encoding='utf-8').strip()
 
-    async def summarize(self, sid, payload, model=None):
-        usage, calls = {}, []
-
-        async def ask(label, system, user):
-            value = await self.chat.complete_memory(system, user, model or self.model)
+    async def summarize(self,sid,payload,model=None):
+        usage={};calls=[]
+        async def ask(label,system,user,json_output=False):
+            result=await self.chat.complete_memory(system,user,model or self.model,json_output=json_output)
             calls.append(label)
-            for key, amount in value.get('usage', {}).items():
-                if isinstance(amount, int):
-                    usage[key] = usage.get(key, 0) + amount
-            return value['text']
-
-        ids = [r['id'] for r in payload['stage']]
+            for key,value in result.get('usage',{}).items():
+                if isinstance(value,int):usage[key]=usage.get(key,0)+value
+            return result['text']
+        ids=[r['id'] for r in payload['stage']]
         with self.social.store.connect() as db:
-            rows = [dict(db.execute('SELECT * FROM messages WHERE id=?', (mid,)).fetchone()) for mid in ids]
-        _, cid = self.social.detail(sid)['conversation_id'].split('|', 1)
-        peer = '' if cid == 'web:owner' else cid
-        subjects = list(dict.fromkeys(r['sender_id'] for r in rows))
-        with self.chat.store.connect() as db:
-            names = {r['id']: r['display_name'] for r in db.execute('SELECT * FROM people')}
-        names['owner'] = '橙汁'
-        plans, days, summaries = [], [], []
-        for subject in subjects:
-            existing = self.social.structured.items(subject=subject)
-            relevant = [r for r in existing if r['peer'] in ('', peer) and r['enabled'] and (r['valid'] or r['manual'])]
-            old = {(r['category'], r['topic']): r for r in relevant}
-            previous = '\n'.join(f'- {r["category"]}::{r["topic"]}::{r["content"]}' for r in relevant) or 'NONE'
-            dialogue = '\n'.join(
-                f'[{datetime.fromtimestamp(r["timestamp"]/1000).astimezone().isoformat()}] '
-                f'{names.get(r["sender_id"], r["sender_id"])}({"user" if r["sender_id"] == subject else {"owner":"橙汁","miko":"Miko","contact":"好友"}[r["author"]]}): {r["content"]}'
-                for r in rows)
-            dialogue = '本次整理对象：' + names.get(subject,subject) + '\n参与者身份：' + json.dumps(
-                {names.get(r['sender_id'],r['sender_id']): {'owner':'橙汁','miko':'Miko','contact':'好友'}[r['author']] for r in rows},
-                ensure_ascii=False) + '\n' + dialogue
-            topic_prompt = topics.get_prompt()
-            recorded = await ask(f'{subject}:summary', summary.get_prompt(topic_prompt, '', self.guidance),
-                                 summary.pack_input(previous, dialogue))
-            extracted = await ask(f'{subject}:extract', extract.get_prompt(topic_prompt),
-                                  extract.pack_input(previous, recorded))
-            facts = merge_by_topic_sub_topics(parser.parse_string_into_profiles(extracted).model_dump()['facts'])
-            changes = []
+            rows=[dict(db.execute('SELECT * FROM messages WHERE id=?',(mid,)).fetchone()) for mid in ids]
+        subjects=list(dict.fromkeys(r['sender_id'] for r in rows))
+        with self.chat.store.connect() as db:names={r['id']:r['display_name'] for r in db.execute('SELECT * FROM people')}
+        names['owner']='橙汁'
+        _,cid=self.social.detail(sid)['conversation_id'].split('|',1);peer='' if cid=='web:owner' else cid
+        existing={s:self.social.structured.items(subject=s) for s in subjects}
+        relevant={s:[r for r in existing[s] if r['peer'] in ('',peer) and r['enabled'] and (r['valid'] or r['manual'])] for s in subjects}
+        previous='\n'.join(f'{names.get(s,s)}[{s}] · {r["category"]}::{r["topic"]}::{r["content"]}' for s in subjects for r in relevant[s]) or 'NONE'
+        events=self.social.structured.days(peer=peer)[:20]
+        previous_events='\n'.join(r['day']+' · '+r['text'] for r in events) or 'NONE'
+        dialogue='\n'.join(f'[{datetime.fromtimestamp(r["timestamp"]/1000).astimezone().isoformat()}] {names.get(r["sender_id"],r["sender_id"])}[{r["sender_id"]}]：{r["content"]}' for r in rows)
+        user='人物：'+json.dumps({s:names.get(s,s) for s in subjects},ensure_ascii=False)+'\n已有资料：\n'+previous+'\n已有经历与约定：\n'+previous_events+'\n本次对话：\n'+dialogue
+        raw=await ask('conversation:extract',(REPO_ROOT / 'config/defaults/memory-extraction.txt').read_text(encoding='utf-8'),user,True)
+        value=json.loads(raw)
+        if not isinstance(value,dict) or not isinstance(value.get('facts'),list) or not isinstance(value.get('events'),list):raise ValueError('提炼结果需要 facts 和 events 数组')
+        grouped=defaultdict(list)
+        for fact in value['facts']:
+            if fact['subject'] not in subjects:raise ValueError('资料人物编号不在输入中')
+            grouped[fact['subject']].append({k:fact[k] for k in ('topic','sub_topic','memo')})
+        plans=[];days=[]
+        for subject,raw_facts in grouped.items():
+            old={(r['category'],r['topic']):r for r in relevant[subject]}
+            facts=merge_by_topic_sub_topics(raw_facts)
+            changes=[]
             for fact in facts:
-                key = (fact['topic'], fact['sub_topic'])
-                current = old.get(key)
-                changes.append({'memo_id': len(changes)+1, 'new_info': fact['memo'],
-                    'current_memo': current['content'] if current else '', 'topic': key[0], 'subtopic': key[1],
-                    'topic_description': None, 'update_instruction': None})
-            # A new broader sub-topic can explicitly discuss an existing named
-            # item (e.g. 乐器 -> 吉他). Reuse the upstream merge judgment for that
-            # item too, rather than leaving its old current-state wording behind.
+                key=(fact['topic'],fact['sub_topic']);current=old.get(key)
+                changes.append({'memo_id':len(changes)+1,'new_info':fact['memo'],'current_memo':current['content'] if current else '',
+                    'topic':key[0],'subtopic':key[1],'topic_description':None,'update_instruction':None})
             present={(c['topic'],c['subtopic']) for c in changes}
             for fact in facts:
                 for key,current in old.items():
@@ -81,40 +66,24 @@ class MemobasePipeline:
                             'current_memo':current['content'],'topic':key[0],'subtopic':key[1],
                             'topic_description':None,'update_instruction':None})
                         present.add(key)
-            actions = {}
-            # Reuse the upstream new-entry fast path; merge existing entries together.
+            actions={}
             if any(c['current_memo'] for c in changes):
-                actions = parser.parse_string_into_merge_yolo_action(await ask(
-                    f'{subject}:merge', merge.get_prompt(), merge.get_input(changes)))
-                if any(c['memo_id'] not in actions for c in changes):
-                    raise ValueError('合并结果缺少对应条目，保留本批待重试')
+                actions=parser.parse_string_into_merge_yolo_action(await ask(subject+':merge',merge.get_prompt(),merge.get_input(changes)))
+                if any(c['memo_id'] not in actions for c in changes):raise ValueError('合并结果缺少条目')
             for change in changes:
-                key = (change['topic'], change['subtopic'])
-                current = old.get(key)
-                action = actions.get(change['memo_id'], {'action': 'APPEND', 'memo': 'APPEND'})
-                if action['action'] == 'ABORT':
-                    continue
-                content = action['memo'] if action['action'] == 'UPDATE' else (
-                    (current['automatic'] + ';' if current else '') + change['new_info'])
-                # Personal facts are shared; relationship knowledge belongs to this conversation.
-                item_peer = peer if subject not in ('owner', 'miko') or change['topic'] == '人物关系' else ''
-                exact = next((r for r in existing if (r['peer'],r['category'],r['topic']) == (item_peer,*key)), None)
-                plans.append({'subject': subject, 'peer': item_peer, 'category': key[0], 'topic': key[1],
-                    'content': content, 'expected_revision': exact['revision'] if exact else 0, 'sources': ids})
-            grouped = defaultdict(list)
-            for line in recorded.splitlines():
-                if not line.strip().startswith('- ') or not re.search(r'//\s*(event|schedule)', line):
-                    continue
-                date = re.search(r'提及于\s*[:：]?\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', line)
-                day = f'{date[1]}-{int(date[2]):02d}-{int(date[3]):02d}' if date else datetime.fromtimestamp(rows[-1]['timestamp']/1000).date().isoformat()
-                grouped[day].append(line)
-            for day, lines in grouped.items():
-                days.append({'subject': subject, 'peer': peer, 'day': day, 'text': '\n'.join(lines),
-                             'sources': ids, 'through': f'{max(ids)}:{day}'})
-            summaries.append(recorded)
-        return {'memory': '\n'.join(summaries)[:4000] or '本批未提炼出新增人物资料。',
-                'evidence_ids': ids, 'structured': plans, 'days': days,
-                'usage': {'model': model or self.model or self.chat.provider.model, 'calls': calls, **usage}}
+                key=(change['topic'],change['subtopic']);current=old.get(key)
+                action=actions.get(change['memo_id'],{'action':'APPEND','memo':'APPEND'})
+                if action['action']=='ABORT':continue
+                content=action['memo'] if action['action']=='UPDATE' else ((current['automatic']+';' if current else '')+change['new_info'])
+                item_peer=peer if subject not in ('owner','miko') or change['topic']=='人物关系' else ''
+                exact=next((r for r in existing[subject] if (r['peer'],r['category'],r['topic'])==(item_peer,*key)),None)
+                plans.append({'subject':subject,'peer':item_peer,'category':key[0],'topic':key[1],'content':content,'expected_revision':exact['revision'] if exact else 0,'sources':ids})
+        for i,event in enumerate(value['events']):
+            people=list(dict.fromkeys(event['subjects']))
+            if not people or any(s not in subjects for s in people):raise ValueError('事件人物编号不在输入中')
+            date.fromisoformat(event['date'])
+            days.append({'subject':people[0] if len(people)==1 else '', 'subjects':people,'peer':peer,'day':event['date'],'text':event['text'],'sources':ids,'through':f'{max(ids)}:{i}'})
+        return {'memory':raw[:4000],'evidence_ids':ids,'structured':plans,'days':days,'usage':{'model':model or self.model or self.chat.provider.model,'calls':calls,**usage}}
 
     async def organize_category(self, subject, peer, category):
         """Use the original organizer on demand, returning a reviewable proposal."""

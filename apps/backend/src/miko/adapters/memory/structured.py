@@ -30,9 +30,13 @@ class StructuredMemory:
               CREATE TABLE IF NOT EXISTS memory_sources (
                 item_id TEXT NOT NULL, message_id INTEGER NOT NULL,
                 PRIMARY KEY(item_id,message_id));
+              CREATE TABLE IF NOT EXISTS memory_event_people (
+                event_id TEXT NOT NULL, subject TEXT NOT NULL,
+                PRIMARY KEY(event_id,subject));
               CREATE TABLE IF NOT EXISTS memory_audit (
                 id INTEGER PRIMARY KEY, item_id TEXT NOT NULL, kind TEXT NOT NULL,
                 snapshot TEXT NOT NULL, created_at INTEGER NOT NULL);
+              CREATE TABLE IF NOT EXISTS memory_review_hidden (message_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL);
               CREATE TABLE IF NOT EXISTS memory_annotations (
                 id TEXT PRIMARY KEY, message_id TEXT NOT NULL, peer TEXT NOT NULL,
                 note TEXT NOT NULL, scope TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
@@ -170,6 +174,9 @@ class StructuredMemory:
             db.executemany('INSERT OR IGNORE INTO memory_sources VALUES(?,?)',
                            [(event_id, mid) for mid in event['sources']])
             self._index(db, event_id, event['text'])
+            db.execute('DELETE FROM memory_event_people WHERE event_id=?', (event_id,))
+            db.executemany('INSERT INTO memory_event_people VALUES(?,?)',
+                           [(event_id, person) for person in event.get('subjects', [event['subject']])])
 
     def edit(self, item_id, text, revision, enabled=True):
         if len(text) > 6000:
@@ -200,9 +207,12 @@ class StructuredMemory:
 
     def days(self, day='', subject='', peer=None, query=''):
         clauses, args = ['d.valid=1'], []
-        for column, value in (('day', day), ('subject', subject)):
+        for column, value in (('day', day),):
             if value:
                 clauses.append(f'd.{column}=?'); args.append(value)
+        if subject:
+            clauses.append('(d.subject=? OR EXISTS (SELECT 1 FROM memory_event_people p WHERE p.event_id=d.id AND p.subject=?))')
+            args.extend([subject, subject])
         if peer is not None:
             clauses.append("d.peer IN ('',?)"); args.append(peer)
         join = ''
@@ -217,6 +227,8 @@ class StructuredMemory:
                 ' WHERE ' + ' AND '.join(clauses) + ' ORDER BY d.day DESC,d.updated_at DESC LIMIT 100', args)]
             for r in rows:
                 r['sources'] = self._sources(db, r['id'])
+                r['subjects'] = [v[0] for v in db.execute(
+                    'SELECT subject FROM memory_event_people WHERE event_id=? ORDER BY subject', (r['id'],))] or [r['subject']]
         return rows
 
     def review(self, day=''):
@@ -234,12 +246,24 @@ class StructuredMemory:
                       (SELECT sequence FROM messages WHERE id=?)
                     ORDER BY m.sequence DESC LIMIT 2''', (row['conversation_id'], row['id']))][::-1]
         with self.projection.connect() as db:
+            hidden = {r[0] for r in db.execute('SELECT message_id FROM memory_review_hidden')}
+            rows = [r for r in rows if r['id'] not in hidden]
             notes = {r['message_id']: dict(r) for r in db.execute('SELECT * FROM memory_annotations')}
             for note in notes.values():
                 note['history']=[dict(r) for r in db.execute("SELECT snapshot,created_at FROM memory_audit WHERE item_id=? AND kind='annotation' ORDER BY id DESC LIMIT 20",(note['id'],))]
         for r in rows:
             r['annotation'] = notes.get(r['id'])
         return {'day': day, 'replies': rows}
+
+    def delete_review(self, message_id):
+        with self.projection.source.connect() as db:
+            if not db.execute("SELECT 1 FROM messages WHERE id=? AND author_id='miko' AND status='completed'", (message_id,)).fetchone():
+                raise ValueError('找不到这条回复')
+        with self.projection.connect() as db:
+            db.execute('INSERT OR REPLACE INTO memory_review_hidden VALUES(?,?)', (message_id, time.time_ns() // 1_000_000))
+            db.execute('DELETE FROM memory_audit WHERE item_id IN (SELECT id FROM memory_annotations WHERE message_id=?)', (message_id,))
+            db.execute('DELETE FROM memory_annotations WHERE message_id=?', (message_id,))
+        return {'deleted': True}
 
     def annotate(self, message_id, note, scope, revision, enabled=True):
         if scope not in ('example', 'friend', 'global') or not note.strip() or len(note) > 2000:
@@ -251,6 +275,8 @@ class StructuredMemory:
         peer = message['conversation_id']
         with self.projection.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM memory_review_hidden WHERE message_id=?', (message_id,)).fetchone():
+                raise ValueError('该回顾已删除')
             old = db.execute('SELECT * FROM memory_annotations WHERE message_id=?', (message_id,)).fetchone()
             if (old['revision'] if old else 0) != revision:
                 raise ValueError('批注已变化，请刷新')
@@ -265,16 +291,20 @@ class StructuredMemory:
             self._audit(db, result, 'annotation')
         return result
 
-    def feedback(self, query, peer):
+    def feedback_candidates(self, peer):
         with self.projection.connect() as db:
-            rows = [dict(r) for r in db.execute("SELECT * FROM memory_annotations WHERE enabled=1 AND (scope IN ('global','example') OR peer=?) ORDER BY updated_at DESC LIMIT 30", (peer,))]
+            rows = [dict(r) for r in db.execute("SELECT * FROM memory_annotations WHERE enabled=1 AND (scope IN ('global','example') OR peer=?) ORDER BY updated_at DESC", (peer,))]
         result = []
         with self.projection.source.connect() as source:
             for r in rows:
-                msg = source.execute('SELECT text FROM messages WHERE id=? AND status=?', (r['message_id'], 'completed')).fetchone()
+                msg = source.execute('SELECT * FROM messages WHERE id=? AND status=?', (r['message_id'], 'completed')).fetchone()
                 if not msg:
                     continue
-                if r['scope'] == 'example' and not (terms(query) & terms(msg['text'])):
-                    continue
-                result.append({'reply': msg['text'], 'feedback': r['note'], 'scope': r['scope']})
-        return result[:8]
+                preceding = source.execute("SELECT text FROM messages WHERE conversation_id=? AND sequence<? ORDER BY sequence DESC LIMIT 2", (msg['conversation_id'], msg['sequence'])).fetchall()
+                result.append({'reply': msg['text'], 'feedback': r['note'], 'scope': r['scope'],
+                    'context': '\n'.join(v['text'] for v in reversed(preceding))})
+        return result
+
+    def feedback(self, query, peer):
+        # Without semantic retrieval, only explicitly scoped feedback is injected.
+        return [r for r in self.feedback_candidates(peer) if r['scope'] != 'example'][:8]

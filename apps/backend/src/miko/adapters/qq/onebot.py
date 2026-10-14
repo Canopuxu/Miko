@@ -57,7 +57,7 @@ class OneBot:
         self.transport = transport
 
     async def call(self, action, payload, *, sending=False):
-        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history', 'get_msg', 'set_qq_avatar'}
+        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history', 'get_msg', 'set_qq_avatar', 'fetch_sys_faces'}
         if action not in allowed | ({'send_private_msg'} if sending else set()):
             raise SendError('接口不在 QQ 适配器允许范围内')
         try:
@@ -87,6 +87,9 @@ class OneBot:
         if await self.login() != self.config.account:
             raise SendError('QQ 登录账号发生变化，未更换头像')
         await self.call('set_qq_avatar', {'file': path})
+
+    async def faces(self):
+        return await self.call('fetch_sys_faces', {'refresh': False})
 
     async def target(self, account, friend):
         if await self.login() != account:

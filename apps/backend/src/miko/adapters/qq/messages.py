@@ -6,9 +6,25 @@ import json
 import re
 
 
-FACES = [{'face_id': '14', 'name': '微笑'}, {'face_id': '76', 'name': '赞'},
-         {'face_id': '182', 'name': '笑哭'}]
-FACE_NAMES = {item['face_id']: item['name'] for item in FACES}
+FACES = []  # Native face sending is currently disabled; keep incoming name lookup.
+FACE_NAMES = {'14': '微笑', '76': '赞', '182': '笑哭'}
+
+
+def update_face_catalog(catalog):
+    """Refresh incoming face names without enabling outgoing candidates."""
+    faces = {}
+    for pack in catalog['packs']:
+        for face in pack['emojis']:
+            face_id = str(face['q_sid'])
+            if not face_id.isascii() or not face_id.isdigit():
+                continue  # Unicode emoji are sent as ordinary text, not OneBot face IDs.
+            name = face['q_des'].lstrip('/').strip()
+            if name:
+                faces[face_id] = name
+    if not faces:
+        raise ValueError('QQ 表情目录为空')
+    FACE_NAMES.clear()
+    FACE_NAMES.update(faces)
 
 
 def parse_message(source):
@@ -58,17 +74,23 @@ def model_message(payload):
     return [{k: v for k, v in item.items() if k != 'ref'} for item in payload.get('segments', [])]
 
 
-def parse_bubbles(raw, records, stickers, max_chars=80):
+def parse_bubbles(raw, records, stickers, max_chars=400):
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {'bubbles'}:
         raise ValueError('回复需要 bubbles JSON 对象')
     bubbles = value['bubbles']
-    if not isinstance(bubbles, list) or not 1 <= len(bubbles) <= 3:
-        raise ValueError('一次回复需要 1–3 个语义气泡')
+    if not isinstance(bubbles, list) or not 0 <= len(bubbles) <= 3:
+        raise ValueError('一次回复最多 3 个语义气泡，无需回复时使用空数组')
     quotes = {r['message_id'] for r in records if 'message_id' in r}
-    faces = set(FACE_NAMES)
+    faces = {face['face_id'] for face in FACES}
     assets = {s['sticker_id'] for s in stickers}
     total = 0
+    current_ids = set()
+    for record in reversed(records):
+        if record.get('author', {}).get('kind') in ('miko', 'owner'):
+            break
+        if record.get('author', {}).get('kind') == 'contact':
+            current_ids.add(record.get('message_id'))
     for i, bubble in enumerate(bubbles):
         if not isinstance(bubble, dict):
             raise ValueError('气泡格式无效')
@@ -88,10 +110,19 @@ def parse_bubbles(raw, records, stickers, max_chars=80):
             raise ValueError('表情不在本轮候选中')
         if 'quote_message_id' in bubble:
             mid = bubble['quote_message_id']
+            if type(mid) is int and mid in current_ids:
+                bubble.pop('quote_message_id')
+                continue
             if i or type(mid) is not int or mid not in quotes:
                 raise ValueError('引用需要本轮记录中的消息编号，且只用于首个气泡')
     if total > max_chars:
-        raise ValueError('本轮文字总长度超过 80 字，未发送')
+        raise ValueError(f'本轮文字总长度超过 {max_chars} 字，未发送')
+    latest = next((r for r in reversed(records) if r.get('author', {}).get('kind') == 'contact'), None)
+    if latest:
+        # Replying to the latest message already identifies the target in ordinary chat.
+        for bubble in bubbles:
+            if bubble.get('quote_message_id') == latest.get('message_id'):
+                bubble.pop('quote_message_id', None)
     return bubbles
 
 

@@ -1,15 +1,16 @@
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowUpRight, Check, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Check, Pencil, Pin, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { useDiscardGuard, useNotice } from '../components/ui';
 
 type Subject = 'miko' | 'owner';
 type Entry = { id: string; subject: Subject; kind: 'overview' | 'fact' | 'recent' | 'excerpt';
   category: string; title: string; content: string; keywords: string; account: string; friend: string;
   as_of: string | null };
-type Child = { id: string; name: string };
+type Child = { id: string; name: string; pinned?: boolean };
 type Category = Child & { children: Child[] };
 type Edit = { id: string | null; path: string; content: string; original?: Entry };
 type CategoryEdit = { id?: string; parent?: string; name: string };
@@ -101,9 +102,9 @@ export function ProfilesPage() {
   const known = new Set(categories.flatMap(c => [c.name, ...c.children.map(s => `${c.name}/${s.name}`)]));
   const unfiled = settings.filter(e => !known.has(e.category));
   const matches = (e: Entry) => !q.trim() || `${e.content} ${e.category}`.toLocaleLowerCase().includes(q.trim().toLocaleLowerCase());
-  const sections = root ? [{ id: root.id, name: root.children.length ? '综合' : root.name, path: root.name },
+  const sections = root ? [{ id: root.id, name: root.children.length ? '综合' : root.name, pinned: root.pinned, path: root.name },
     ...root.children.map(c => ({ ...c, path: `${root.name}/${c.name}` }))]
-    : [{ id: 'unfiled', name: '待归类', path: '' }];
+    : [{ pinned: false, id: 'unfiled', name: '待归类', path: '' }];
   const legacy = entries.filter(e => e.kind === 'recent' || e.kind === 'excerpt');
 
   async function request(url: string, method: string, body?: unknown) {
@@ -159,6 +160,15 @@ export function ProfilesPage() {
     if (categoryEdit?.id || categoryEdit?.parent || deleting?.id !== selected) preservePosition();
     setCategoryEdit(null); setDeleting(null); setRevision(v => v + 1); setPreview(null);
   }
+  async function togglePin(id: string, pinned: boolean) {
+    setBusy(true);
+    try {
+      await saveTree(categories.map(c => c.id === id ? { ...c, pinned } : {
+        ...c, children: c.children.map(child => child.id === id ? { ...child, pinned } : child)
+      }));
+      setNotice(pinned ? '该分类词条已常驻背景' : '已恢复按相关性检索');
+    } catch (cause) { setFailure(cause); } finally { setBusy(false); }
+  }
   async function saveCategory() {
     if (!categoryEdit?.name.trim()) return;
     setBusy(true); setNotice('');
@@ -167,7 +177,7 @@ export function ProfilesPage() {
       let tree = categories;
       if (categoryEdit.parent) {
         tree = categories.map(c => c.id !== categoryEdit.parent ? c : { ...c, children: categoryEdit.id
-          ? c.children.map(child => child.id === data.id ? data : child) : [...c.children, data] });
+          ? c.children.map(child => child.id === data.id ? { ...child, ...data } : child) : [...c.children, data] });
       } else {
         tree = categoryEdit.id ? categories.map(c => c.id === data.id ? { ...c, name: data.name } : c)
           : [...categories, { ...data, children: [] }];
@@ -220,12 +230,6 @@ export function ProfilesPage() {
       <button type="button" disabled={busy} onClick={() => guard.proceed(()=>setCategoryEdit(null))}>取消</button>
     </form>;
   }
-  function deleteConfirmation() {
-    return deleting && <div className="persona-delete" role="alert"><p>{deleting.kind === 'category'
-      ? '删除这个分类？其中的词条将移到待归类，内容仍会保留。' : '删除这条词条？'}</p>
-      <button disabled={busy} onClick={() => void remove()}>确认删除</button>
-      <button disabled={busy} onClick={() => setDeleting(null)}>取消</button></div>;
-  }
 
   return <AppShell view="profiles" sidebar={<section className="persona-browser" aria-label="人物分类">
     <div className="persona-subject" role="group" aria-label="人物"><button aria-pressed={subject === 'miko'} disabled={busy}
@@ -255,15 +259,16 @@ export function ProfilesPage() {
           <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: root.id })}>删除分类</button></div>}</div>
         {notice && <p className={`persona-status ${failed?'error-notice':''}`} role={failed?'alert':'status'}>{notice}</p>}
         {categoryEdit && (!categoryEdit.parent || !categoryEdit.id) && categoryEditor()}
-        {deleting?.kind === 'category' && deleting.id === root?.id && deleteConfirmation()}
         {loading ? <p className="profile-empty">正在读取…</p> : sections.map(section => {
           const items = (root ? settings.filter(e => e.category === section.path) : unfiled).filter(matches);
-          return <section className={`persona-section ${dropPath===section.path?'drop-target':''}`} {...dropTarget(section.path)} key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small></h3>
+          return <section className={`persona-section ${dropPath===section.path?'drop-target':''}`} {...dropTarget(section.path)} key={section.id} aria-label={section.name}><header><h3>{section.name} <small>{items.length}</small>{root && <button type="button" className="persona-pin" disabled={busy}
+              aria-pressed={!!section.pinned} aria-label={`${section.pinned ? '取消固定' : '固定'}${section.name}为背景`}
+              title={section.pinned ? '已常驻：此分类下的已保存词条会随每次聊天提供。点击取消，恢复按相关性检索。' : '固定为背景：此分类下的已保存词条会随每次聊天提供，无需命中检索。'}
+              onClick={() => void togglePin(section.id, !section.pinned)}><Pin size={15}/></button>}</h3>
             <div>{root && section.id !== root.id && <><button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({id:section.id,parent:root.id,name:section.name});})}>重命名</button>
               <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: section.id })}>删除小分类</button></>}
               <button disabled={busy} onClick={() => guard.proceed(()=>{setCategoryEdit(null);setEdit({id:null,path:section.path,content:''});})}><Plus size={14}/>添加词条</button></div></header>
             {categoryEdit?.parent && categoryEdit.id === section.id && categoryEditor()}
-            {deleting?.kind === 'category' && deleting.id === section.id && section.id !== root?.id && deleteConfirmation()}
             {!items.length && !(edit && !edit.id && edit.path === section.path) && <p className="persona-empty">还没有词条，想到时再补充。</p>}
             <div className="persona-entry-cloud">{items.map(entry => <article className={`persona-entry persona-tile${edit?.id === entry.id ? ' is-editing' : ''}${deleting?.kind==='entry' && deleting.id===entry.id?' confirming-delete':''}${dragging?.id===entry.id?' is-dragging':''}`} key={entry.id}
               draggable={!busy && !edit && !categoryEdit && !deleting}
@@ -292,6 +297,20 @@ export function ProfilesPage() {
         {!!legacy.length && <details className="persona-preview"><summary>保留的旧近况与对话片段 · {legacy.length}</summary>
           <p>这些资料仍然保留；近况与经历由记忆模块维护。</p>{legacy.map(e => <article className="persona-entry" key={e.id}><small>{e.as_of}</small><p>{e.content}</p></article>)}</details>}
       </div>
+    <AlertDialog.Root open={deleting?.kind === 'category'} onOpenChange={open => { if (!open && !busy) setDeleting(null); }}>
+      <AlertDialog.Overlay className="dialog-overlay persona-delete-overlay"/>
+      <AlertDialog.Content className="confirm-dialog persona-delete-dialog">
+        <AlertDialog.Title>删除这个分类？</AlertDialog.Title>
+        <AlertDialog.Description>其中的词条将移到待归类，内容仍会保留。</AlertDialog.Description>
+        {failed && <p role="alert">{notice}</p>}
+        <div className="dialog-actions">
+          <AlertDialog.Cancel className="ui-button" disabled={busy}>取消</AlertDialog.Cancel>
+          <AlertDialog.Action className="ui-button warning" disabled={busy} onClick={event => { event.preventDefault(); void remove(); }}>
+            {busy ? '删除中…' : '确认删除'}
+          </AlertDialog.Action>
+        </div>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
     {guard.dialog}</main>
   </AppShell>;
 }

@@ -1,6 +1,7 @@
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useContext, useEffect, useState } from 'react';
 import { AppShell, NavigationContext } from '../components/AppShell';
-import { ArrowUpRight, NotebookPen, Pause, Play, RefreshCw, Save } from 'lucide-react';
+import { ArrowUpRight, NotebookPen, Pause, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { EmptyState, useDiscardGuard, useNotice } from '../components/ui';
 import { getJson, responseError } from '../api/chat';
 
@@ -8,7 +9,7 @@ type Person = {id:string;display_name:string};
 type Item = {id:string;subject:string;peer:string;category:string;topic:string;content:string;automatic:string;manual:string;enabled:number;valid:number;revision:number;updated_at:number};
 type Source = {id:number;author:string;content:string;timestamp:number};
 type Detail = Item & {sources:Source[];history:{id:number;kind:string;snapshot:string;created_at:number}[]};
-type Day = {id:string;subject:string;day:string;text:string;sources:Source[]};
+type Day = {id:string;subject:string;subjects?:string[];day:string;text:string;sources:Source[]};
 type Note = {note:string;scope:string;enabled:number;revision:number;history?:{snapshot:string;created_at:number}[]};
 type Reply = {id:string;text:string;title:string;created_at:number;annotation:Note|null;
   conversation_id:string;source:string;context:{author:string;text:string}[]};
@@ -30,8 +31,8 @@ function Sources({rows}:{rows:Source[]}) {
     <small>{r.author==='owner'?'你':r.author==='miko'?'Miko':'好友'} · {new Date(r.timestamp).toLocaleString()}</small><p>{r.content}</p>
   </article>)}</div></details>;
 }
-function ReplyCard({reply,save,open,onDirty}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>;
-  open:()=>void;onDirty:(id:string,dirty:boolean)=>void}) {
+function ReplyCard({reply,save,open,onDirty,onDelete}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>;
+  open:()=>void;onDelete:()=>void;onDirty:(id:string,dirty:boolean)=>void}) {
   const [note,setNote]=useState(reply.annotation?.note ?? '');
   const [scope,setScope]=useState(reply.annotation?.scope ?? 'example');
   const [busy,setBusy]=useState(false);
@@ -46,7 +47,7 @@ function ReplyCard({reply,save,open,onDirty}:{reply:Reply;save:(path:string,meth
     <header className="review-card-heading"><span className="review-avatar"><NotebookPen size={18}/></span><div>
       <strong>{reply.source==='qq' ? reply.title : '你与 Miko'}</strong><small>{new Date(reply.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}
       {reply.annotation?.enabled ? ' · 已批注' : reply.annotation ? ' · 批注已撤销' : ''}</small></div>
-      <button className="text-button" onClick={open}>原对话<ArrowUpRight size={14}/></button></header>
+      <button className="text-button" onClick={open}>原对话<ArrowUpRight size={14}/></button><button className="text-button" aria-label="删除回顾" title="删除回顾" disabled={busy} onClick={onDelete}><Trash2 size={16}/></button></header>
     {!!reply.context?.length && <div className="review-context">{reply.context.map((r,i)=><p key={i}><small>{r.author}</small>{r.text}</p>)}</div>}
     <p className="memory-body review-response">{reply.text}</p>
     <textarea aria-label="回复批注" rows={3} placeholder="写下你对这条回复的反馈" value={note} onChange={e=>setNote(e.target.value)}/>
@@ -81,6 +82,7 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
   const {notice,setNotice,setFailure,failed}=useNotice();
   const [recordsLoading,setRecordsLoading]=useState(true);
   const [busy,setBusy]=useState(false);
+  const [deleting,setDeleting]=useState<Reply|null>(null);
   const [refresh,setRefresh]=useState(0);
   const [peer,setPeer]=useState(view==='review' ? navigation.search.get('peer') ?? '' : '');
   const [relation,setRelation]=useState(view==='memory'?navigation.search.get('relation') ?? '':'');
@@ -138,6 +140,14 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
       if(mode==='legacy' && legacy)setLegacy(await getJson<Legacy>('/api/memory/scopes/'+legacy.id));}
     catch(e){setFailure(e);}finally{setBusy(false);}
   }
+  async function removeReview() {
+    if (!deleting) return;
+    setBusy(true);
+    try {
+      await request('/api/memory/review/'+encodeURIComponent(deleting.id),'DELETE');
+      onReplyDirty(deleting.id,false);setDeleting(null);setRefresh(v=>v+1);setNotice('回顾及批注已删除');
+    } catch(e) {setFailure(e);} finally {setBusy(false);}
+  }
   async function special(path:string,body?:object) {
     setBusy(true);setNotice('');
     try{const r=await request(path,'POST',body);if(path==='/api/memory/organize')setProposal(r as Proposal);else setBrief((r as {summary:string}).summary);}
@@ -185,14 +195,20 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
         {brief && <article><h3>浏览摘要</h3><p>{brief}</p><small>原条目仍保留，聊天使用完整资料。</small></article>}
         {proposal && <article><h3>分类整理方案</h3>{proposal.items.map(r=><p key={r.sub_topic}><strong>{r.sub_topic}</strong> · {r.memo}</p>)}<button disabled={busy || !proposal.items.length} className="send-button" onClick={()=>{void mutate('/api/memory/organize/apply','POST',proposal);setProposal(null);}}>采用方案并保留旧版本</button></article>}
       </>)}
-      {mode==='days' && (days.length?days.map(r=><article className="review-card" key={r.id}><h2>{name(r.subject)}</h2><p className="memory-body">{r.text}</p><Sources rows={r.sources}/></article>):<p>这一天尚无整理出的经历。</p>)}
+      {mode==='days' && (days.length?days.map(r=><article className="review-card" key={r.id}><h2>{(r.subjects || [r.subject]).map(name).join('、')}</h2><p className="memory-body">{r.text}</p><Sources rows={r.sources}/></article>):<p>这一天尚无整理出的经历。</p>)}
       {mode==='review' && (recordsLoading?<EmptyState loading title="正在读取回复…"/>:replies.filter(r=>!peer || r.conversation_id===peer).length?
         replies.filter(r=>!peer || r.conversation_id===peer).map(r=><ReplyCard key={r.id+':'+(r.annotation?.revision ?? 0)+':'+discardVersion}
-          reply={r} save={mutate} open={()=>openReply(r)} onDirty={onReplyDirty}/>):
+          reply={r} save={mutate} open={()=>openReply(r)} onDirty={onReplyDirty} onDelete={()=>setDeleting(r)}/>):
         <EmptyState title="这一天暂无已完成的回复"/>)}
       {mode==='legacy' && (!legacy?<p>选择一段关系，查看整理进度和原有记录。</p>:<><h2>关系整理记录</h2><p className="memory-body">{legacy.automatic || '尚无整理记录'}</p>
         <h3>我的关系补充</h3><textarea rows={5} value={manual} onChange={e=>setManual(e.target.value)}/><div className="profile-actions"><button disabled={busy} className="send-button" onClick={()=>void mutate('/api/memory/scopes/'+legacy.id,'PATCH',{text:manual,revision:legacy.revision})}>保存补充</button>
           <button disabled={busy || !listing?.control.enabled || !listing.scopes.find(s=>s.id===legacy.id)?.conversation_id.startsWith('miko|')} onClick={()=>void mutate('/api/memory/scopes/'+legacy.id+'/consolidate','POST')}>现在整理待处理消息</button></div>
         <Sources rows={legacy.source_messages}/>{legacy.history.map(h=><details key={h.id}><summary>{h.kind==='manual'?'关系补充':'自动整理'} · {new Date(h.created_at*1000).toLocaleString()}</summary><p className="memory-body">{h.body}</p></details>)}</>)}
-    </section></div>{guard.dialog}</main></AppShell>;
+    </section></div>{guard.dialog}<AlertDialog.Root open={!!deleting} onOpenChange={open=>{if(!open && !busy)setDeleting(null);}}>
+      <AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay"/><AlertDialog.Content className="confirm-dialog">
+        <AlertDialog.Title>删除这条回顾？</AlertDialog.Title>
+        <AlertDialog.Description>这条回顾及其批注将被删除。聊天记录会保留，已发送的 QQ 消息不会撤回。</AlertDialog.Description>
+        <div className="dialog-actions"><AlertDialog.Cancel className="ui-button" disabled={busy}>取消</AlertDialog.Cancel>
+          <button className="ui-button warning" disabled={busy} onClick={()=>void removeReview()}>{busy?'正在删除…':'确认删除'}</button></div>
+      </AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root></main></AppShell>;
 }

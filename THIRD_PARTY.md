@@ -1,5 +1,7 @@
 # 开源来源
 
+- [SnowLuma](https://github.com/SnowLuma/SnowLuma)：现有本机运行服务；通过 `fetch_sys_faces` 接口读取 QQ 系统表情目录，不复制其源码或打包发行。上游采用源码可见非商业许可（非 OSI 开源许可）。
+
 - [AstrBot Life Scheduler](https://github.com/muyouzhi6/astrbot_plugin_life_scheduler)：MIT，复用 `core/data.py` 的日期归一化、单日记录与 JSON 原子存取，适配为 Miko 简短生活条目。固定提交及改动见 `apps/backend/src/miko/adapters/life/source-manifest.json`，许可随模块保存。
 
 本清单记录 Miko 使用及调研的开源源码。具体提交、模块路径与本地位置见
@@ -7,11 +9,11 @@
 
 | 项目 | 来源 | 许可 | 选用部分 |
 | --- | --- | --- | --- |
-| DeepSeek Harness | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | MIT；[许可副本](licenses/deepseek-harness-LICENSE.txt) | Python SDK、运行时、界面扩展、上下文组装；MCP 接口供后续使用 |
+| DeepSeek Harness | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | MIT；[许可副本](licenses/deepseek-harness-LICENSE.txt) | Python SDK、运行时、界面扩展、上下文组装；独立原生 Web 工作台使用官方 npm @deepseek-ai/dsh 0.2.1-alpha.2 |
 | memU | [NevaMind-AI/memU](https://github.com/NevaMind-AI/memU) | Apache-2.0；[许可副本](licenses/memU-LICENSE.txt) | MemoryService、记忆提交与检索、SQLite 存储、Embedding 接口 |
 | Memobase | [memodb-io/memobase](https://github.com/memodb-io/memobase) | Apache-2.0；[许可副本](licenses/memobase-LICENSE.txt) | 中文记忆提炼、合并与事件整理流程 |
 | jieba | [fxsjy/jieba](https://github.com/fxsjy/jieba) | MIT；[许可副本](licenses/jieba-LICENSE.txt) | 中文分词 |
-| Tulpa 本地 QQ 基线 | [fumingyang2004/Tulpa](https://github.com/fumingyang2004/Tulpa)；本地提交 `7b603d3` | MIT；[许可副本](licenses/tulpa-qq-baseline-LICENSE.txt) | QQ 接收、调度、发送确认；适配 MCP Chat 的消息段解析、原生引用校验、ChatTurns 气泡队列/节奏/回执恢复，以及 ChatMedia/StickerLibrary 的原图校验、中文匹配和表情笔记 |
+| Tulpa 本地 QQ 基线 | [fumingyang2004/Tulpa](https://github.com/fumingyang2004/Tulpa)；本地提交 `7b603d3` | MIT；[许可副本](licenses/tulpa-qq-baseline-LICENSE.txt) | QQ 接收、调度、发送确认；适配 MCP Chat 的消息段解析、原生引用校验、ChatTurns 气泡队列/节奏/回执恢复，以及 ChatMedia/StickerLibrary 的 QQ 图片下载、格式校验、采样编码、中文匹配和表情笔记 |
 | SQLite | [sqlite.org](https://sqlite.org/) | Public Domain；[版权说明](https://sqlite.org/copyright.html) | 通过现有 Python 标准库 sqlite3 保存会话、消息与作者 |
 | PyYAML 6.0.3 | [yaml/pyyaml](https://github.com/yaml/pyyaml) | MIT；[许可副本](licenses/python/pyyaml-LICENSE.txt) | Memobase 内嵌主题配置与隔离验证 |
 
@@ -187,3 +189,7 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 
 - [react-masonry-css](https://github.com/paulcollett/react-masonry-css)：1.0.16，MIT；曾用于生活页卡片流，已从当前前端移除，保留历史致谢与许可副本。
 - [React Flow](https://github.com/xyflow/xyflow)：@xyflow/react 12.12.0，MIT；生活页复用节点、连线和交互，适配为顶部汇总、按日期对齐的纵向目标分支；继续使用既有许可副本。
+- [VTracer](https://github.com/visioncortex/vtracer)：Python 包 0.6.15，MIT；仅作为开发工具，将用户提供的 Logo 头像转换为平滑 SVG 路径，不作为应用运行依赖。
+- Logo 字体：[Allura](https://github.com/google/fonts/tree/main/ofl/allura) 用于正式 Logo `apps/web/src/assets/miko-logo.svg`；[Marck Script](https://github.com/google/fonts/tree/main/ofl/marckscript)、[Cormorant Garamond](https://github.com/google/fonts/tree/main/ofl/cormorantgaramond) 用于 `design/logo-variants` 试排。均为 SIL Open Font License 1.1，文字已转轮廓，许可保存在 `licenses/fonts` 对应目录。
+- SVG 文字转轮廓开发工具：[fontTools](https://github.com/fonttools/fonttools) 4.66.1，MIT；[uharfbuzz](https://github.com/harfbuzz/uharfbuzz) 0.56.3，Apache-2.0。仅用于离线生成，不作为应用运行依赖。
+- [sharp](https://github.com/lovell/sharp)：0.35.5，Apache-2.0；仅使用开发环境自带工具，将既有 SVG 头像转为 QQ 头像测试用 PNG，不作为应用运行依赖。

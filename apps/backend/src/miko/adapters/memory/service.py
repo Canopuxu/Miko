@@ -49,7 +49,9 @@ class Memory:
     def status(self):
         return {'configured': self.index is not None, 'embedding_model': self.model,
                 'error': self.error, 'automatic': self.social.control(), 'batch_size': 100,
-                'memory_engine': self.social.engine, 'idle_flush_seconds': 60}
+                'memory_engine': self.social.engine,
+                'memory_model': (self.social.pipeline.model or self.chat.provider.model) if self.social.pipeline and self.chat.provider else None,
+                'idle_flush_seconds': 60}
 
     def documents(self):
         result = {}
@@ -62,10 +64,10 @@ class Memory:
             for day, row in self.chat.life.store.all().items():
                 if day > date.today().isoformat() or not row.entries:
                     continue
-                name = 'life:' + day
-                result[name] = {'name': name, 'track': 'memory', 'description': 'Miko 生活 · ' + day,
-                    'content': '\n'.join(r['text'] for r in row.entries),
-                    'subject': 'miko', 'peer': '', 'entry_id': name}
+                for position, entry in enumerate(row.entries):
+                    name = f'life:{day}:{position}'
+                    result[name] = {'name': name, 'track': 'memory', 'description': 'Miko 生活 · ' + day,
+                        'content': entry['text'], 'subject': 'miko', 'peer': '', 'entry_id': name}
         for row in self.chat.profiles.list(active=True):
             name = 'profile:' + row['id']
             peer = f"qq:{row['account']}:{row['friend']}" if row['account'] else ''
@@ -124,6 +126,10 @@ class Memory:
                 self.error = '记忆索引更新失败（' + type(exc).__name__ + '），本次使用原有关键词检索'
                 logging.getLogger(__name__).warning('Memory index sync failed: %s', type(exc).__name__)
 
+    async def feedback(self, query, peer):
+        from miko.adapters.memory.feedback import select_feedback
+        return await select_feedback(self.chat.provider, query, self.structured.feedback_candidates(peer))
+
     async def context(self, query, key=None, conversation_id=None):
         await self.sync()
         context = self.chat.profiles.context(query, key)
@@ -135,7 +141,7 @@ class Memory:
         context['people_memory'] = [{k: r[k] for k in ('id','subject','peer','category','topic','content','updated_at')}
             for r in self.structured.items(query, peer=peer, active=True)[:12]] if self.social.control()['enabled'] else []
         context['dated_experiences'] = self.structured.days(peer=peer, query=query)[:6] if self.social.control()['enabled'] else []
-        context['owner_feedback'] = self.structured.feedback(query, conversation_id or peer or 'web:owner')
+        context['owner_feedback'] = await self.feedback(query, conversation_id or peer or 'web:owner')
         if self.social.engine=='memobase':
             for row in context['social_memory']:
                 row['automatic'] = ''
@@ -149,7 +155,7 @@ class Memory:
                 active = {r['id']: r for r in self.chat.profiles.list(key=key, active=True)}
                 used = {r['id'] for r in context['role_material']}
                 remaining = 20000 - sum(len(r['content']) for r in context['role_material'])
-                for hit in hits['files']:
+                for rank, hit in enumerate(hits['files']):
                     name = hit['name']
                     if name.startswith('profile:') and name[8:] in active and name[8:] not in used:
                         row = active[name[8:]]
@@ -159,9 +165,9 @@ class Memory:
                             used.add(name[8:])
                     elif name.startswith('social:'):
                         detail = self.social.detail(int(name[7:]))
-                        subject, peer = detail['conversation_id'].split('|', 1)
-                        if not any(r['subject'] == subject and r['peer'] == peer for r in context['social_memory']):
-                            context['social_memory'].append({'subject': subject, 'peer': peer,
+                        subject, social_peer = detail['conversation_id'].split('|', 1)
+                        if not any(r['subject'] == subject and r['peer'] == social_peer for r in context['social_memory']):
+                            context['social_memory'].append({'subject': subject, 'peer': social_peer,
                                 'automatic': detail['automatic'] if detail['valid'] and self.social.engine!='memobase' else '',
                                 'manual_corrections': detail['manual'], 'sources': self.social.sources(detail['id'])})
                     elif name.startswith('item:'):
@@ -172,21 +178,18 @@ class Memory:
                         row = next((r for r in self.structured.days(peer=peer) if r['id']==name), None)
                         if row and not any(r['id']==name for r in context['dated_experiences']):
                             context['dated_experiences'].append(row)
-                    elif name.startswith('life-goal:') and self.chat.life:
+                    elif name.startswith('life-goal:') and self.chat.life and rank < 3:
                         goal = self.chat.life.store.goals.get(name[10:])
                         goals = context.setdefault('life_goals', [])
-                        if goal and goal not in goals and len(goals) < 20:
+                        if goal and goal not in goals and len(goals) < 3:
                             goals.append(goal)
-                        rows = [r for r in self.chat.life.records() if r.get('goal_id') == name[10:]]
-                        entries = context.setdefault('life_entries', [])
-                        for row in rows[:6]:
-                            if row not in entries and len(entries) < 20:
-                                entries.append(row)
-                    elif name.startswith('life:') and self.chat.life:
-                        rows = [r for r in self.chat.life.records() if r['day'] == name[5:]]
-                        entries = context.setdefault('life_entries', [])
-                        for row in rows:
-                            if row not in entries and len(entries) < 20:
+                    elif name.startswith('life:') and self.chat.life and rank < 3:
+                        _, day, position = name.split(':')
+                        record = self.chat.life.store.all().get(day)
+                        if record and day <= date.today().isoformat() and int(position) < len(record.entries):
+                            row = {'day': day, **record.entries[int(position)]}
+                            entries = context.setdefault('life_entries', [])
+                            if row not in entries and len(entries) < 3:
                                 entries.append(row)
                 context['retrieval'] = {'engine': 'memU Embedding + Tulpa FTS', 'model': self.model,
                                         'hits': [{k: h[k] for k in ('name','score')} for h in hits['files']]}
@@ -194,7 +197,7 @@ class Memory:
                     goals = context.setdefault('life_goals', [])
                     for entry in context.get('life_entries', []):
                         goal = self.chat.life.store.goals.get(entry.get('goal_id'))
-                        if goal and goal not in goals and len(goals) < 20:
+                        if goal and goal not in goals and len(goals) < 6:
                             goals.append(goal)
             except Exception as exc:
                 self.error = '语义检索失败（' + type(exc).__name__ + '），本次使用原有关键词检索'

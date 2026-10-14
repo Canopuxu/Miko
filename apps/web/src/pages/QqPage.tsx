@@ -18,7 +18,7 @@ type QqStatus = { receiver: { state: string; account: string; note: string }; fr
 type Detail = { messages: QqMessage[]; runs: Run[] };
 const states: Record<string, string> = { disabled: '已关闭', blocked: '等待核对', waiting: '等待接话',
   generating: '正在生成', sending: '正在发送', chatting: 'Miko 接话中', listening: '等待新消息',
-  sent: '已发送', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断',
+  sent: '已发送', skipped: '无需回复', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断',
   pending: '待发送', preparing: '准备发送', cancelled: '已取消', between_bubbles: '接话中' };
 const timeLabel = (stamp: number) => new Date(stamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -103,7 +103,7 @@ export function QqPage() {
       {friend ? <>
         <div className="friend-controls">
           <div><strong>{states[friend.state] ?? friend.state}</strong>
-            <p>{friend.note}</p>
+            {friend.note !== (states[friend.state] ?? friend.state) && <p>{friend.note}</p>}
             {friend.state === 'waiting' && friend.due_at && <small>约 {Math.max(0, Math.ceil(friend.due_at - Date.now()/1000))} 秒后接话</small>}
           </div>
           <div className="friend-actions">

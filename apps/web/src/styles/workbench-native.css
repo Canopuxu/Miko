@@ -1,0 +1,18 @@
+body:not([data-ds-dark-theme]) {
+  --dsw-alias-bg-base: #f8f7f3;
+  --dsw-alias-bg-layer-1: #f8f7f3;
+  --dsw-alias-bg-layer-2: #fffdf9;
+  --dsw-alias-bg-layer-3: #fffdf9;
+  --dsw-alias-bg-module-platform: #efeee7;
+  --dsw-alias-label-primary: #403b35;
+  --dsw-alias-label-secondary: #746f64;
+  --dsw-alias-label-tertiary: #817c70;
+  --dsw-alias-brand-primary: #6d8068;
+  --dsw-alias-button-primary-fill: #6d8068;
+  --dsw-alias-button-primary-hover: #5e7059;
+  --dsw-alias-interactive-bg-active: #e1e7d9;
+  --dsw-alias-interactive-bg-hover: #eceee5;
+  --dsw-alias-link: #58704f;
+  --dsw-alias-state-business-primary: #6d8068;
+  --dsw-font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}

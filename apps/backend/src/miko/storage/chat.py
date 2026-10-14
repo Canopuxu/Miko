@@ -61,6 +61,14 @@ class ChatStore:
                 (SELECT substr(text, 1, 80) FROM messages WHERE conversation_id=c.id ORDER BY sequence DESC LIMIT 1) AS preview
                 FROM conversations c WHERE source='web' ORDER BY updated_at DESC, rowid DESC""")]
 
+    def delete_conversation(self, conversation_id: str):
+        with self.connect() as db:
+            row = db.execute("SELECT source FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+            if not row or row['source'] != 'web':
+                raise ValueError('找不到这段网页对话')
+            db.execute('DELETE FROM messages WHERE conversation_id=?', (conversation_id,))
+            db.execute('DELETE FROM conversations WHERE id=?', (conversation_id,))
+
     def begin_turn(self, conversation_id: str, turn_id: str, message: str) -> str:
         user_id = uuid.uuid4().hex
         stamp = now_ms()

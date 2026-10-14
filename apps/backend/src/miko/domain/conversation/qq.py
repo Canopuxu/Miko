@@ -1,16 +1,19 @@
 """Private-message scheduler adapted from Tulpa's local QQ loop."""
+from miko.adapters.qq.images import attach_images
+from miko.adapters.qq.avatar import ReplyAvatar
+
 import asyncio
 from dataclasses import dataclass
 import logging
 import json
+import re
 from pathlib import Path
 import sqlite3
 import time
 
-from miko.adapters.qq.avatar import ReplyAvatar
 from miko.adapters.qq.onebot import EventReceiver, OneBot, SendError, SendUncertain
 from miko.storage.qq import QqStore
-from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay
+from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay, update_face_catalog
 from miko.adapters.qq.media import StickerLibrary
 
 
@@ -26,13 +29,14 @@ class Worker:
     turn: object | None = None
     phase: str = 'generating'
     position: int | None = None
+    previous_mode: str = 'owner'
 
 
 class QqService:
     wait_seconds = 120
     quiet_seconds = 2
     collect_seconds = 8
-    max_reply_chars = 80
+    max_reply_chars = 400
 
     def __init__(self, chat, config, *, client=None, clock=time.time):
         self.chat, self.clock = chat, clock
@@ -70,6 +74,8 @@ class QqService:
         for key in list(self.workers):
             await self.invalidate(key)
         await asyncio.gather(*(w.task for w in list(self.workers.values())), return_exceptions=True)
+        if self.avatar:
+            await self.avatar.close()
 
     def status(self):
         receiver = self.receiver.status() if self.receiver else {'state': 'unconfigured', 'account': '', 'note': '尚未配置 QQ 连接'}
@@ -110,6 +116,11 @@ class QqService:
     async def source_changed(self, state):
         if state == 'connected':
             self.epoch = self.clock()
+            if isinstance(self.client, OneBot):
+                try:
+                    update_face_catalog(await self.client.faces())
+                except (SendError, ValueError, KeyError, TypeError):
+                    logging.getLogger(__name__).warning('Unable to refresh QQ face directory; retaining current candidates')
         for friend in self.store.friends():
             key = (friend['account'], friend['friend'])
             await self.invalidate(key)
@@ -117,6 +128,9 @@ class QqService:
 
     async def manual(self, key):
         await self.invalidate(key)
+        if self.avatar:
+            worker = self.workers.get(key)
+            await self.avatar.interrupt(worker.run_id if worker else None)
         self.store.update_friend(key, mode='owner', note='你正在主导；后续新消息将重新等待两分钟',
             pending_since=None, pending_last=None, due_at=None)
 
@@ -162,9 +176,13 @@ class QqService:
         now = self.clock()
         first = cfg['pending_since'] if cfg['pending_since'] is not None else now
         batch_due = min(now + self.quiet_seconds, first + self.collect_seconds)
-        due = batch_due if cfg['mode'] == 'miko' else max(first + self.wait_seconds, batch_due)
-        self.store.update_friend(key, pending_since=first, pending_last=now, due_at=due,
-            note='等待你回复' if cfg['mode'] == 'owner' else '正在合并连续消息')
+        mentioned = any(re.search(r'(?<![A-Za-z0-9_])miko(?![A-Za-z0-9_])',
+            segment.get('text', ''), re.IGNORECASE)
+            for segment in payload['segments'] if segment['type'] == 'text')
+        mode = 'miko' if mentioned else cfg['mode']
+        due = batch_due if mode == 'miko' else max(first + self.wait_seconds, batch_due)
+        self.store.update_friend(key, mode=mode, pending_since=first, pending_last=now, due_at=due,
+            note='等待你回复' if mode == 'owner' else '正在合并连续消息')
 
     def check(self, key, worker):
         cfg = self.store.friend(key)
@@ -181,7 +199,7 @@ class QqService:
             key = (friend['account'], friend['friend'])
             if (friend['enabled'] and not friend['blocked'] and key not in self.storage_faults and friend['due_at'] is not None
                     and friend['due_at'] <= self.clock() and key not in self.workers):
-                worker = Worker(self.versions.get(key, 0), self.store.new_run(key, self.clock()))
+                worker = Worker(self.versions.get(key, 0), self.store.new_run(key, self.clock()), previous_mode=friend['mode'])
                 self.store.update_friend(key, due_at=None, mode='miko', pending_since=None, pending_last=None)
                 self.workers[key] = worker
                 worker.task = asyncio.create_task(self.reply(key, worker))
@@ -262,14 +280,30 @@ class QqService:
             self.check(key, worker)
             cfg = self.store.friend(key)
             records = await self.context(key)
+            provider = getattr(self.chat, 'qq_provider', None)
+            if provider and provider.model.startswith('doubao-seed-2-1'):
+                await attach_images(self.client, key, records)
             self.check(key, worker)
             candidates = self.stickers.candidates(key[0], '\n'.join(r['text'] for r in records[-8:]))
-            worker.turn = self.chat.begin_qq(cfg['conversation_id'], records, candidates)
-            await worker.turn.task
-            self.check(key, worker)
-            if worker.turn.status != 'completed':
-                raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
-            bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars)
+            for attempt in range(4):
+                self.check(key, worker)
+                worker.turn = self.chat.begin_qq(cfg['conversation_id'], records, candidates)
+                await worker.turn.task
+                self.check(key, worker)
+                if worker.turn.status != 'completed':
+                    raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
+                try:
+                    bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars)
+                    break
+                except ValueError:
+                    if attempt == 3:
+                        raise
+            if not bubbles:
+                self.store.update_run(worker.run_id, state='skipped')
+                if self.versions.get(key, 0) == worker.version:
+                    self.store.update_friend(key, mode=worker.previous_mode, note='本轮无需回复，等待新消息',
+                        pending_since=None, pending_last=None, due_at=None)
+                return
             texts = [self.bubble_text(b, candidates) for b in bubbles]
             self.store.plan(worker.run_id, bubbles, texts)
             self.store.update_run(worker.run_id, state='sending')
@@ -349,7 +383,8 @@ class QqService:
                 self.store.update_friend(key, blocked=1, note=error, due_at=None,
                     pending_since=None, pending_last=None)
             elif state == 'error' and self.versions.get(key, 0) == worker.version:
-                self.store.update_friend(key, mode='owner', pending_since=None, pending_last=None, due_at=None)
+                self.store.update_friend(key, mode=worker.previous_mode, note=error,
+                    pending_since=None, pending_last=None, due_at=None)
         except sqlite3.Error:
             self.storage_faults[key] = '回复记录保存失败，请检查本机存储并到 QQ 核对后恢复'
             logging.getLogger(__name__).exception('Unable to save QQ reply outcome')

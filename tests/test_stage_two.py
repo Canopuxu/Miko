@@ -16,7 +16,7 @@ import uvicorn
 
 from miko.api.chat import chat_router
 from miko.domain.conversation.chat import ChatService
-from miko.settings import ProviderConfig, Settings
+from miko.settings import ProviderConfig, Settings, REPO_ROOT
 from miko.storage.chat import ChatStore
 from miko.storage.qq import QqStore
 from miko.api.profiles import ProfileInput
@@ -37,7 +37,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.store = ChatStore(Path(self.temporary.name) / 'chat.sqlite3')
         config = ProviderConfig(api_base=settings.url + "/fake", api_key="fake-private-key", model="fake-model")
-        with patch.object(Settings, "load_provider", return_value=config):
+        with patch.object(Settings, "load_provider", return_value=config), patch.object(Settings, "load_qq_provider", return_value=None):
             self.service = ChatService(settings, self.store)
         app = FastAPI()
         app.include_router(chat_router(self.service))
@@ -242,12 +242,20 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn.status, 'completed')
         payload = self.requests[-1]
         self.assertTrue(payload['messages'][0]['content'].startswith(
-            '你是Miko，是号主形影不离的朋友，请你以自己的身份帮号主回应好友消息。\n\n'))
+            '你是 Miko，橙汁的朋友。结合你熟悉的人和事，以自己的口吻接着当前话题聊。\n\n'))
+        self.assertIn('如果某个文字气泡介绍了你是 Miko，请在该气泡中添加 introduces_miko=true。', payload['messages'][0]['content'])
         self.assertTrue(payload['messages'][0]['content'].endswith(
-            '如果某个文字气泡介绍了你是 Miko，请在该气泡中添加 introduces_miko=true。'))
-        self.assertEqual(json.loads(payload['messages'][1]['content'])['chat_records'], records)
+            (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()))
+        sent = json.loads(payload['messages'][1]['content'])['chat_records']
+        self.assertEqual(sent[0]['author']['name'], '橙汁')
+        self.assertEqual(sent[1], records[1])
+        target = json.loads(payload['messages'][1]['content'])['reply_to']
+        self.assertEqual(target['author'], records[1]['author'])
+        self.assertEqual(target['text'], '你好')
+        self.assertEqual(records[0]['author']['name'], '你')
         self.assertNotIn('tools', payload)
         self.assertEqual(payload['response_format'], {'type': 'json_object'})
+        self.assertEqual(payload['max_tokens'], 8192)
 
     async def test_web_and_qq_share_reviewed_material_and_keep_relationships_separate(self):
         self.service.profiles.save(ProfileInput(subject='miko', kind='overview', title='Miko', content='喜欢平面设计').record())
@@ -284,9 +292,10 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         qq_prompt = self.requests[-1]['messages'][0]['content']
         qq = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
         self.assertEqual(web['life_entries'], qq['life_entries'])
-        self.assertEqual(web['life_entries'], entries)
+        self.assertEqual(web['life_entries'], [{**entries[0], 'subject': 'miko', 'subject_name': 'Miko'}])
         self.assertEqual(web['life_goals'], qq['life_goals'])
         self.assertEqual(web['life_goals'][0]['status'], 'active')
+        self.assertEqual(web['life_goals'][0]['subject_name'], 'Miko')
         self.assertNotIn('id', web['life_goals'][0])
         self.assertIn('日期表示记录时间', web_prompt)
         self.assertIn('日期表示记录时间', qq_prompt)

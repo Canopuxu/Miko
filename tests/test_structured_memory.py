@@ -23,17 +23,16 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.social.loop=asyncio.get_running_loop()
         self.calls=[]
 
-        async def complete(system,message,model=None):
+        async def complete(system,message,model=None,json_output=False):
             self.calls.append(message)
-            if '### 输入对话' in message:
-                if 'Miko(user)' in message:
-                    text='- Miko在练键盘。[提及于 2026/10/13] // info'
-                else:
-                    text=('- 主人在练贝斯。' if '改练贝斯' in message else '- 主人在练吉他。')+'[提及于 2026/10/13] // info\n- 主人今天练了半小时。[提及于 2026/10/13] // event'
-            elif '#### 备忘录' in message:
-                text='- 兴趣::乐器::'+('键盘' if 'Miko在练键盘' in message else '贝斯' if '主人在练贝斯' in message else '吉他')
+            if json_output:
+                text=json.dumps({'facts':[
+                    {'subject':'owner','topic':'兴趣','sub_topic':'乐器','memo':'贝斯' if '改练贝斯' in message else '吉他'},
+                    {'subject':'miko','topic':'兴趣','sub_topic':'乐器','memo':'键盘'}],
+                    'events':[{'subjects':['owner','miko'],'date':'2026-10-14','text':'一起练了半小时乐器'}]},ensure_ascii=False)
             else:
-                text='1. UPDATE::'+('贝斯' if '贝斯' in message else '键盘')
+                import ast
+                text='\n'.join(str(c['memo_id'])+'. UPDATE::'+c['new_info'] for c in ast.literal_eval(message.strip()))
             return {'text':text,'usage':{}}
         self.chat.complete_memory=complete
 
@@ -55,6 +54,13 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         miko=self.memory.structured.items(subject='miko')[0]
         self.assertEqual((owner['content'],miko['content']),('吉他','键盘'))
         self.assertTrue(self.memory.structured.days(subject='owner'))
+        shared=self.memory.structured.days(subject='owner')[0]
+        self.assertEqual(shared['id'],self.memory.structured.days(subject='miko')[0]['id'])
+        from miko.domain.conversation.context_selection import candidates,scoped_row
+        _,rows=candidates({'dated_experiences':[shared]})
+        self.assertTrue(scoped_row(rows[0],{'miko'}))
+        self.assertTrue(scoped_row(rows[0],{'owner'}))
+        self.assertIn('橙汁',rows[0]['text'])
         self.add_turn('我暂停吉他，现在改练贝斯')
         await asyncio.to_thread(self.social.consolidate,sid,None,True)
         row=self.memory.structured.items(subject='owner')[0]
@@ -82,12 +88,12 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.add_turn('我暂停吉他，现在改练贝斯')
         captured=self.chat.complete_memory
         touched=False
-        async def concurrent_edit(system,message,model=None):
+        async def concurrent_edit(system,message,model=None,json_output=False):
             nonlocal touched
             if not touched:
                 touched=True
                 self.memory.structured.edit(owner['id'],'用户确认仍练吉他',owner['revision'])
-            return await captured(system,message,model)
+            return await captured(system,message,model,json_output)
         self.chat.complete_memory=concurrent_edit
         result=await asyncio.to_thread(self.social.consolidate,sid,None,True)
         self.assertEqual(result['status'],'superseded')
@@ -107,15 +113,14 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
     async def test_changed_subtopic_updates_named_item_and_category_history(self):
         import ast
         original=self.chat.complete_memory
-        async def classify(system,message,model=None):
-            answer=await original(system,message,model)
-            if '#### 备忘录' in message and '主人在练吉他' in message:
-                answer['text']='- 兴趣::吉他::正在练吉他'
-            elif '#### 备忘录' in message and '主人在练贝斯' in message:
-                answer['text']='- 兴趣::乐器::吉他暂时停练，现在主要练贝斯'
-            elif message.lstrip().startswith('[{'):
-                changes=ast.literal_eval(message.strip())
-                answer['text']='\n'.join(str(c['memo_id'])+'. UPDATE::'+c['new_info'] for c in changes)
+        async def classify(system,message,model=None,json_output=False):
+            answer=await original(system,message,model,json_output)
+            if json_output:
+                value=json.loads(answer['text'])
+                fact=value['facts'][0]
+                fact['sub_topic']='乐器' if '改练贝斯' in message else '吉他'
+                fact['memo']='吉他暂时停练，现在主要练贝斯' if '改练贝斯' in message else '正在练吉他'
+                answer['text']=json.dumps(value,ensure_ascii=False)
             return answer
         self.chat.complete_memory=classify
         sid=self.add_turn('我在练吉他')
@@ -131,6 +136,36 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(active),1)
         self.assertTrue(self.memory.structured.detail(rows[0]['id'])['history'])
 
+
+class ReviewAndFeedbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delete_review_keeps_chat_and_removes_feedback(self):
+        from miko.storage.chat import ChatStore
+        from miko.adapters.memory.tulpa import Projection
+        from miko.adapters.memory.structured import StructuredMemory
+        from miko.domain.conversation.context_selection import candidates, render
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=ChatStore(root/'chat.db')
+            source.begin_turn('web-example','reply-one','早上好')
+            source.finish('reply-one','早上好呀','completed',None)
+            store=StructuredMemory(Projection(root/'memory.db',source,True))
+            store.annotate('reply-one','语气自然一些','global',0)
+            feedback=store.feedback('听歌','qq:1:2')
+            self.assertEqual(len(feedback),1)
+            context={'current_time':'2026-10-14','role_material':[], 'owner_feedback':feedback}
+            self.assertEqual(candidates(context),([],[]))
+            self.assertIn('语气自然一些',render(context,[],[]))
+            # Current-chat feedback cannot cross chats; withdrawn feedback is absent.
+            note=store.annotate('reply-one','语气自然一些','friend',1)
+            self.assertEqual(store.feedback('听歌','qq:1:2'),[])
+            self.assertTrue(store.feedback('听歌','web-example'))
+            store.annotate('reply-one','语气自然一些','global',note['revision'],False)
+            self.assertEqual(store.feedback('听歌','web-example'),[])
+            store.delete_review('reply-one')
+            self.assertEqual(store.review()['replies'],[])
+            self.assertEqual(len(source.messages('web-example')),2)
+            reopened=StructuredMemory(Projection(root/'memory.db',source,True))
+            self.assertEqual(reopened.review()['replies'],[])
+            with self.assertRaises(ValueError):reopened.annotate('reply-one','新批注','global',0)
 
 if __name__=='__main__':
     unittest.main()

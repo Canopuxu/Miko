@@ -2,7 +2,8 @@
 import asyncio
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import json
 from typing import Literal
 from uuid import uuid4
@@ -75,20 +76,15 @@ class Life:
 
     def goals_context(self, query=''):
         selected = terms(query) if query.strip() else set()
-        goals = list(self.store.goals.values())
-        current = [g for g in goals if g['status'] == 'active']
         associated = {r.get('goal_id') for r in self.context(query)}
-        relevant = [g for g in goals if g not in current and
-                    (selected & terms(g['text']) or g['id'] in associated)]
-        return (current + relevant[:6])[:20]
+        return [g for g in self.store.goals.values()
+                if selected & terms(g['text']) or g['id'] in associated][:3]
 
     def context(self, query=''):
+        if not query.strip():
+            return []
         today = date.today().isoformat()
-        records = [r for r in self.records() if r['day'] <= today]
-        latest = max((d for d in self.store.all() if d <= today), default='')
-        current = [r for r in records if r['day'] == latest]
-        matches = [r for r in self.records(query) if r['day'] <= today and r not in current] if query.strip() else []
-        return (current + matches[:6])[:20]
+        return [r for r in self.records(query) if r['day'] <= today][:3]
 
     def status(self):
         return {'enabled': self.enabled, 'generating': self.generating, 'error': self.error,
@@ -139,11 +135,11 @@ class Life:
         self.config_path.write_text(json.dumps({'enabled': enabled}), encoding='utf-8')
         return self.status()
 
-    async def generate(self):
+    async def generate(self, day=None):
         if self.generating:
             raise ValueError('生活条目正在生成')
         self.generating = True
-        day = date.today()
+        day = day or date.today()
         self.attempted_day = day
         current = self.store.get(day)
         revision = current.revision if current else 0
@@ -203,12 +199,16 @@ class Life:
     def start(self):
         self.task = asyncio.create_task(self.background())
 
+    def automatic_due(self, now=None):
+        now = now or datetime.now(ZoneInfo('Asia/Shanghai'))
+        return (self.enabled and bool(self.chat.provider) and now.hour >= 22
+                and not self.store.has(now.date()) and self.attempted_day != now.date())
+
     async def background(self):
-        # TODO: 按实际使用效果再调整生成频率与触发方式。
         while True:
-            if self.enabled and self.chat.provider and not self.store.has(date.today()) and self.attempted_day != date.today():
+            if self.automatic_due():
                 try:
-                    await self.generate()
+                    await self.generate(datetime.now(ZoneInfo('Asia/Shanghai')).date())
                 except Exception:
                     pass  # Keep the previous entries; the page offers an explicit retry.
             await asyncio.sleep(60)

@@ -120,7 +120,7 @@ export function LifePage() {
       disabled={busy}>回到今天</button>
     <div className="life-date-list">{data?.dates.map(value => <button key={value}
       className={day === value ? 'selected' : ''} disabled={busy} onClick={() => showDay(value)}><CalendarDays size={15}/><span>{value}</span><small>{data.trajectory.filter(e=>e.day===value).length} 条</small></button>)}</div></>}
-    <div className="life-controls"><p>{data?.status.enabled ? '自动记录已开启' : '自动记录已暂停'}</p>
+    <div className="life-controls"><p>{data?.status.enabled ? '每天 22:00 自动总结（北京时间）' : '自动记录已暂停'}</p>
       <button className="life-button" disabled={busy || data?.status.generating || !data} onClick={() => void toggle()}>
         {data?.status.enabled ? '暂停自动记录' : '恢复自动记录'}</button></div>
   </div>;

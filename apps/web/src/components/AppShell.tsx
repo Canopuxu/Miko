@@ -1,6 +1,8 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, MessageCircle, NotebookPen, Sprout, Users, UserRound, type LucideIcon } from 'lucide-react';
 import { RuntimeStatus } from './RuntimeStatus';
+import mikoAvatar from '../assets/miko-avatar.svg';
+import mikoLogo from '../assets/miko-logo.svg';
 
 export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life' | 'review';
 export const views: { id: View; label: string; icon: LucideIcon; title: string }[] = [
@@ -16,16 +18,24 @@ export const NavigationContext = createContext<{
   navigate: (view: View, params?: Record<string, string | undefined>) => void;
   replace: (params: Record<string, string | undefined>) => void;
   search: URLSearchParams;
+  workbench: boolean; toggleWorkbench: () => void;
 } | null>(null);
+
+export function BrandButton() {
+  const navigation = useContext(NavigationContext)!;
+  return <button className="brand" onClick={navigation.toggleWorkbench}
+    title={navigation.workbench ? '返回 Miko' : '打开 DSH 工作台'} aria-label={navigation.workbench ? '返回 Miko' : '打开 DSH 工作台'}>
+    <span className="brand-mark" aria-hidden="true"><img className="brand-logo" src={mikoLogo} alt="" />
+      <img className="brand-avatar" src={mikoAvatar} alt="" /></span>
+  </button>;
+}
 
 export function AppShell({ view, sidebar, children }: { view: View; sidebar: ReactNode; children: ReactNode }) {
   const navigation = useContext(NavigationContext)!;
   const current = views.find(item => item.id === view)!;
   return <div className={`workspace-frame ${navigation.expanded ? '' : 'sidebar-collapsed'}`}>
     <aside className="primary-sidebar">
-      <button className="brand" onClick={() => navigation.select('chat')} aria-label="Miko 首页">
-        <span className="brand-mark"><span className="brand-wordmark" aria-hidden="true">Miko</span></span>
-      </button>
+      <div className="brand-space" aria-hidden="true" />
       <nav className="primary-navigation" aria-label="一级导航">
         {views.map(view => <button key={view.id} className={`primary-item ${view.id === navigation.active ? 'selected' : ''}`}
           aria-current={view.id === navigation.active ? 'page' : undefined}

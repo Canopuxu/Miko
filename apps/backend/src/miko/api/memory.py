@@ -174,6 +174,13 @@ def memory_router(memory):
         except ValueError:
             raise HTTPException(422,'日期格式需要为 YYYY-MM-DD') from None
 
+    @router.delete('/review/{message_id}')
+    async def delete_review(message_id: str):
+        try:
+            return memory.structured.delete_review(message_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+
     @router.put('/review/{message_id}')
     async def annotate(message_id: str, body: Annotation):
         try:
