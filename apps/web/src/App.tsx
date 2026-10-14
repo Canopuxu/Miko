@@ -51,13 +51,6 @@ export function App() {
     history.replaceState(null,'',url);setSearch(new URLSearchParams(url.search));
   }
   useEffect(() => {
-    let alive = true;
-    void fetch('/api/settings').then(r=>r.ok?r.json():null).then(config=>{
-      if(alive && config && !config.configured) navigate('settings');
-    }).catch(()=>{});
-    return ()=>{alive=false;};
-  }, []);
-  useEffect(() => {
     const restore = () => {activate(currentView()); setSearch(new URLSearchParams(location.search));};
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);

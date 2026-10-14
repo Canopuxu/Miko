@@ -10,6 +10,7 @@ from miko.api.local import local_request
 from miko.settings import ProviderConfig, write_json
 from miko.adapters.qq.onebot import QqConfig, OneBot, EventReceiver, SendError
 from miko.adapters.qq.avatar import ReplyAvatar
+from miko.adapters.qq.managed import resolve_connection
 
 
 class ModelInput(BaseModel):
@@ -26,14 +27,16 @@ class ModelsInput(BaseModel):
     memory_model: str = ''
     life_model: str = ''
     embedding_model: str = ''
+    use_shared_model: bool = False
 
 
 class QqInput(BaseModel):
     model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
     account: str
-    http_url: str
+    managed: bool = False
+    http_url: str = ''
     http_token: str = ''
-    ws_url: str
+    ws_url: str = ''
     ws_token: str = ''
 
 
@@ -99,6 +102,10 @@ def settings_router(chat, qq):
     @router.put('/models')
     async def save_models(body: ModelsInput):
         idle()
+        if body.use_shared_model:
+            body.qq_provider = None
+            body.memory_model = ''
+            body.life_model = ''
         primary = provider(body.provider, 'provider.local.json')
         secondary = provider(body.qq_provider, 'qq-provider.local.json') if body.qq_provider else None
         embedding = read('embedding.local.json')
@@ -127,7 +134,12 @@ def settings_router(chat, qq):
 
     def qq_config(body):
         old = read('qq.local.json')
-        value = {**old, **body.model_dump()}
+        if body.managed:
+            try:
+                return resolve_connection(chat.settings.local_root, body.account.strip(), old)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+        value = {**old, **body.model_dump(exclude={'managed'})}
         for key, url in [('http_token', 'http_url'), ('ws_token', 'ws_url')]:
             if not value[key]:
                 value[key] = old.get(key, '') if old.get(url) == value[url] else ''
@@ -156,6 +168,9 @@ def settings_router(chat, qq):
         idle()
         if qq.client and qq.client.config.account != config.account:
             raise HTTPException(409, '当前已连接其他 QQ 账号，请先停止服务后更换账号')
+        if (body.managed and qq.client and qq.client.config == config
+                and qq.receiver and qq.receiver.status()['state'] == 'connected'):
+            return {'message': 'QQ 已连接，接口与凭据由程序管理'}
         await qq.close()
         qq.client = OneBot(config)
         qq.receiver = EventReceiver(qq.client, qq.receive, qq.source_changed)

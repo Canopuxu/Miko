@@ -58,6 +58,29 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.client.put('/api/settings/models',json=self.payload()).status_code,409)
         self.assertFalse((self.root/'config/provider.local.json').exists())
 
+    def test_basic_model_save_shares_one_model_across_generation_tasks(self):
+        data = self.payload()
+        data['qq_provider'] = {'api_base':'https://qq.example/v1','api_key':'qq-test','model':'other'}
+        data['use_shared_model'] = True
+        self.assertEqual(self.client.put('/api/settings/models',json=data).status_code,200)
+        self.assertIsNone(self.chat.qq_provider)
+        self.assertIsNone(self.chat.life.model)
+        self.assertIsNone(self.memory.social.pipeline.model)
+        self.assertFalse((self.root/'config/qq-provider.local.json').exists())
+
+    def test_basic_qq_only_requires_account_and_preserves_existing_tokens(self):
+        from miko.adapters.qq.onebot import QqConfig
+        config = {'account':'12345','http_url':'http://127.0.0.1:3000','ws_url':'ws://127.0.0.1:3001/',
+                  'http_token':'http-test-secret','ws_token':'ws-test-secret'}
+        write_json(self.root/'config/qq.local.json',config)
+        self.qq.client = SimpleNamespace(config=QqConfig.model_validate(config))
+        self.qq.receiver = SimpleNamespace(status=lambda:{'state':'connected'})
+        with patch('miko.api.settings.OneBot.login',new=AsyncMock(return_value='12345')):
+            response=self.client.put('/api/settings/qq',json={'account':'12345','managed':True})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertNotIn('test-secret',response.text)
+        self.assertEqual(json.loads((self.root/'config/qq.local.json').read_text())['http_token'],'http-test-secret')
+
     def test_embedding_switch_preserves_old_index_and_other_settings(self):
         write_json(self.root/'config/life.local.json',{'enabled':False})
         write_json(self.root/'config/memory.local.json',{'engine':'memobase'})

@@ -15,7 +15,12 @@
 .settings-navigation { padding:16px; display:grid; align-content:start; gap:8px; }
 .settings-navigation button { text-align:left; border:0; border-radius:8px; background:transparent; padding:12px; color:var(--ink); cursor:pointer; }
 .settings-navigation button.selected { background:#e1e7d9; font-weight:600; }
-.setup-progress { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:28px; color:#746f64; }
-.setup-progress [aria-current] { color:#4f684a; font-weight:600; }
 .settings-body:disabled { opacity:.65; }
 @media(max-width:760px){.settings-content{padding:20px 18px}.settings-fields{grid-template-columns:1fr}}
+.settings-advanced { max-width:820px; border-top:1px solid var(--line); }
+.settings-advanced summary { list-style:none; display:flex; align-items:center; justify-content:space-between; padding:16px 0; cursor:pointer; color:#746f64; }
+.settings-advanced summary::-webkit-details-marker { display:none; }
+.settings-advanced summary svg { transition:transform 160ms ease; }
+.settings-advanced[open] summary svg { transform:rotate(180deg); }
+.settings-advanced-content { padding:8px 0 24px; }
+.settings-body section.settings-basic { border-bottom:0; margin-bottom:0; }
