@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import time
 
+from miko.adapters.qq.avatar import ReplyAvatar
 from miko.adapters.qq.onebot import EventReceiver, OneBot, SendError, SendUncertain
 from miko.storage.qq import QqStore
 from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay
@@ -40,6 +41,8 @@ class QqService:
         local_root = getattr(getattr(chat, 'settings', None), 'local_root', chat.store.path.parent)
         self.stickers = StickerLibrary(self.store, Path(local_root) / 'data/qq/stickers')
         self.client = client or (OneBot(config) if config else None)
+        self.avatar = (ReplyAvatar(self.client, config.miko_avatar_file, config.owner_avatar_file)
+                       if config and config.miko_avatar_file and config.owner_avatar_file else None)
         self.receiver = EventReceiver(self.client, self.receive, self.source_changed) if self.client else None
         if config:
             for friend in config.friends:
@@ -277,6 +280,9 @@ class QqService:
                 self.check(key, worker)
                 self.store.update_bubble(worker.run_id, i, state='preparing')
                 segments = await self.segments(key, worker, bubble)
+                if i == 0 and self.avatar:
+                    await self.avatar.acquire(worker.run_id)
+                    self.check(key, worker)
                 payload = parse_message(segments)
                 if bubble['kind'] == 'sticker':
                     payload['segments'][-1]['sticker_id'] = bubble['sticker_id']
@@ -324,7 +330,11 @@ class QqService:
                 self.storage_faults[key] = '消息保存失败，请检查本机存储并到 QQ 核对后恢复'
                 logging.getLogger(__name__).exception('Unable to save QQ message origin')
             finally:
-                self.workers.pop(key, None)
+                try:
+                    if self.avatar:
+                        await self.avatar.release(worker.run_id)
+                finally:
+                    self.workers.pop(key, None)
 
     def fail_run(self, key, worker, state, error):
         try:

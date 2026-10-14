@@ -29,9 +29,13 @@ class QqConfig(BaseModel):
     ws_token: SecretStr = SecretStr('')
     account: str
     friends: list[dict[str, str]] = []
+    miko_avatar_file: str = ''
+    owner_avatar_file: str = ''
 
     @model_validator(mode='after')
     def local_endpoints(self):
+        if bool(self.miko_avatar_file) != bool(self.owner_avatar_file):
+            raise ValueError('头像切换需要同时配置 Miko 和原头像')
         if not self.account.isascii() or not self.account.isdigit() or int(self.account) <= 0:
             raise ValueError('需要有效的本人 QQ 号')
         for friend in self.friends:
@@ -53,7 +57,7 @@ class OneBot:
         self.transport = transport
 
     async def call(self, action, payload, *, sending=False):
-        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history', 'get_msg'}
+        allowed = {'get_login_info', 'get_friend_list', 'get_friend_msg_history', 'get_msg', 'set_qq_avatar'}
         if action not in allowed | ({'send_private_msg'} if sending else set()):
             raise SendError('接口不在 QQ 适配器允许范围内')
         try:
@@ -78,6 +82,11 @@ class OneBot:
         if not account.isascii() or not account.isdigit() or int(account) <= 0:
             raise SendError('QQ 接口未返回有效登录账号')
         return account
+
+    async def avatar(self, path):
+        if await self.login() != self.config.account:
+            raise SendError('QQ 登录账号发生变化，未更换头像')
+        await self.call('set_qq_avatar', {'file': path})
 
     async def target(self, account, friend):
         if await self.login() != account:
