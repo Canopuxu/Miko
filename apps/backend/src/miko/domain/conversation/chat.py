@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 import logging
@@ -16,7 +17,7 @@ import httpx
 
 from miko.adapters.dsh.runtime import DshRuntime
 from miko.adapters.qq.messages import FACES, OUTPUT_SCHEMA
-from miko.settings import REPO_ROOT, Settings
+from miko.settings import REPO_ROOT, Settings, ProviderConfig
 from miko.storage.chat import ChatStore
 from miko.storage.profiles import ProfileStore
 from miko.domain.conversation.context_selection import compose_qq_context, render_dialogue
@@ -80,6 +81,9 @@ class Turn:
     model: str | None = None
     usage: dict = field(default_factory=dict)
     qq_records: list[dict] | None = None
+    qq_input: dict | None = None
+    warning: str | None = None
+    provider_override: ProviderConfig | None = None
 
     def close_runtime(self):
         with self.lifecycle:
@@ -144,7 +148,16 @@ class ChatService:
             context['life_goals'] = self.life.goals_context(query)
             if context['life_entries'] or context['life_goals']:
                 instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
-        return base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False)
+        return self.named_prompt(base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False))
+
+    def named_prompt(self, text):
+        names = {'Miko': self.store.character_name(), '橙汁': self.store.person_name('owner')}
+        return re.sub(r'(?<![A-Za-z0-9_])Miko(?![A-Za-z0-9_])|橙汁', lambda match: names[match[0]], text)
+
+    def canonical_query(self, query):
+        names = {self.store.character_name().casefold(): 'Miko', self.store.person_name('owner').casefold(): '橙汁'}
+        pattern = '|'.join(re.escape(name) for name in sorted(names, key=len, reverse=True))
+        return re.sub(pattern, lambda match: names[match[0].casefold()], query, flags=re.IGNORECASE)
 
     async def run(self, turn: Turn):
         status = "error"
@@ -169,6 +182,7 @@ class ChatService:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()
                 if turn.memory_key:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
+            turn.system_prompt = self.named_prompt(turn.system_prompt or self.system_prompt)
             turn.runtime = DshRuntime(
                 self.settings, base_url=f"{self.settings.url}/_runtime/llm/{turn.id}",
                 token=self.bridge_token, model=turn.model or self.provider_for(turn).model,
@@ -236,12 +250,12 @@ class ChatService:
                     json_output=True)
         turn.memory_query = query
         turn.memory_key = (account, friend)
-        if self.qq_provider:
-            turn.qq_records = records
-            turn.message = render_dialogue(json.loads(message))
-            image_parts = [part for r in records for part in r.get('_image_inputs', [])]
-            content = [{'type': 'text', 'text': turn.message}, *image_parts] if image_parts else turn.message
-            turn.context = [{'role': 'user', 'content': content}]
+        turn.qq_records = records
+        turn.qq_input = json.loads(message)
+        turn.message = render_dialogue(turn.qq_input)
+        image_parts = [part for r in records for part in r.get('_image_inputs', [])]
+        content = [{'type': 'text', 'text': turn.message}, *image_parts] if image_parts else turn.message
+        turn.context = [{'role': 'user', 'content': content}]
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         return turn
@@ -263,10 +277,10 @@ class ChatService:
                 await self.cancel(turn)
                 await turn.task
 
-    async def complete_memory(self, system, message, model=None, json_output=False):
+    async def complete_memory(self, system, message, model=None, json_output=False, provider=None):
         turn = Turn(uuid.uuid4().hex, 'memory', message,
                     context=[{'role': 'user', 'content': message}], system_prompt=system, model=model,
-                    json_output=json_output)
+                    json_output=json_output, provider_override=provider)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         try:
@@ -325,11 +339,30 @@ class ChatService:
             payload['stream_options'] = {'include_usage': True}
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
         try:
-            turn.provider_task = asyncio.create_task(client.send(client.build_request(
-                "POST", provider.api_base + "/chat/completions", json=payload,
-                headers={"Authorization": "Bearer " + provider.api_key.get_secret_value()},
-            ), stream=True))
-            remote = await turn.provider_task
+            for attempt in range(2):
+                if turn.cancelled:
+                    raise asyncio.CancelledError
+                turn.provider_task = asyncio.create_task(client.send(client.build_request(
+                    "POST", provider.api_base + "/chat/completions", json=payload,
+                    headers={"Authorization": "Bearer " + provider.api_key.get_secret_value()},
+                ), stream=True))
+                remote = await turn.provider_task
+                has_images = any(isinstance(message.get('content'), list) and
+                    any(part.get('type') == 'image_url' for part in message['content'])
+                    for message in payload['messages'])
+                if attempt == 0 and turn.qq_input is not None and has_images and remote.status_code in (400, 415, 422):
+                    await remote.aclose()
+                    text_input = deepcopy(turn.qq_input)
+                    for record in text_input['chat_records']:
+                        for segment in record.get('segments', []):
+                            if segment.get('type') == 'image':
+                                segment['content_status'] = 'unavailable'
+                    turn.message = render_dialogue(text_input)
+                    turn.context = [{'role': 'user', 'content': turn.message}]
+                    payload['messages'] = [payload['messages'][0], *turn.context]
+                    turn.warning = '模型接口未接受图片，本轮已自动改用文字处理。可在模型设置中更换支持图片输入的模型。'
+                    continue
+                break
         except asyncio.CancelledError:
             await client.aclose()
             raise HTTPException(409, "Turn cancelled") from None
@@ -341,6 +374,8 @@ class ChatService:
             turn.provider_task = None
         if remote.status_code != 200:
             turn.error = f"模型接口返回 HTTP {remote.status_code}，请检查模型配置或稍后重试"
+            if turn.warning:
+                turn.error = '图片请求被拒，改用文字后仍失败：' + turn.error
             await remote.aclose()
             await client.aclose()
             raise HTTPException(502, "Provider request failed")
@@ -388,4 +423,4 @@ class ChatService:
         return StreamingResponse(stream(), media_type="text/event-stream")
 
     def provider_for(self, turn):
-        return (self.qq_provider or self.provider) if turn.memory_key is not None else self.provider
+        return turn.provider_override or ((self.qq_provider or self.provider) if turn.memory_key is not None else self.provider)

@@ -1,5 +1,6 @@
 {
   "name": "miko-web",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,6 +1,8 @@
 """Sample the shape of a day before selecting its supporting character facts."""
 import hashlib
 import random
+import re
+from datetime import timedelta
 
 from miko.storage.search import terms
 
@@ -37,10 +39,48 @@ def day_rhythm(day):
     return {'白天的时间去向': daytime[day.weekday()], '空下来之后': leisure[day.weekday()]}
 
 
-def generation_material(profiles, records, goals, day, rhythm=None):
+def conversation_background(profiles, events, day, query):
+    today = day.isoformat()
+    recent = (day - timedelta(days=7)).isoformat()
+    soon = (day + timedelta(days=2)).isoformat()
+    rows = [r for r in events if 'miko' in r.get('subjects', [r.get('subject')])]
+    current = sorted((r for r in rows if r['day'] == today), key=lambda r: r.get('updated_at', 0), reverse=True)[:2]
+    upcoming = sorted((r for r in rows if today < r['day'] <= soon
+                       and len(query & terms(r['text'])) >= 2),
+                      key=lambda r: (r['day'], -r.get('updated_at', 0)))[:1] if not current else []
+    # A nearby plan also supplies its topic: yesterday's change to that plan
+    # should be available alongside it, without another retrieval/model call.
+    relevant = query | terms(' '.join(r['text'] for r in current + upcoming))
+    counterparts = {person for r in current + upcoming for person in r.get('subjects', []) if person != 'miko'}
+    eligible = [r for r in rows if recent <= r['day'] < today and
+                (not counterparts or not (set(r.get('subjects', [])) - {'miko'}) or
+                 counterparts & set(r.get('subjects', [])))]
+    def relevance(row):
+        # The compact extraction may omit a category such as “游戏”; its
+        # existing source messages can supply that keyword for local matching.
+        titles = re.findall(r'《([^》]+)》', row['text'])
+        sources = row.get('sources', [])
+        nearby = {j for i, source in enumerate(sources) if any(title in source['content'] for title in titles)
+                  for j in range(max(0, i - 1), min(len(sources), i + 2))}
+        text = row['text'] + ' ' + ' '.join(sources[i]['content'] for i in sorted(nearby))
+        return len(relevant & terms(text, limit=None))
+    past = sorted((r for r in eligible if relevance(r) >= 2),
+                  key=lambda r: (relevance(r), r['day'], r.get('updated_at', 0)), reverse=True)[:1]
+    groups = {'当天': current, '临近': upcoming, '近期对话': past}
+    if not any(groups.values()):
+        return {}
+    with profiles.chat.connect() as db:
+        names = {r['id']: r['display_name'] for r in db.execute('SELECT id,display_name FROM people')}
+    return {key: [{'日期': r['day'], '涉及的人': [names.get(person, '好友') for person in r.get('subjects', [r.get('subject')])],
+                   '内容': r['text']} for r in values] for key, values in groups.items() if values}
+
+
+def generation_material(profiles, records, goals, day, rhythm=None, memory_events=()):
     shape = rhythm if rhythm is not None else day_rhythm(day)
+    owner_names = {'橙汁', profiles.chat.person_name('owner')}
     rows = [r for r in profiles.list(subject='miko', active=True)
-            if r['kind'] in ('overview', 'fact') and not r['account'] and not r['friend']]
+            if r['kind'] in ('overview', 'fact') and not r['account'] and not r['friend']
+            and not (r['kind'] == 'overview' and any(name in r['content'] for name in owner_names))]
     work = [r for r in rows if any(word in r['category'] for word in ('工作', '职业', '学业'))]
     core = [r for r in rows if r['kind'] == 'overview' or r['category'].startswith('生活习惯') or r in work]
     work_terms = set().union(*(terms(r['content']) for r in work)) if work else set()
@@ -59,14 +99,14 @@ def generation_material(profiles, records, goals, day, rhythm=None):
     material_rows = core + related[:5]
     role_material = [{name: r[name] for name in ('subject', 'kind', 'category', 'content')}
                      for r in material_rows]
-    owner_identity = [r for r in profiles.list(subject='owner', kind='overview', active=True)
-                      if not r['account'] and not r['friend']]
-    role_material += [{name: r[name] for name in ('subject', 'kind', 'category', 'content')}
-                      for r in owner_identity]
+    identity = [r for r in profiles.list(subject='owner', kind='overview', active=True)
+                if not r['account'] and not r['friend'] and any(name in r['content'] for name in owner_names)]
     recent = [r for r in profiles.list(kind='recent', active=True)
               if r['subject'] == 'owner' and r.get('as_of') and r['as_of'] <= day.isoformat()
               and not r['account'] and not r['friend']][:3]
-    role_material += [{name: r[name] for name in ('subject', 'kind', 'category', 'content', 'as_of')}
+    owner_material = [{name: r[name] for name in ('subject', 'kind', 'category', 'content')}
+                      for r in identity]
+    owner_material += [{name: r[name] for name in ('subject', 'kind', 'category', 'content', 'as_of')}
                       for r in recent]
 
     prior = [r for r in records if r['day'] < day.isoformat()]
@@ -78,10 +118,19 @@ def generation_material(profiles, records, goals, day, rhythm=None):
             progress.append({'day': row['day'], 'text': row['text'], 'goal_id': goal_id})
             used.add(goal_id)
     # The recent prose is background, not a source of obsolete goal IDs/statuses.
-    recent_entries = [{'day': r['day'], 'text': r['text']} for r in prior[:8]]
+    # Generated stories about the real user are not evidence about that person.
+    recent_entries = [{'day': r['day'], 'text': r['text']} for r in prior
+                      if not any(name in r['text'] for name in owner_names)][:8]
     ended = [{'text': g['text'], 'status': g['status'],
               **({'completed_date': g['completed_date']} if g.get('completed_date') else {})}
              for g in goals.values() if g['status'] != 'active'][-5:]
-    return {'日期': day.isoformat(), 'role_material': role_material, '本次抽样的日子轮廓': shape,
-            '生活目标': selected, '相关事项的最新进展': progress, '生活条目': recent_entries,
+    result = {'日期': day.isoformat(), 'role_material': role_material, '真实用户资料': owner_material,
+            '本次抽样的日子轮廓': shape, '生活目标': selected, '相关事项的最新进展': progress,
+            '既有角色生活记录': recent_entries,
             '已经告一段落的事项': ended}
+    background = conversation_background(profiles, memory_events, day, query)
+    if background:
+        # Keep recalled context ahead of the current day, not as the final
+        # instruction that can take over the day's otherwise ordinary shape.
+        result = {'对话提炼记录': background, **result}
+    return result

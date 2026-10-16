@@ -16,6 +16,7 @@ import uvicorn
 
 from miko.api.chat import chat_router
 from miko.domain.conversation.chat import ChatService
+from miko.adapters.dsh.runtime import DshRuntime
 from miko.settings import ProviderConfig, Settings, REPO_ROOT
 from miko.storage.chat import ChatStore
 from miko.storage.qq import QqStore
@@ -30,15 +31,30 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-        settings = Settings(LOCAL_ROOT, port)
         self.requests = []
         self.remote_closed = asyncio.Event()
         self.waiting_headers = asyncio.Event()
         self.temporary = tempfile.TemporaryDirectory()
+        settings = Settings(Path(self.temporary.name), port)
+        settings.prepare()
+        def isolated_runtime(settings, **kwargs):
+            # Validate the installed runtime, keeping all test state in its temporary root.
+            runtime = DshRuntime(Settings(LOCAL_ROOT, settings.port), **kwargs)
+            runtime.settings = settings
+            return runtime
+        self.runtime_patch = patch('miko.domain.conversation.chat.DshRuntime', side_effect=isolated_runtime)
+        self.runtime_patch.start()
         self.store = ChatStore(Path(self.temporary.name) / 'chat.sqlite3')
         config = ProviderConfig(api_base=settings.url + "/fake", api_key="fake-private-key", model="fake-model")
         with patch.object(Settings, "load_provider", return_value=config), patch.object(Settings, "load_qq_provider", return_value=None):
             self.service = ChatService(settings, self.store)
+        async def context(query, key=None, conversation_id=None):
+            material = self.service.profiles.context(query, key)
+            if self.service.life:
+                material['life_entries'] = self.service.life.context(query)
+                material['life_goals'] = self.service.life.goals_context(query)
+            return material
+        self.service.memory = SimpleNamespace(context=context, reranker=None)
         app = FastAPI()
         app.include_router(chat_router(self.service))
 
@@ -46,6 +62,10 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         async def provider(request: Request):
             payload = await request.json()
             self.requests.append(payload)
+            if getattr(self, 'reject_images', False) and isinstance(payload['messages'][-1]['content'], list):
+                return JSONResponse({'error': {'message': 'image_url is not supported; fake-private-key'}}, status_code=400)
+            if getattr(self, 'reject_text_fallback', False):
+                return JSONResponse({'error': {'message': 'invalid request; fake-private-key'}}, status_code=400)
             message = payload["messages"][-1]["content"]
             if message == "fail":
                 return JSONResponse({"error": "fake-private-key"}, status_code=503)
@@ -82,6 +102,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.service.close()
+        self.runtime_patch.stop()
         await self.client.aclose()
         self.server.should_exit = True
         await asyncio.wait_for(self.server_task, 10)
@@ -138,7 +159,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
             turn = self.service.turns[first["turn_id"]]
             pid = turn.runtime.process.pid
             environment = turn.runtime.process.environ()
-            self.assertEqual(environment["DSH_HOME"], str(LOCAL_ROOT / "dsh/home"))
+            self.assertEqual(environment["DSH_HOME"], str(self.service.settings.dsh_home))
             self.assertNotIn("fake-private-key", json.dumps(environment))
             cancelled = await self.client.post(f'/api/chat/{turn.id}/cancel')
             self.assertEqual(cancelled.status_code, 200)
@@ -239,23 +260,68 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
                    {'author': {'kind': 'contact', 'name': '测试好友'}, 'text': '你好'}]
         turn = self.service.begin_qq('qq:123:456', records)
         await asyncio.wait_for(turn.task, 10)
-        self.assertEqual(turn.status, 'completed')
+        self.assertEqual(turn.status, 'completed', turn.error)
         payload = self.requests[-1]
         self.assertTrue(payload['messages'][0]['content'].startswith(
-            '你是 Miko，橙汁的朋友。结合你熟悉的人和事，以自己的口吻接着当前话题聊。\n\n'))
+            (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()))
         self.assertIn('如果某个文字气泡介绍了你是 Miko，请在该气泡中添加 introduces_miko=true。', payload['messages'][0]['content'])
         self.assertTrue(payload['messages'][0]['content'].endswith(
             (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()))
-        sent = json.loads(payload['messages'][1]['content'])['chat_records']
-        self.assertEqual(sent[0]['author']['name'], '橙汁')
-        self.assertEqual(sent[1], records[1])
-        target = json.loads(payload['messages'][1]['content'])['reply_to']
-        self.assertEqual(target['author'], records[1]['author'])
-        self.assertEqual(target['text'], '你好')
+        sent = payload['messages'][1]['content']
+        self.assertIn('橙汁：我稍后回来', sent)
+        self.assertIn('测试好友：你好', sent)
+        self.assertIn('本次回应：\n[] 测试好友：你好', sent)
         self.assertEqual(records[0]['author']['name'], '你')
         self.assertNotIn('tools', payload)
         self.assertEqual(payload['response_format'], {'type': 'json_object'})
-        self.assertEqual(payload['max_tokens'], 8192)
+        self.assertEqual(payload['max_tokens'], 2048)
+
+    async def test_qq_image_parts_reach_provider_request(self):
+        image_url = 'data:image/jpeg;base64,aW1hZ2U='
+        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+                    'text': '[图片]', '_image_inputs': [
+                        {'type': 'text', 'text': '消息 42 · 图片 1'},
+                        {'type': 'image_url', 'image_url': {'url': image_url}}]}]
+        turn = self.service.begin_qq('qq:123:456', records)
+        await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed', turn.error)
+        content = self.requests[-1]['messages'][1]['content']
+        self.assertIsInstance(content, list)
+        self.assertIn('测试好友：[图片]', content[0]['text'])
+        self.assertEqual(content[-1], records[0]['_image_inputs'][-1])
+
+    async def test_image_rejection_retries_text_once_with_warning(self):
+        self.reject_images = True
+        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+                    'text': '[图片]', 'segments': [{'type': 'image', 'content_status': 'attached'}], '_image_inputs': [
+                        {'type': 'text', 'text': '消息 42 · 图片 1'},
+                        {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,aW1hZ2U='}}]}]
+        turn = self.service.begin_qq('qq:123:456', records)
+        await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed', turn.error)
+        self.assertIn('自动改用文字处理', turn.warning)
+        self.assertNotIn('fake-private-key', turn.warning)
+        self.assertEqual(len(self.requests), 2)
+        self.assertIsInstance(self.requests[0]['messages'][-1]['content'], list)
+        fallback = self.requests[1]['messages'][-1]['content']
+        self.assertIsInstance(fallback, str)
+        self.assertIn('"content_status": "unavailable"', fallback)
+        self.assertNotIn('image_url', fallback)
+        self.assertNotIn('消息 42 · 图片 1', fallback)
+        self.assertEqual(self.requests[0]['messages'][0], self.requests[1]['messages'][0])
+        self.assertEqual(records[0]['segments'][0]['content_status'], 'attached')
+
+    async def test_rejected_text_fallback_stops_after_two_requests(self):
+        self.reject_images = self.reject_text_fallback = True
+        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+                    'text': '[图片]', '_image_inputs': [
+                        {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,aW1hZ2U='}}]}]
+        turn = self.service.begin_qq('qq:123:456', records)
+        await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'error')
+        self.assertIn('改用文字后仍失败', turn.error)
+        self.assertNotIn('fake-private-key', turn.error)
+        self.assertEqual(len(self.requests), 2)
 
     async def test_web_and_qq_share_reviewed_material_and_keep_relationships_separate(self):
         self.service.profiles.save(ProfileInput(subject='miko', kind='overview', title='Miko', content='喜欢平面设计').record())
@@ -268,37 +334,40 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         await self.collect('和朋友甲聊设计')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
-        records = [{'author': {'kind':'contact','name':'朋友甲'}, 'text':'你们最近在学什么设计？'}]
+        records = [{'author': {'kind':'contact','name':'朋友甲'}, 'text':'你和橙汁最近在学什么设计？'}]
         turn = self.service.begin_qq('qq:123:456', records)
         await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed', turn.error)
         qq_prompt = self.requests[-1]['messages'][0]['content']
-        data = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
-        self.assertEqual(data['role_material'], web['role_material'])
-        relation = data['friend_relationships'][0]
-        self.assertEqual((relation['owner_relationship'], relation['miko_relationship']), ('多年同学', '刚认识'))
-        self.assertEqual(len(data['friend_relationships']), 1)
-        self.assertTrue(relation['miko_introduced'])
+        self.assertIn('喜欢平面设计', qq_prompt)
+        self.assertIn('最近学习前端设计', qq_prompt)
+        self.assertIn('橙汁与朋友甲：多年同学', qq_prompt)
+        self.assertIn('Miko与朋友甲：刚认识', qq_prompt)
+        self.assertIn('Miko 已向朋友甲介绍过自己', qq_prompt)
+        self.assertNotIn('另一段交往', qq_prompt)
+        self.assertEqual(len(web['role_material']), 2)
 
     async def test_web_and_qq_read_the_same_dated_life_entries(self):
         entries = [{'day': '2026-10-13', 'text': '摄影：练构图'}]
         goals = [{'id': 'private-goal-id', 'text': '拍一组窗边照片', 'start_date': '2026-10-13',
                   'target_date': '2026-10-20', 'status': 'active'}]
-        self.service.life = SimpleNamespace(context=lambda query: entries, goals_context=lambda query: goals)
+        self.service.life = SimpleNamespace(context=lambda query: entries, goals_context=lambda query: goals,
+                                            records=lambda: entries)
         await self.collect('你最近在做什么')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
         turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'}, 'text': '你在做什么'}])
         await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed', turn.error)
         qq_prompt = self.requests[-1]['messages'][0]['content']
-        qq = json.loads(qq_prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
-        self.assertEqual(web['life_entries'], qq['life_entries'])
         self.assertEqual(web['life_entries'], [{**entries[0], 'subject': 'miko', 'subject_name': 'Miko'}])
-        self.assertEqual(web['life_goals'], qq['life_goals'])
+        self.assertIn('Miko，2026-10-13：摄影：练构图', qq_prompt)
+        self.assertIn('拍一组窗边照片', qq_prompt)
         self.assertEqual(web['life_goals'][0]['status'], 'active')
         self.assertEqual(web['life_goals'][0]['subject_name'], 'Miko')
         self.assertNotIn('id', web['life_goals'][0])
         self.assertIn('日期表示记录时间', web_prompt)
-        self.assertIn('日期表示记录时间', qq_prompt)
+        self.assertNotIn('private-goal-id', qq_prompt)
 
     async def test_reply_uses_compact_memory_and_preserves_review_data(self):
         from copy import deepcopy
@@ -310,7 +379,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
             'people_memory': [{'id': 'internal-memory-id', 'subject': 'miko', 'peer': '',
                 'category': '兴趣', 'topic': '摄影', 'content': '开始学摄影', 'updated_at': 123}],
             'dated_experiences': [{'id': 'internal-day-id', 'subject': 'miko', 'day': '2026-10-12',
-                'text': '- 开始学摄影。[提及于 2026/10/12] // event\n- 明天练构图。 // schedule',
+                'text': '开始学摄影；计划明天练构图。',
                 'sources': [{'content': '事件依据'}], 'scope_id': 2}],
             'retrieval': {'engine': 'memU', 'hits': [{'name': 'internal-memory-id', 'score': .9}]},
         })
@@ -318,20 +387,18 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
         async def context(*args):
             return material
-        self.service.memory = SimpleNamespace(context=context)
+        self.service.memory = SimpleNamespace(context=context, reranker=None)
         await self.collect('最近在做什么')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
         turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'},
                                                 'text': '最近在做什么'}])
         await asyncio.wait_for(turn.task, 10)
+        self.assertEqual(turn.status, 'completed', turn.error)
         prompt = self.requests[-1]['messages'][0]['content']
-        qq = json.loads(prompt.split('\n\n', 2)[2].rsplit('\n\n', 1)[0])
-        self.assertEqual(web, qq)
-        self.assertEqual(qq['people_memory'][0]['content'], '开始学摄影')
-        self.assertEqual(qq['social_memory'][0]['manual_corrections'], '和朋友甲刚认识')
-        self.assertEqual(qq['dated_experiences'][0]['day'], '2026-10-12')
-        self.assertIn('\n- 明天练构图。', qq['dated_experiences'][0]['text'])
+        self.assertEqual(web['people_memory'][0]['content'], '开始学摄影')
+        self.assertIn('和朋友甲刚认识', prompt)
+        self.assertIn('2026-10-12：开始学摄影；计划明天练构图。', prompt)
         self.assertNotIn('// event', prompt)
         self.assertNotIn('// schedule', prompt)
         for omitted in ('证据原文保留供回顾', '旧聊天片段', '事件依据', 'internal-memory-id', 'retrieval'):

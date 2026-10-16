@@ -2,7 +2,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, Field, StrictBool
 
 from miko.api.local import local_request
 
@@ -17,6 +17,10 @@ class Correction(BaseModel):
 
 class ItemCorrection(Correction):
     enabled: StrictBool = True
+
+class ItemEdit(ItemCorrection):
+    category: str | None = Field(default=None, min_length=1, max_length=80)
+    topic: str | None = Field(default=None, min_length=1, max_length=100)
 
 class Annotation(ItemCorrection):
     scope: str = 'example'
@@ -140,13 +144,22 @@ def memory_router(memory):
             raise HTTPException(404,str(exc)) from None
 
     @router.patch('/items/{item_id}')
-    async def edit_item(item_id: str, body: ItemCorrection):
+    async def edit_item(item_id: str, body: ItemEdit):
         try:
-            result=memory.structured.edit(item_id,body.text,body.revision,body.enabled)
+            result=memory.structured.edit(item_id,body.text,body.revision,body.enabled,body.category,body.topic)
             await memory.sync()
             return result
         except ValueError as exc:
             raise HTTPException(409,str(exc)) from None
+
+    @router.delete('/items/{item_id}')
+    async def delete_item(item_id: str):
+        try:
+            result = memory.structured.delete(item_id)
+            await memory.sync()
+            return result
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
 
     @router.post('/items/{item_id}/restore')
     async def restore(item_id: str, body: Restore):
@@ -157,15 +170,18 @@ def memory_router(memory):
         except ValueError as exc:
             raise HTTPException(409,str(exc)) from None
 
-    @router.post('/items/{item_id}/summary')
-    async def brief(item_id: str):
-        if not memory.social.pipeline:
-            raise HTTPException(409,'新版记忆整理尚未配置')
-        return await memory.social.pipeline.summarize_item(item_id)
-
     @router.get('/days')
     async def days(day: str='', subject: str=''):
         return {'days': memory.structured.days(day,subject)}
+
+    @router.delete('/days/{event_id}')
+    async def delete_day(event_id: str):
+        try:
+            result = memory.structured.delete(event_id, 'day')
+            await memory.sync()
+            return result
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
 
     @router.get('/review')
     async def review(day: str=''):

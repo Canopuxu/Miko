@@ -11,6 +11,9 @@ from miko.api.local import local_request
 class FriendSwitch(BaseModel):
     enabled: StrictBool
 
+class ReplyOptions(BaseModel):
+    auto_reply_idle: StrictBool
+
 
 class StickerUpload(BaseModel):
     image_base64: str
@@ -44,6 +47,18 @@ def qq_router(service: QqService):
             raise HTTPException(404, '找不到这位好友')
         return {'friend': cfg, 'messages': service.store.messages(key),
                 'runs': service.store.runs(key)}
+
+    @router.patch('/friends/{account}/{friend}/options')
+    async def options(account: str, friend: str, body: ReplyOptions):
+        key = (account, friend)
+        cfg = service.store.friend(key)
+        if not cfg:
+            raise HTTPException(404, '找不到这位好友')
+        fields = {'auto_reply_idle': int(body.auto_reply_idle)}
+        if not body.auto_reply_idle and cfg['mode'] == 'owner':
+            fields.update(pending_since=None, pending_last=None, due_at=None)
+        service.store.update_friend(key, **fields)
+        return service.status()
 
     def known_account(account):
         if not any(f['account'] == account for f in service.store.friends()):

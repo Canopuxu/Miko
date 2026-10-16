@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Python = 'E:\Software\Anaconda3\envs\tulpa\python.exe', [string]$Pnpm = 'pnpm')
+param([string]$Python = 'python', [string]$Pnpm = 'pnpm')
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 & (Join-Path $PSScriptRoot 'prepare_workspace.ps1')
@@ -35,7 +35,11 @@ $configPath = Join-Path $mikoLocalRoot 'config\miko.local.json'
 if (-not (Test-Path -LiteralPath $configPath)) {
     Copy-Item -LiteralPath (Join-Path $mikoRepoRoot 'config\examples\miko.local.json') -Destination $configPath
 }
-& (Join-Path $PSScriptRoot 'setup_web.ps1') -Pnpm $Pnpm
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'setup_web.ps1')) {
+    & (Join-Path $PSScriptRoot 'setup_web.ps1') -Pnpm $Pnpm
+} elseif (-not (Test-Path -LiteralPath (Join-Path $mikoRepoRoot 'apps/web/dist/index.html'))) {
+    throw 'Prebuilt Miko UI is missing.'
+}
 if (-not (Test-Path -LiteralPath (Join-Path $mikoLocalRoot 'config\memory.local.json'))) {
     Copy-Item -LiteralPath (Join-Path $mikoRepoRoot 'config\examples\memory.local.json') -Destination (Join-Path $mikoLocalRoot 'config\memory.local.json')
 }

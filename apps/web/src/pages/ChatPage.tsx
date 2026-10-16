@@ -3,7 +3,7 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
 import { ArrowUp, NotebookPen, Plus, Square, Trash2, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
-import { useRuntime } from '../components/RuntimeStatus';
+import { useCharacterName, useRuntime } from '../components/RuntimeStatus';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
 
 const note = { cancelled: '已停止', error: '生成失败', interrupted: '回复中断' };
@@ -11,6 +11,7 @@ const dateTime = (stamp: number) => new Date(stamp).toLocaleString('zh-CN');
 const shortTime = (stamp: number) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(stamp);
 
 export function ChatPage() {
+  const characterName = useCharacterName();
   const navigation = useContext(NavigationContext)!;
   const {status, error:runtimeError} = useRuntime();
   const connected = !!status?.dsh.ready && !runtimeError;
@@ -138,7 +139,7 @@ export function ChatPage() {
     setMessages(current => [...current,
       { id: userId, author: { id: 'owner', kind: 'owner', name: '你' }, source: 'web', text,
         status: 'completed', error: null, created_at: stamp },
-      { id: assistantId, author: { id: 'miko', kind: 'miko', name: 'Miko' }, source: 'web', text: '',
+      { id: assistantId, author: { id: 'miko', kind: 'miko', name: characterName }, source: 'web', text: '',
         status: 'running', error: null, created_at: stamp },
     ]);
     setDraft(''); setError(''); setBusy(true); setStopping(false);
@@ -241,7 +242,7 @@ export function ChatPage() {
               : <button type="submit" className="send-button" disabled={!enabled || !draft.trim()}>发送 <ArrowUp size={16}/></button>}
           </div>
         </form>
-        {generating && <p className="composer-caption" role="status">Miko 正在回复你</p>}
+        {generating && <p className="composer-caption" role="status">{characterName} 正在回复你</p>}
       </footer>
     {guard.dialog}
     <AlertDialog.Root open={!!deleting} onOpenChange={open => { if (!open && !removing) setDeleting(null); }}>

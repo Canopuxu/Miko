@@ -1,9 +1,11 @@
+import { useCharacterName, useOwnerName } from '../components/RuntimeStatus';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { AppShell, NavigationContext } from '../components/AppShell';
-import { ArrowUpRight, NotebookPen, Pause, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { ArrowUpRight, NotebookPen, Pause, Pencil, Play, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { EmptyState, useDiscardGuard, useNotice } from '../components/ui';
 import { getJson, responseError } from '../api/chat';
+import '../styles/memory.css';
 
 type Person = {id:string;display_name:string};
 type Item = {id:string;subject:string;peer:string;category:string;topic:string;content:string;automatic:string;manual:string;enabled:number;valid:number;revision:number;updated_at:number};
@@ -16,7 +18,6 @@ type Reply = {id:string;text:string;title:string;created_at:number;annotation:No
 type Scope = {id:number;name:string;conversation_id:string;total:number;processed:number;status:string};
 type Listing = {control:{enabled:number};scopes:Scope[];index:{memory_engine:string;error:string|null}};
 type Legacy = {id:number;automatic:string;manual:string;revision:number;valid:number;source_messages:Source[];history:{id:number;kind:string;body:string;created_at:number}[]};
-type Proposal = {subject:string;peer:string;category:string;items:{sub_topic:string;memo:string}[];revisions:Record<string,number>};
 const modes = {people:'人物记忆',days:'日期经历',review:'回复回顾',legacy:'关系与整理记录'};
 type Mode = keyof typeof modes;
 const today = () => new Date().toLocaleDateString('sv-SE');
@@ -27,17 +28,32 @@ async function request(path:string,method:string,body?:object) {
   return r.json() as Promise<unknown>;
 }
 function Sources({rows}:{rows:Source[]}) {
+  const characterName = useCharacterName();
   return <details><summary>原文依据 · {rows.length} 条</summary><div className="context-material">{rows.map(r=><article key={r.id}>
-    <small>{r.author==='owner'?'你':r.author==='miko'?'Miko':'好友'} · {new Date(r.timestamp).toLocaleString()}</small><p>{r.content}</p>
+    <small>{r.author==='owner'?'你':r.author==='miko'?characterName:'好友'} · {new Date(r.timestamp).toLocaleString()}</small><p>{r.content}</p>
   </article>)}</div></details>;
 }
-function ReplyCard({reply,save,open,onDirty,onDelete}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>;
+function ReplyCard({reply,save,open,onDirty,onDelete,showDate=false}:{reply:Reply;save:(path:string,method:string,body:object)=>Promise<void>;
+  showDate?:boolean;
   open:()=>void;onDelete:()=>void;onDirty:(id:string,dirty:boolean)=>void}) {
+  const characterName = useCharacterName();
   const [note,setNote]=useState(reply.annotation?.note ?? '');
   const [scope,setScope]=useState(reply.annotation?.scope ?? 'example');
   const [busy,setBusy]=useState(false);
+  const [editing,setEditing]=useState(false);
+  const editorRef=useRef<HTMLDivElement>(null);
   const dirty = note !== (reply.annotation?.note ?? '') || scope !== (reply.annotation?.scope ?? 'example');
-  useEffect(()=>{onDirty(reply.id,dirty);return()=>onDirty(reply.id,false);},[reply.id,dirty]);
+  useEffect(()=>{onDirty(reply.id,editing&&dirty);return()=>onDirty(reply.id,false);},[reply.id,dirty,editing]);
+  useEffect(()=>{
+    if(!editing||busy)return;
+    const dismiss=(event:PointerEvent)=>{
+      if(event.target instanceof Node && !editorRef.current?.contains(event.target)){
+        setNote(reply.annotation?.note ?? '');setScope(reply.annotation?.scope ?? 'example');setEditing(false);
+      }
+    };
+    document.addEventListener('pointerdown',dismiss,true);
+    return()=>document.removeEventListener('pointerdown',dismiss,true);
+  },[editing,busy,reply.annotation]);
   async function submit(enabled:boolean) {
     setBusy(true);
     try{await save('/api/memory/review/'+encodeURIComponent(reply.id),'PUT',{text:note,scope,revision:reply.annotation?.revision ?? 0,enabled});}
@@ -45,24 +61,29 @@ function ReplyCard({reply,save,open,onDirty,onDelete}:{reply:Reply;save:(path:st
   }
   return <article className="review-card" id={'review-'+reply.id}>
     <header className="review-card-heading"><span className="review-avatar"><NotebookPen size={18}/></span><div>
-      <strong>{reply.source==='qq' ? reply.title : '你与 Miko'}</strong><small>{new Date(reply.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}
+      <strong>{reply.source==='qq' ? reply.title : `你与 ${characterName}`}</strong><small>{showDate ? new Date(reply.created_at).toLocaleString('zh-CN',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : new Date(reply.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}
       {reply.annotation?.enabled ? ' · 已批注' : reply.annotation ? ' · 批注已撤销' : ''}</small></div>
       <button className="text-button" onClick={open}>原对话<ArrowUpRight size={14}/></button><button className="text-button" aria-label="删除回顾" title="删除回顾" disabled={busy} onClick={onDelete}><Trash2 size={16}/></button></header>
     {!!reply.context?.length && <div className="review-context">{reply.context.map((r,i)=><p key={i}><small>{r.author}</small>{r.text}</p>)}</div>}
     <p className="memory-body review-response">{reply.text}</p>
-    <textarea aria-label="回复批注" rows={3} placeholder="写下你对这条回复的反馈" value={note} onChange={e=>setNote(e.target.value)}/>
+    {editing ? <div ref={editorRef} className="review-feedback-editor"><textarea autoFocus aria-label="回复批注" rows={3} placeholder="写下你对这条回复的反馈" value={note} onChange={e=>setNote(e.target.value)}/>
     <div className="profile-actions"><select aria-label="批注适用范围" value={scope} onChange={e=>setScope(e.target.value)}>
       <option value="example">相关表达示例</option><option value="friend">当前聊天</option><option value="global">通用表达</option></select>
       <button disabled={busy || !note.trim() || (!dirty && !!reply.annotation?.enabled)} className="send-button" onClick={()=>void submit(true)}>
         <Save size={14}/>{busy?'保存中…':'保存批注'}</button>
       {reply.annotation && <button disabled={busy} onClick={()=>void submit(!reply.annotation!.enabled)}>{reply.annotation.enabled?'撤销批注':'恢复批注'}</button>}
-    </div>{reply.annotation && <small>{reply.annotation.enabled?'正在参考这条反馈':'已撤销，记录保留'}</small>}
+    </div></div> : <div className="review-feedback-summary">
+      {reply.annotation && <p className="memory-body">{reply.annotation.note}</p>}
+      <button className="text-button" onClick={()=>setEditing(true)}><Pencil size={14}/>{reply.annotation?'编辑反馈':'添加反馈'}</button>
+    </div>}{reply.annotation && <small>{reply.annotation.enabled?'正在参考这条反馈':'已撤销，记录保留'}</small>}
     {reply.annotation?.history && <details><summary>批注历史</summary>{reply.annotation.history.map((h,i)=>{const previous=JSON.parse(h.snapshot) as Note;return <article key={i}><small>{new Date(h.created_at).toLocaleString()}</small><p>{previous.note}</p><button disabled={busy} onClick={()=>void save('/api/memory/review/'+encodeURIComponent(reply.id),'PUT',{text:previous.note,scope:previous.scope,revision:reply.annotation!.revision,enabled:true})}>恢复这份批注</button></article>;})}</details>}
   </article>;
 }
 
 export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
   const navigation = useContext(NavigationContext)!;
+  const characterName = useCharacterName();
+  const ownerName = useOwnerName();
   const [mode,setMode]=useState<Mode>(view==='review'?'review':'people');
   const [listing,setListing]=useState<Listing|null>(null);
   const [people,setPeople]=useState<Person[]>([]);
@@ -77,21 +98,23 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
   const [detail,setDetail]=useState<Detail|null>(null);
   const [manual,setManual]=useState('');
   const [legacy,setLegacy]=useState<Legacy|null>(null);
-  const [brief,setBrief]=useState('');
-  const [proposal,setProposal]=useState<Proposal|null>(null);
+  const [editCategory,setEditCategory]=useState('');
+  const [editTopic,setEditTopic]=useState('');
+  const [itemsLoading,setItemsLoading]=useState(true);
   const {notice,setNotice,setFailure,failed}=useNotice();
   const [recordsLoading,setRecordsLoading]=useState(true);
   const [busy,setBusy]=useState(false);
   const [deleting,setDeleting]=useState<Reply|null>(null);
+  const [deletingMemory,setDeletingMemory]=useState<{id:string;kind:'item'|'day'}|null>(null);
   const [refresh,setRefresh]=useState(0);
   const [peer,setPeer]=useState(view==='review' ? navigation.search.get('peer') ?? '' : '');
   const [relation,setRelation]=useState(view==='memory'?navigation.search.get('relation') ?? '':'');
   const [drafts,setDrafts]=useState<Record<string,boolean>>({});
   const [discardVersion,setDiscardVersion]=useState(0);
   const baseline = mode==='legacy' ? legacy?.manual ?? '' : detail?.manual || detail?.automatic || '';
-  const manualDirty = (mode==='people' || mode==='legacy') && manual!==baseline;
+  const manualDirty = mode==='legacy' ? manual!==baseline : mode==='people' && !!detail && (manual!==baseline || editCategory!==detail.category || editTopic!==detail.topic);
   const guard = useDiscardGuard(manualDirty || Object.values(drafts).some(Boolean),()=>{
-    setManual(baseline);setDrafts({});setDiscardVersion(v=>v+1);
+    setManual(baseline);setEditCategory(detail?.category ?? '');setEditTopic(detail?.topic ?? '');setDrafts({});setDiscardVersion(v=>v+1);
   });
   const onReplyDirty = (id:string,dirty:boolean)=>setDrafts(previous=>previous[id]===dirty?previous:{...previous,[id]:dirty});
   function openReply(reply:Reply) {
@@ -114,12 +137,13 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
     const focus=navigation.search.get('reply');
     if(navigation.active===view && view==='review' && focus && replies.length) document.getElementById('review-'+focus)?.scrollIntoView({block:'center'});
   },[replies,navigation.active,navigation.search]);
-  const name=(id:string)=>people.find(p=>p.id===id)?.display_name ?? id;
+  const name=(id:string)=>id==='miko' ? characterName : id==='owner' ? ownerName : people.find(p=>p.id===id)?.display_name ?? id;
   useEffect(()=>{
     let alive=true;
+    setItemsLoading(true);
     void Promise.all([getJson<Listing>('/api/memory'),getJson<{people:Person[]}>('/api/memory/objects'),
       getJson<{items:Item[]}>('/api/memory/items?q='+encodeURIComponent(q)+'&subject='+encodeURIComponent(subject)+(relation?'&peer='+encodeURIComponent(relation):''))])
-      .then(([a,b,c])=>{if(alive){setListing(a);setPeople(b.people);setItems(c.items);}}).catch(e=>{if(alive)setFailure(e);});
+      .then(([a,b,c])=>{if(alive){setListing(a);setPeople(b.people);setItems(c.items);}}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setItemsLoading(false);});
     return ()=>{alive=false;};
   },[q,subject,refresh,relation]);
   useEffect(()=>{
@@ -130,8 +154,8 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
     return ()=>{alive=false;};
   },[mode,day,subject,refresh]);
   useEffect(()=>{
-    let alive=true;setDetail(null);setBrief('');
-    if(selected && mode==='people')void getJson<Detail>('/api/memory/items/'+selected).then(r=>{if(alive){setDetail(r);setManual(r.manual || r.automatic);}}).catch(e=>{if(alive)setFailure(e);});
+    let alive=true;setDetail(null);
+    if(selected && mode==='people')void getJson<Detail>('/api/memory/items/'+selected).then(r=>{if(alive){setDetail(r);setManual(r.content);setEditCategory(r.category);setEditTopic(r.topic);}}).catch(e=>{if(alive)setFailure(e);});
     return ()=>{alive=false;};
   },[selected,mode,refresh]);
   async function mutate(path:string,method:string,body?:object) {
@@ -148,10 +172,14 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
       onReplyDirty(deleting.id,false);setDeleting(null);setRefresh(v=>v+1);setNotice('回顾及批注已删除');
     } catch(e) {setFailure(e);} finally {setBusy(false);}
   }
-  async function special(path:string,body?:object) {
+  async function removeMemory() {
+    if (!deletingMemory) return;
     setBusy(true);setNotice('');
-    try{const r=await request(path,'POST',body);if(path==='/api/memory/organize')setProposal(r as Proposal);else setBrief((r as {summary:string}).summary);}
-    catch(e){setFailure(e);}finally{setBusy(false);}
+    try {
+      await request('/api/memory/'+(deletingMemory.kind==='item'?'items/':'days/')+encodeURIComponent(deletingMemory.id),'DELETE');
+      if (deletingMemory.kind==='item') {setSelected('');setDetail(null);setManual('');}
+      setDeletingMemory(null);setRefresh(v=>v+1);setNotice('记忆已删除');
+    } catch(e) {setFailure(e);} finally {setBusy(false);}
   }
   async function openScope(id:number) {
     try{const r=await getJson<Legacy>('/api/memory/scopes/'+id);setLegacy(r);setManual(r.manual);}
@@ -159,15 +187,20 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
   }
   return <AppShell view={view} sidebar={<section className="profile-browser" aria-label={view==='review'?'回顾筛选':'记忆导航'}>
     {view==='memory' && <div className="memory-modes">{Object.entries(modes).filter(([id])=>id!=='review').map(([id,label])=><button key={id} className={mode===id?'active':''}
-      onClick={()=>guard.proceed(()=>{setMode(id as Mode);setManual('');setDetail(null);setSelected('');setProposal(null);})}>{label}</button>)}</div>}
+      onClick={()=>guard.proceed(()=>{setMode(id as Mode);setManual('');setDetail(null);setSelected('');})}>{label}</button>)}</div>}
     {relation && <div className="relation-filter"><span>当前好友：{name('qq:'+relation.split(':')[2])}</span>
       <button className="text-button" onClick={()=>guard.proceed(()=>{setRelation('');navigation.replace({relation:undefined});})}>查看全部</button></div>}
     {mode==='people' && <><div className="profile-filters"><input aria-label="搜索人物记忆" placeholder="搜索记忆" value={q} onChange={e=>setQ(e.target.value)}/>
       <select aria-label="记忆人物" value={subject} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setSubject(value);setCategory('');setSelected('');setDetail(null);setManual('');});}}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>
-      <select aria-label="记忆分类" value={category} onChange={e=>setCategory(e.target.value)}><option value="">全部分类</option>{[...new Set(items.map(r=>r.category))].map(c=><option key={c}>{c}</option>)}</select></div>
-      {items.filter(r=>!category || r.category===category).map(r=><button key={r.id} className={'profile-card '+(selected===r.id?'active':'')} onClick={()=>guard.proceed(()=>{setManual('');setDetail(null);setSelected(r.id);})}><strong>{name(r.subject)} · {r.topic}</strong><small>{r.category}{r.manual?' · 已有你的修正':''}{!r.enabled?' · 已停用':''}</small><small>{r.content.slice(0,70)}</small></button>)}
-      {!items.length && <p>聊天整理后，人物记忆会出现在这里。核心设定仍在“设定与资料”中。</p>}</>}
-    {(mode==='days' || mode==='review') && <div className="profile-filters"><label>日期<input aria-label="回顾日期" type="date" value={day} onChange={e=>{const value=e.target.value;if(value)guard.proceed(()=>{setDay(value);if(view==='review')navigation.replace({day:value,reply:undefined});});}}/></label>
+      </div>
+      <nav className="memory-category-list" aria-label="记忆分类">
+        {[...new Set(items.map(r=>r.category))].map(c=><button key={c} className={category===c?'active':''}
+          onClick={()=>guard.proceed(()=>{setCategory(category===c?'':c);setSelected('');setDetail(null);setManual('');})}>
+          <span>{c}</span><small>{items.filter(r=>r.category===c).length}</small></button>)}
+      </nav></>}
+
+    {(mode==='days' || mode==='review') && <div className="profile-filters"><div className="review-date-filter"><label>{day==='all'?'全部日期':'日期'}<input aria-label="回顾日期" type="date" value={day==='all'?'':day} onChange={e=>{const value=e.target.value || (mode==='review'?'all':'');if(value)guard.proceed(()=>{setDay(value);if(view==='review')navigation.replace({day:value,reply:undefined});});}}/></label>
+      {mode==='review' && <button type="button" aria-pressed={day==='all'} onClick={()=>guard.proceed(()=>{setDay('all');navigation.replace({day:'all',reply:undefined});})}>全部</button>}</div>
       {mode==='review' && <><label>对话<select aria-label="回顾对话" value={peer} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setPeer(value);navigation.replace({peer:value,reply:undefined});});}}>
         <option value="">全部对话</option>{peer && !replies.some(r=>r.conversation_id===peer) && <option value={peer}>当前对话</option>}
         {[...new Map(replies.map(r=>[r.conversation_id,r.title])).entries()].map(([id,title])=><option key={id} value={id}>{title}</option>)}</select></label>
@@ -182,33 +215,50 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
     {(notice || listing?.index.error) && <p className={failed || listing?.index.error?'profile-notice error-notice':'profile-notice'}
       role={failed || listing?.index.error?'alert':'status'}>{notice || listing?.index.error}</p>}
     <div className="profile-workspace"><section className="profile-editor">
-      {mode==='people' && (!detail?<EmptyState title="选择一条记忆"/>:<>
-        <h2>{name(detail.subject)} · {detail.category} / {detail.topic}</h2><small>更新于 {new Date(detail.updated_at).toLocaleString()}</small>
-        <h3>自动认识</h3><p className="memory-body">{detail.automatic}</p>{!detail.valid && <p>原文已变化，自动认识暂不用于聊天。你的修正仍保留。</p>}
-        <h3>我的修正</h3><textarea aria-label="人物记忆修正" rows={5} value={manual} onChange={e=>setManual(e.target.value)}/>
-        <div className="profile-actions"><button disabled={busy} className="send-button" onClick={()=>void mutate('/api/memory/items/'+detail.id,'PATCH',{text:manual,revision:detail.revision,enabled:true})}>保存修正</button>
-          <button disabled={busy} onClick={()=>void mutate('/api/memory/items/'+detail.id,'PATCH',{text:'',revision:detail.revision,enabled:!!detail.enabled})}>撤销人工修正</button>
-          <button disabled={busy} onClick={()=>void mutate('/api/memory/items/'+detail.id,'PATCH',{text:detail.manual,revision:detail.revision,enabled:!detail.enabled})}>{detail.enabled?'停用条目':'恢复条目'}</button></div>
-        <Sources rows={detail.sources}/><h3>版本记录</h3>{detail.history.map(h=>{const r=JSON.parse(h.snapshot) as Item;return <details key={h.id}><summary>{h.kind.includes('manual')?'人工修正':'整理记录'} · {new Date(h.created_at).toLocaleString()}</summary><p className="memory-body">{r.manual || r.automatic}</p><button disabled={busy} onClick={()=>void mutate('/api/memory/items/'+detail.id+'/restore','POST',{history_id:h.id,revision:detail.revision})}>恢复此版本为人工修正</button></details>;})}
-        <div className="profile-actions"><button disabled={busy} onClick={()=>void special('/api/memory/items/'+detail.id+'/summary')}>生成浏览摘要</button>
-          <button disabled={busy} onClick={()=>void special('/api/memory/organize',{subject:detail.subject,peer:detail.peer,category:detail.category})}>整理此分类</button></div>
-        {brief && <article><h3>浏览摘要</h3><p>{brief}</p><small>原条目仍保留，聊天使用完整资料。</small></article>}
-        {proposal && <article><h3>分类整理方案</h3>{proposal.items.map(r=><p key={r.sub_topic}><strong>{r.sub_topic}</strong> · {r.memo}</p>)}<button disabled={busy || !proposal.items.length} className="send-button" onClick={()=>{void mutate('/api/memory/organize/apply','POST',proposal);setProposal(null);}}>采用方案并保留旧版本</button></article>}
-      </>)}
-      {mode==='days' && (days.length?days.map(r=><article className="review-card" key={r.id}><h2>{(r.subjects || [r.subject]).map(name).join('、')}</h2><p className="memory-body">{r.text}</p><Sources rows={r.sources}/></article>):<p>这一天尚无整理出的经历。</p>)}
+      {mode==='people' && (itemsLoading ? <EmptyState loading title="正在读取记忆…"/> : !items.length ? <EmptyState title="暂无人物记忆"/> :
+        [...new Set(items.filter(r=>!category || r.category===category).map(r=>r.category))].map(group=><section className="memory-entry-group" key={group}>
+          <h2>{group}<small>{items.filter(r=>r.category===group).length}</small></h2>
+          <div className="memory-entry-cloud">{items.filter(r=>r.category===group).map(r=>selected===r.id ?
+            <article className="memory-entry-edit" key={r.id}>{!detail ? <EmptyState loading title="正在读取条目…"/> : <>
+              <form onSubmit={e=>{e.preventDefault();void mutate('/api/memory/items/'+detail.id,'PATCH',
+                {text:manual,category:editCategory,topic:editTopic,revision:detail.revision,enabled:!!detail.enabled});}}>
+                <small>{name(detail.subject)}</small>
+                <label>内容<textarea aria-label="记忆内容" rows={3} value={manual} onChange={e=>setManual(e.target.value)}/></label>
+                <div className="memory-entry-fields"><label>分类<input aria-label="记忆分类" list="memory-categories" maxLength={80} value={editCategory} onChange={e=>setEditCategory(e.target.value)}/></label>
+                  <label>条目名称<input aria-label="记忆条目名称" maxLength={100} value={editTopic} onChange={e=>setEditTopic(e.target.value)}/></label></div>
+                <datalist id="memory-categories">{[...new Set(items.map(i=>i.category))].map(c=><option key={c} value={c}/>)}</datalist>
+                <div className="profile-actions"><button className="send-button" disabled={busy || !manual.trim() || !editCategory.trim() || !editTopic.trim() || !manualDirty} type="submit"><Save size={14}/>{busy?'保存中…':'保存'}</button>
+                  <button type="button" disabled={busy} onClick={()=>guard.proceed(()=>{setSelected('');setDetail(null);setManual('');})}>关闭</button>
+                  <button type="button" disabled={busy} onClick={()=>void mutate('/api/memory/items/'+detail.id,'PATCH',{text:detail.manual,revision:detail.revision,enabled:!detail.enabled})}>{detail.enabled?'停用':'恢复使用'}</button>
+                  <button type="button" className="text-button" disabled={busy} onClick={()=>setDeletingMemory({id:detail.id,kind:'item'})}><Trash2 size={16}/>删除</button></div>
+              </form>
+              <Sources rows={detail.sources}/>
+              <details><summary>版本记录 · {detail.history.length}</summary>{detail.history.map(h=>{const previous=JSON.parse(h.snapshot) as Item;return <div className="memory-version" key={h.id}>
+                <small>{new Date(h.created_at).toLocaleString()} · {previous.category} / {previous.topic}</small><p>{previous.manual || previous.automatic}</p>
+                <button disabled={busy} onClick={()=>guard.proceed(()=>void mutate('/api/memory/items/'+detail.id+'/restore','POST',{history_id:h.id,revision:detail.revision}))}>恢复此版本</button></div>;})}</details>
+              {!detail.valid && !detail.manual && <p className="retrieval-note">原文已变化，这条记忆暂未用于聊天。</p>}
+            </>}</article> : <article className={'memory-entry-tile'+(!r.enabled?' inactive':'')} key={r.id}>
+              <button className="memory-entry-content" title={`${name(r.subject)} · ${r.topic}`} onClick={()=>guard.proceed(()=>{setManual('');setDetail(null);setSelected(r.id);})}>
+                <small>{name(r.subject)}{!r.enabled?' · 已停用':''}</small><span>{r.content}</span></button>
+              <div className="memory-entry-overlay"><button aria-label="编辑记忆" title="编辑" disabled={busy} onClick={()=>guard.proceed(()=>{setManual('');setDetail(null);setSelected(r.id);})}><Pencil size={16}/></button>
+                <button aria-label="删除记忆" title="删除" disabled={busy} onClick={()=>setDeletingMemory({id:r.id,kind:'item'})}><Trash2 size={16}/></button></div>
+            </article>)}</div>
+        </section>))}
+      {mode==='days' && (days.length?days.map(r=><article className="review-card" key={r.id}><header className="review-card-heading"><h2>{(r.subjects || [r.subject]).map(name).join('、')}</h2><button className="text-button" disabled={busy} aria-label="删除经历" title="删除经历" onClick={()=>setDeletingMemory({id:r.id,kind:'day'})}><Trash2 size={16}/></button></header><p className="memory-body">{r.text}</p><Sources rows={r.sources}/></article>):<p>这一天尚无整理出的经历。</p>)}
       {mode==='review' && (recordsLoading?<EmptyState loading title="正在读取回复…"/>:replies.filter(r=>!peer || r.conversation_id===peer).length?
         replies.filter(r=>!peer || r.conversation_id===peer).map(r=><ReplyCard key={r.id+':'+(r.annotation?.revision ?? 0)+':'+discardVersion}
-          reply={r} save={mutate} open={()=>openReply(r)} onDirty={onReplyDirty} onDelete={()=>setDeleting(r)}/>):
-        <EmptyState title="这一天暂无已完成的回复"/>)}
+          reply={r} showDate={day==='all'} save={mutate} open={()=>openReply(r)} onDirty={onReplyDirty} onDelete={()=>setDeleting(r)}/>):
+        <EmptyState title={day==='all'?'暂无已完成的回复':'这一天暂无已完成的回复'}/>)}
       {mode==='legacy' && (!legacy?<p>选择一段关系，查看整理进度和原有记录。</p>:<><h2>关系整理记录</h2><p className="memory-body">{legacy.automatic || '尚无整理记录'}</p>
         <h3>我的关系补充</h3><textarea rows={5} value={manual} onChange={e=>setManual(e.target.value)}/><div className="profile-actions"><button disabled={busy} className="send-button" onClick={()=>void mutate('/api/memory/scopes/'+legacy.id,'PATCH',{text:manual,revision:legacy.revision})}>保存补充</button>
           <button disabled={busy || !listing?.control.enabled || !listing.scopes.find(s=>s.id===legacy.id)?.conversation_id.startsWith('miko|')} onClick={()=>void mutate('/api/memory/scopes/'+legacy.id+'/consolidate','POST')}>现在整理待处理消息</button></div>
         <Sources rows={legacy.source_messages}/>{legacy.history.map(h=><details key={h.id}><summary>{h.kind==='manual'?'关系补充':'自动整理'} · {new Date(h.created_at*1000).toLocaleString()}</summary><p className="memory-body">{h.body}</p></details>)}</>)}
-    </section></div>{guard.dialog}<AlertDialog.Root open={!!deleting} onOpenChange={open=>{if(!open && !busy)setDeleting(null);}}>
+    </section></div>{guard.dialog}<AlertDialog.Root open={!!deleting || !!deletingMemory} onOpenChange={open=>{if(!open && !busy){setDeleting(null);setDeletingMemory(null);}}}>
       <AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay"/><AlertDialog.Content className="confirm-dialog">
-        <AlertDialog.Title>删除这条回顾？</AlertDialog.Title>
-        <AlertDialog.Description>这条回顾及其批注将被删除。聊天记录会保留，已发送的 QQ 消息不会撤回。</AlertDialog.Description>
+        <AlertDialog.Title>{deletingMemory ? deletingMemory.kind==='item'?'删除这条记忆？':'删除这条经历？' : '删除这条回顾？'}</AlertDialog.Title>
+        <AlertDialog.Description>{deletingMemory ? '删除后不再参与检索，原聊天记录会保留。' : '这条回顾及其批注将被删除。聊天记录会保留，已发送的 QQ 消息不会撤回。'}</AlertDialog.Description>
+        {failed && <p role="alert">{notice}</p>}
         <div className="dialog-actions"><AlertDialog.Cancel className="ui-button" disabled={busy}>取消</AlertDialog.Cancel>
-          <button className="ui-button warning" disabled={busy} onClick={()=>void removeReview()}>{busy?'正在删除…':'确认删除'}</button></div>
+          <button className="ui-button warning" disabled={busy} onClick={()=>void (deletingMemory ? removeMemory() : removeReview())}>{busy?'正在删除…':'确认删除'}</button></div>
       </AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root></main></AppShell>;
 }

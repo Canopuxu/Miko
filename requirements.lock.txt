@@ -7,6 +7,7 @@ click==8.5.0
 deepseek-harness-runtime-bin==0.1.5rc1
 deepseek-harness-sdk==0.1.5rc1
 fastapi==0.143.0
+frida==17.23.3
 h11==0.16.0
 httpcore2==2.13.1
 httpcore==1.0.9

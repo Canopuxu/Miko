@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 // DSH publishes its browser plugin as a module-registration factory. Adapt that
 // factory at build time so this standalone Vite app can use the same official code.
 export default defineConfig({
+  server: {proxy: {'/api': 'http://127.0.0.1:7870'}},
   plugins: [{
     name: 'miko-dsh-client-factory',
     enforce: 'pre',

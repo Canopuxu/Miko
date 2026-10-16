@@ -40,6 +40,11 @@ class RelationshipInput(BaseModel):
     miko_relationship: str = Field(default='', max_length=3000)
     miko_introduced: StrictBool | None = None
 
+class CharacterName(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=36, pattern=r'^[^\x00-\x1f\x7f]+$')
+    subject: Literal['miko', 'owner'] = 'miko'
+
 
 class Subcategory(BaseModel):
     pinned: StrictBool = False
@@ -73,6 +78,14 @@ def profiles_router(chat, qq):
     router = APIRouter(prefix='/api/profiles', dependencies=[Depends(local_request)])
     store = chat.profiles
     library = ProfileCategories(store.chat)
+
+    @router.get('/identity')
+    async def identity(subject: Literal['miko', 'owner'] = 'miko'):
+        return {'name': store.chat.person_name(subject)}
+
+    @router.put('/identity')
+    async def rename(body: CharacterName):
+        return store.chat.rename_character(body.name, body.subject)
 
     @router.get('/categories')
     async def categories(subject: Literal['miko', 'owner'] = 'miko'):

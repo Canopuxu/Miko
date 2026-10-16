@@ -67,3 +67,15 @@
 .persona-pin:hover { background: #ebece4; color: #52684e; }
 .persona-pin[aria-pressed="true"] { background: #e1e8d9; color: #52684e; }
 .persona-pin[aria-pressed="true"] svg { fill: currentColor; }
+
+.retrieval-preview-results { margin-top: 20px; color: #403b35; }
+.retrieval-note { color: #777168; font-size: 12px; line-height: 1.7; }
+.retrieval-engine { margin-top: 12px; color: #777168; }
+.retrieval-entries { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 12px 0; }
+.retrieval-entry { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid #e7dfd3; border-radius: 8px; font-size: 14px; line-height: 1.7; background: #fffdf9; overflow-wrap: anywhere; }
+.retrieval-entry > svg { flex-shrink: 0; color: #6d8068; }
+.retrieval-entry small { margin-right: 8px; color: #777168; font-size: 12px; }
+.persona-name-heading { display:flex; align-items:center; gap:8px; min-width:0; }
+.persona-name-editor { display:flex; align-items:center; flex-wrap:wrap; gap:12px; min-width:0; }
+.persona-name-editor h1 { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+.persona-name-editor input { max-width:100%; min-width:0; box-sizing:border-box; padding:2px 4px; border:0; border-bottom:1px solid var(--sage); border-radius:0; color:var(--ink); background:transparent; font:inherit; }

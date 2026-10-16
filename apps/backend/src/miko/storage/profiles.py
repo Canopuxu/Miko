@@ -89,14 +89,13 @@ class ProfileStore:
                 for r in selected[:8]]
 
     def context(self, query, key=None):
-        # Core descriptions and latest manually dated activities accompany relevant entries.
+        # Only explicitly pinned profiles are always supplied.
         pinned = [r for r in self.list(key=key, active=True) if r.get('pinned')]
-        overviews = self.list(kind='overview', key=key, active=True)[:4]
         recent = sorted(self.list(kind='recent', key=key, active=True),
                         key=lambda r: (r['as_of'] or '', r['updated_at']), reverse=True)[:5]
-        matches = [r for r in self.list(query, key=key, active=True) if r['kind'] not in ('overview', 'recent')][:12]
+        matches = [r for r in self.list(query, key=key, active=True) if r['kind'] != 'recent'][:12]
         rows, used, remaining = [], set(), 20000
-        for row in pinned + overviews + recent + matches:
+        for row in pinned + recent + matches:
             if row['id'] in used or (not row.get('pinned') and len(row['content']) > remaining):
                 continue
             used.add(row['id']); remaining -= len(row['content'])

@@ -6,9 +6,11 @@ import { getJson } from '../api/chat';
 type Status = {version: string; dsh: {ready: boolean}; chat: {configured: boolean; model: string | null; active_turns: number};
   memory: {configured: boolean; embedding_model: string | null; error: string | null; memory_engine: string;
     automatic: {enabled: number}}; life: {enabled: boolean; generating: boolean; error: string | null; today_recorded: boolean}};
-type Qq = {receiver: {state: string; note: string}; friends: {name: string; friend: string; enabled: number; blocked: number}[]};
+type Qq = {character_name:string; owner_name:string; receiver: {state: string; note: string}; friends: {name: string; friend: string; enabled: number; blocked: number}[]};
 const RuntimeContext = createContext<{status: Status | null; qq: Qq | null; error: string; qqError:string; refresh: () => Promise<void>} | null>(null);
 export const useRuntime = () => useContext(RuntimeContext)!;
+export const useCharacterName = () => useRuntime().qq?.character_name ?? 'Miko';
+export const useOwnerName = () => useRuntime().qq?.owner_name ?? '橙汁';
 
 export function RuntimeProvider({children}: {children: ReactNode}) {
   const [status, setStatus] = useState<Status | null>(null);

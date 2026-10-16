@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from urllib.parse import urlparse
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
@@ -31,6 +32,19 @@ class ProviderConfig(BaseModel):
 class LocalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     port: int = Field(default=7870, ge=1024, le=65535, strict=True)
+
+
+class RerankConfig(ProviderConfig):
+    format: Literal['dashscope', 'standard'] = 'dashscope'
+
+
+def legacy_rerank(provider):
+    if not provider:
+        return None
+    url = urlparse(provider.api_base)
+    return RerankConfig(api_base=url.scheme + '://' + url.netloc +
+        '/api/v1/services/rerank/text-rerank/text-rerank',
+        api_key=provider.api_key, model='qwen3.7-text-rerank')
 
 
 @dataclass(frozen=True)
@@ -93,11 +107,29 @@ class Settings:
     def load_qq(self):
         from miko.adapters.qq.onebot import QqConfig
         path = self.local_root / 'config/qq.local.json'
-        return QqConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
+        if not path.exists():
+            return None
+        value = json.loads(path.read_text(encoding='utf-8-sig'))
+        enabled = value.pop('enabled', True)
+        return QqConfig.model_validate(value) if enabled else None
 
     def load_qq_provider(self) -> ProviderConfig | None:
         path = self.local_root / 'config/qq-provider.local.json'
         return ProviderConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
+
+    def load_task_provider(self, task: Literal['life', 'memory']) -> ProviderConfig | None:
+        path = self.local_root / f'config/{task}-provider.local.json'
+        return ProviderConfig.model_validate_json(path.read_text(encoding='utf-8-sig')) if path.exists() else None
+
+    def load_rerank(self) -> RerankConfig | None:
+        path = self.local_root / 'config/rerank.local.json'
+        if not path.exists():
+            return legacy_rerank(self.load_provider())
+        value = json.loads(path.read_text(encoding='utf-8-sig'))
+        value.pop('shared', None)
+        if not value.pop('enabled', True):
+            return None
+        return RerankConfig.model_validate(value)
 
 
 def write_json(path: Path, value: dict) -> None:

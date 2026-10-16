@@ -5,20 +5,50 @@ import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
 import { ArrowUpRight, Check, Pencil, Pin, Plus, Save, Search, Trash2 } from 'lucide-react';
 import { useDiscardGuard, useNotice } from '../components/ui';
+import { useCharacterName, useOwnerName, useRuntime } from '../components/RuntimeStatus';
 
 type Subject = 'miko' | 'owner';
 type Entry = { id: string; subject: Subject; kind: 'overview' | 'fact' | 'recent' | 'excerpt';
   category: string; title: string; content: string; keywords: string; account: string; friend: string;
-  as_of: string | null };
+  as_of: string | null; pinned?: boolean };
 type Child = { id: string; name: string; pinned?: boolean };
 type Category = Child & { children: Child[] };
 type Edit = { id: string | null; path: string; content: string; original?: Entry };
 type CategoryEdit = { id?: string; parent?: string; name: string };
 type Friend = { account: string; friend: string; name: string };
-type Context = { role_material: Entry[]; retrieval?: { engine: string; error?: string } };
+type Context = { role_material: Entry[];
+  people_memory?: { id: string; subject: string; category: string; topic: string; content: string }[];
+  dated_experiences?: { id: string; subject: string; day: string; text: string }[];
+  retrieval?: { engine: string; error?: string } };
+
+function RetrievalPreview({ value }: { value: Context }) {
+  const characterName = useCharacterName();
+  const ownerName = useOwnerName();
+  const person = (subject: string) => subject === 'miko' ? characterName : subject === 'owner' ? ownerName : subject;
+  const rows = [
+    ...value.role_material.map(e => ({ id: 'profile:' + e.id, person: person(e.subject), label: `资料库 · ${e.category}`, text: e.content, pinned: !!e.pinned })),
+    ...(value.people_memory ?? []).map(e => ({ id: 'memory:' + e.id, person: person(e.subject), label: `长期记忆 · ${e.category} / ${e.topic}`, text: e.content, pinned: false })),
+    ...(value.dated_experiences ?? []).map(e => ({ id: 'event:' + e.id, person: person(e.subject), label: `经历 · ${e.day}`, text: e.text, pinned: false })),
+  ].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  return <div className="retrieval-preview-results">
+    <p className="retrieval-note">以下是检索候选；聊天时还会按话题筛选，不代表全部加入回复。</p>
+    {value.retrieval?.error && <p role="alert">{value.retrieval.error}</p>}
+    <div className="retrieval-entries">{rows.map(e => <span className="retrieval-entry" key={e.id}
+      title={`${e.person} · ${e.label}${e.pinned ? ' · 常驻背景' : ''}`}>
+      {e.pinned && <Pin size={14} fill="currentColor" aria-label="常驻背景"/>}<span><small>{e.person}</small>{e.text}</span>
+    </span>)}</div>
+    {!rows.length && <p className="retrieval-note">未找到相关条目</p>}
+    {value.retrieval?.engine && <details className="retrieval-engine"><summary>检索方式</summary><p>{value.retrieval.engine}</p></details>}
+  </div>;
+}
 
 export function ProfilesPage() {
   const navigation = useContext(NavigationContext)!;
+  const runtime = useRuntime();
+  const characterName = useCharacterName();
+  const ownerName = useOwnerName();
+  const [renaming,setRenaming]=useState(false);
+  const [nameDraft,setNameDraft]=useState('');
   const [subject, setSubject] = useState<Subject>('miko');
   const [entries, setEntries] = useState<Entry[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -37,6 +67,15 @@ export function ProfilesPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [previewFriend, setPreviewFriend] = useState('');
   const [preview, setPreview] = useState<Context | null>(null);
+  const nameEditorRef = useRef<HTMLFormElement>(null);
+  useEffect(()=>{
+    if(!renaming || busy)return;
+    const dismiss=(event:PointerEvent)=>{
+      if(event.target instanceof Node && !nameEditorRef.current?.contains(event.target))setRenaming(false);
+    };
+    document.addEventListener('pointerdown',dismiss,true);
+    return()=>document.removeEventListener('pointerdown',dismiss,true);
+  },[renaming,busy]);
   useEffect(()=>{
     if(deleting?.kind !== 'entry') return;
     const cancel=(event: PointerEvent)=>{
@@ -79,6 +118,7 @@ export function ProfilesPage() {
   const originalCategory=categoryEdit?.parent ? categories.find(c=>c.id===categoryEdit.parent)?.children.find(c=>c.id===categoryEdit.id)
     : categories.find(c=>c.id===categoryEdit?.id);
   const categoryDirty=!!categoryEdit && categoryEdit.name!==(originalCategory?.name ?? '');
+  const currentName = subject==='miko' ? characterName : ownerName;
   const guard=useDiscardGuard(editDirty || categoryDirty);
   function choose(id: string, action?: 'rename' | 'delete') {
     guard.proceed(()=>{
@@ -94,7 +134,7 @@ export function ProfilesPage() {
     if (value === subject) return;
     guard.proceed(()=>{
     setLoading(true); setSubject(value); setEntries([]); setCategories([]); setSelected(''); setEdit(null);
-    setCategoryEdit(null); setDeleting(null); setNotice(''); setPreview(null);
+    setCategoryEdit(null); setDeleting(null); setNotice(''); setPreview(null); setRenaming(false);
     });
   }
   const root = categories.find(c => c.id === selected);
@@ -112,6 +152,13 @@ export function ProfilesPage() {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     if (!result.ok) throw new Error(await responseError(result));
     return result;
+  }
+  async function renameCharacter() {
+    setBusy(true);setNotice('');
+    try {
+      await request('/api/profiles/identity','PUT',{name:nameDraft.trim(),subject});
+      await runtime.refresh();setRenaming(false);setNotice('名称已更新');
+    } catch(cause) {setFailure(cause);} finally {setBusy(false);}
   }
   async function moveEntry(entry: Entry, category: string) {
     if (busy || entry.category === category) return;
@@ -233,7 +280,7 @@ export function ProfilesPage() {
 
   return <AppShell view="profiles" sidebar={<section className="persona-browser" aria-label="人物分类">
     <div className="persona-subject" role="group" aria-label="人物"><button aria-pressed={subject === 'miko'} disabled={busy}
-      onClick={() => chooseSubject('miko')}>Miko</button><button aria-pressed={subject === 'owner'} disabled={busy}
+      onClick={() => chooseSubject('miko')}>{characterName}</button><button aria-pressed={subject === 'owner'} disabled={busy}
       onClick={() => chooseSubject('owner')}>我</button></div>
     <div className="search-field"><Search size={15}/><input className="persona-search" aria-label="搜索词条" value={q} onChange={event => setQ(event.target.value)} placeholder="搜索词条内容" /></div>
     <nav className="persona-categories" aria-label="大分类">{categories.map(c => <div key={c.id} className={`persona-category-row ${selected===c.id?'selected':''} ${dropPath===c.name?'drop-target':''}`} {...dropTarget(c.name)}>
@@ -251,9 +298,17 @@ export function ProfilesPage() {
         <span>待归类</span><small>{unfiled.filter(matches).length}</small></button></nav>
     <button className="persona-add-category" disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({name:''});})}><Plus size={14}/>新增大分类</button>
   </section>}>
-    <main className="main-panel persona-panel"><header className="page-header"><h1>{subject === 'miko' ? 'Miko 的人物设定' : '我的稳定资料'}</h1>
+    <main className="main-panel persona-panel"><header className="page-header"><div className="persona-name-heading">
+      {renaming ? <form ref={nameEditorRef} className="persona-name-editor" onSubmit={event=>{event.preventDefault();void renameCharacter();}}>
+        <h1><input autoFocus aria-label={subject==='miko'?'角色名称':'我的名字'} maxLength={36} size={Math.max(4,Math.min(20,nameDraft.length*2))}
+          value={nameDraft} onChange={event=>setNameDraft(event.target.value)}/><span>的资料</span></h1>
+        <button type="submit" className="send-button" disabled={busy||!nameDraft.trim()||nameDraft.trim()===currentName}>保存</button>
+      </form> : <><h1>{currentName} 的资料</h1>
+      <button className="text-button" disabled={busy} aria-label={subject==='miko'?'重命名角色':'修改我的名字'} title="修改名字"
+        onClick={()=>guard.proceed(()=>{setNameDraft(currentName);setRenaming(true);})}><Pencil size={16}/></button></>}</div>
       <button className="persona-memory-link" onClick={() => navigation.navigate('memory',{person:subject,relation:undefined})}>近况与经历<ArrowUpRight size={14}/></button></header>
-      <div className="persona-content" ref={contentRef}><div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
+      <div className="persona-content" ref={contentRef}>
+        <div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
         {root && <div className="persona-category-actions"><button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({parent:root.id,name:''});})}><Plus size={14}/>小分类</button>
           <button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({id:root.id,name:root.name});})}>重命名</button>
           <button disabled={busy} onClick={() => setDeleting({ kind: 'category', id: root.id })}>删除分类</button></div>}</div>
@@ -287,13 +342,12 @@ export function ProfilesPage() {
             {edit && !edit.id && edit.path === section.path && editor()}
           </section>;
         })}
-        <details className="persona-preview"><summary>检索预览</summary><p>查看一段聊天会找到哪些人物资料。</p>
+        <details className="persona-preview"><summary>检索预览</summary><p>查看话题相关的资料与记忆。</p>
           <div className="profile-filters"><input aria-label="预览聊天内容" value={question} placeholder="输入想聊的内容" onChange={e => setQuestion(e.target.value)} />
-            <select aria-label="预览对话对象" value={previewFriend} onChange={e => setPreviewFriend(e.target.value)}><option value="">我与 Miko</option>
+            <select aria-label="预览对话对象" value={previewFriend} onChange={e => setPreviewFriend(e.target.value)}><option value="">我与 {characterName}</option>
               {friends.map(f => <option key={`${f.account}:${f.friend}`} value={`${f.account}:${f.friend}`}>{f.name}</option>)}</select>
             <button className="send-button" disabled={busy} onClick={() => void inspect()}>查看资料</button></div>
-          {preview && <div className="context-material"><p>{preview.retrieval?.engine}{preview.retrieval?.error}</p>
-            {preview.role_material.map(e => <article key={e.id}><small>{e.subject === 'miko' ? 'Miko' : '我'} · {e.category}</small><p>{e.content}</p></article>)}</div>}</details>
+          {preview && <RetrievalPreview value={preview} />}</details>
         {!!legacy.length && <details className="persona-preview"><summary>保留的旧近况与对话片段 · {legacy.length}</summary>
           <p>这些资料仍然保留；近况与经历由记忆模块维护。</p>{legacy.map(e => <article className="persona-entry" key={e.id}><small>{e.as_of}</small><p>{e.content}</p></article>)}</details>}
       </div>

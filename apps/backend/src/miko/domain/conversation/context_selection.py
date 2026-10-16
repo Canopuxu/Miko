@@ -1,9 +1,10 @@
 """QQ context selection: stored ownership, reranking and readable context."""
 import json,re
+from copy import deepcopy
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import urlsplit
 import httpx
+from miko.adapters.memory.rerank import rank
 
 NAMES={'owner':'橙汁','miko':'Miko'}
 GROUPS=('role_material','social_memory','people_memory','dated_experiences','life_entries','life_goals')
@@ -26,7 +27,7 @@ def candidates(context):
             key=(subject,day,re.sub(r'\s+','',text))
             if key in seen:continue
             seen.add(key)
-            if group=='role_material' and (row.get('kind')=='overview' or row.get('pinned')):
+            if group=='role_material' and row.get('pinned'):
                 core.append(f'{subject}：{text}');continue
             label=subject
             if group=='role_material' and row.get('category'):
@@ -139,8 +140,6 @@ def scoring_documents(rows):
 async def select(provider,query,context,threshold=.70,limit=5):
     core,rows=candidates(context)
     if not rows:return core,[],[]
-    u=urlsplit(provider.api_base)
-    endpoint=u.scheme+'://'+u.netloc+'/api/v1/services/rerank/text-rerank/text-rerank'
     topics=list(dict.fromkeys([query]+topic_queries(query)));ranks=[]
     previous=context.get('_previous_contact_texts',[])
     scopes=[subjects_for(topic,previous) for topic in topics]
@@ -148,14 +147,16 @@ async def select(provider,query,context,threshold=.70,limit=5):
     pinned_core={f"{NAMES.get(r.get('subject'), r.get('subject', ''))}：{r.get('content', '')}" for r in context.get('role_material', []) if r.get('pinned')}
     core=[line for line in core if line in pinned_core or not line.startswith('橙汁：') or 'owner' in all_subjects]
     context['_subjects']=all_subjects
+    if provider is None:
+        selected = [{**row, 'candidate_index': i, 'score': None} for i,row in enumerate(rows)
+                    if scoped_row(row, all_subjects)][:limit]
+        return core, selected, selected
     async with httpx.AsyncClient(timeout=60,trust_env=False) as client:
         for topic,subjects in zip(topics,scopes):
             indexes=[i for i,row in enumerate(rows) if scoped_row(row,subjects)]
             if not indexes:continue
-            response=await client.post(endpoint,headers={'Authorization':'Bearer '+provider.api_key.get_secret_value()},json={
-                'model':'qwen3.7-text-rerank','input':{'query':scoring_query(topic),'documents':scoring_documents([rows[i] for i in indexes])},'parameters':{'top_n':len(indexes)}})
-            response.raise_for_status()
-            ranks.append([{**rows[indexes[x['index']]],'candidate_index':indexes[x['index']],'score':x['relevance_score'],'query':topic,'scoring_query':scoring_query(topic)} for x in response.json()['output']['results']])
+            ranking = await rank(client,provider,scoring_query(topic),scoring_documents([rows[i] for i in indexes]),len(indexes))
+            ranks.append([{**rows[indexes[x['index']]],'candidate_index':indexes[x['index']],'score':x['relevance_score'],'query':topic,'scoring_query':scoring_query(topic)} for x in ranking])
     def eligible(row):
         literal=row['source'].get('content','').strip()
         cutoff=.60 if row['group']=='role_material' and row['source'].get('kind')=='fact' else threshold
@@ -235,17 +236,18 @@ def render_dialogue(request):
 
 
 async def compose_qq_context(chat, records, key):
-    contacts=[r['text'] for r in records if r['author']['kind']=='contact']
+    contacts=[chat.canonical_query(r['text']) for r in records if r['author']['kind']=='contact']
     pending = pending_contacts(records)
     query='\n'.join(r['text'] for r in pending) if pending else records[-1]['text']
-    context=await chat.memory.context(query,key) if chat.memory else chat.profiles.context(query,key)
+    query = chat.canonical_query(query)
+    context=deepcopy(await chat.memory.context(query,key) if chat.memory else chat.profiles.context(query,key))
     context['role_material']=chat.profiles.list(key=key,active=True,kind='overview')+chat.profiles.list(key=key,active=True,kind='fact')+[r for r in context.get('role_material',[]) if r.get('kind')=='recent']
     if chat.life:
         trajectory=chat.life.records()
         days=sorted({r['day'] for r in trajectory if r['day']<=context['current_time'][:10]},reverse=True)[:2]
         context.setdefault('life_entries',[]).extend(r for r in trajectory if r['day'] in days)
     context['_previous_contact_texts']=contacts[:-len(pending)] if pending else contacts
-    core,selected,ranked=await select(chat.provider,query,context)
+    core,selected,ranked=await select(chat.memory.reranker,query,context)
     result = render(context,core,selected)
     if context.get('owner_feedback'):
         from miko.settings import REPO_ROOT

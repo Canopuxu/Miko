@@ -7,6 +7,7 @@ import { StickerLibrary } from './StickerLibrary';
 import { FriendRelationships } from './FriendRelationships';
 
 type Friend = { account: string; friend: string; name: string; enabled: number; blocked: number;
+  auto_reply_idle:number;
   state: string; mode: string; note: string; due_at: number | null;
   owner_relationship: string; miko_relationship: string; miko_introduced: number; intro_receipt_id: number | null };
 type Run = { id: string; state: string; text: string; error: string | null; created_at: number;
@@ -14,7 +15,7 @@ type Run = { id: string; state: string; text: string; error: string | null; crea
 type QqMessage = Message & { message_id: number; recalled: boolean;
   segments: { type: string; message_id?: number; sticker_id?: string }[];
   quoted_message?: { text?: string; message_id: number } };
-type QqStatus = { receiver: { state: string; account: string; note: string }; friends: Friend[] };
+type QqStatus = { character_name:string; receiver: { state: string; account: string; note: string }; friends: Friend[] };
 type Detail = { messages: QqMessage[]; runs: Run[] };
 const states: Record<string, string> = { disabled: '已关闭', blocked: '等待核对', waiting: '等待接话',
   generating: '正在生成', sending: '正在发送', chatting: 'Miko 接话中', listening: '等待新消息',
@@ -31,6 +32,10 @@ export function QqPage() {
   const [changing, setChanging] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const friend = status?.friends.find(item => item.friend === selected);
+  const latestRun = detail?.runs[0];
+  const replyNotice = latestRun?.error === friend?.note ? latestRun?.error : null;
+  const characterName = status?.character_name ?? 'Miko';
+  const stateLabel = (state:string) => state==='chatting' ? `${characterName} 接话中` : states[state] ?? state;
   const [relationshipDirty,setRelationshipDirty]=useState(false);
   const guard = useDiscardGuard(relationshipDirty);
   useEffect(()=>{
@@ -82,12 +87,23 @@ export function QqPage() {
     finally { setChanging(false); }
   }
 
+  async function toggleIdle(auto_reply_idle:boolean) {
+    if(!friend)return;
+    setChanging(true);setError('');
+    try {
+      const response=await fetch(`/api/qq/friends/${friend.account}/${friend.friend}/options`,{
+        method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_reply_idle})});
+      if(!response.ok)throw new Error(await responseError(response));
+      setStatus(await response.json());
+    } catch(cause) {setError(String(cause));} finally {setChanging(false);}
+  }
+
   return <AppShell view="qq" sidebar={<>
       <nav className="conversation-list" aria-label="QQ 好友">
         {status?.friends.map(item => <button key={`${item.account}:${item.friend}`}
           className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => {if(item.friend!==selected)guard.proceed(()=>select(item.friend));}}>
           <span className="conversation-title">{item.name}</span>
-          <span className="conversation-preview">{states[item.state] ?? item.state}</span>
+          <span className="conversation-preview">{stateLabel(item.state)}</span>
         </button>)}
       </nav>
     </>}>
@@ -100,10 +116,16 @@ export function QqPage() {
             {person:'miko',relation:`qq:${friend.account}:${friend.friend}`})}><BookOpen size={15}/>关系记忆</button></>}
           <span className="model-label">{status?.receiver.state==='connected'?'QQ 已连接':'QQ 未连接'}</span></div></header>
       {error && <div role="alert" className="qq-error error-notice">{error}<button className="text-button" aria-label="关闭提示" onClick={()=>setError('')}><X size={15}/></button></div>}
+      {replyNotice && <div role="alert" className="qq-error error-notice"><span>{replyNotice}</span>
+        <button className="text-button" onClick={()=>navigation.navigate('settings')}>模型设置</button></div>}
       {friend ? <>
         <div className="friend-controls">
-          <div><strong>{states[friend.state] ?? friend.state}</strong>
-            {friend.note !== (states[friend.state] ?? friend.state) && <p>{friend.note}</p>}
+          <div><strong>{stateLabel(friend.state)}</strong>
+            <p>{!friend.enabled && '开启后，'}好友明确提到 {characterName}{friend.auto_reply_idle ? ' 或用户两分钟没回复好友消息' : ''}时会自动接话</p>
+            {!!friend.blocked && <p>{friend.note}</p>}
+            <label className="qq-idle-option"><button type="button" role="switch" aria-checked={!!friend.auto_reply_idle}
+              aria-label="用户两分钟没回复自动接话" className="qq-idle-switch" disabled={changing}
+              onClick={()=>void toggleIdle(!friend.auto_reply_idle)}><span/></button>用户两分钟没回复自动接话</label>
             {friend.state === 'waiting' && friend.due_at && <small>约 {Math.max(0, Math.ceil(friend.due_at - Date.now()/1000))} 秒后接话</small>}
           </div>
           <div className="friend-actions">
@@ -146,7 +168,7 @@ export function QqPage() {
               <div ref={bottom} />
             </div>}
         </section>
-        <p className="qq-caption">你两分钟没有回复时，Miko 接话；你发言后重新由你主导。</p>
+        <p className="qq-caption">你发言后，该会话重新由你主导。</p>
       </> : <section className="conversation"><EmptyState title="选择一位好友"/></section>}
       {guard.dialog}
     </main>

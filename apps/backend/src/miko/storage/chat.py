@@ -16,7 +16,7 @@ class ChatStore:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 5:
+            if version > 7:
                 raise RuntimeError("聊天数据库版本较新，请使用对应版本的 Miko")
             if version == 0:
                 sql = (Path(__file__).parent / "migrations/001_chat.sql").read_text(encoding="utf-8")
@@ -33,6 +33,24 @@ class ChatStore:
             if version < 5:
                 sql = (Path(__file__).parent / 'migrations/005_saved_profiles.sql').read_text(encoding='utf-8')
                 db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=5;\nCOMMIT;')
+            if version < 6:
+                sql = (Path(__file__).parent / 'migrations/006_reply_options.sql').read_text(encoding='utf-8')
+                db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=6;\nCOMMIT;')
+            if version < 7:
+                sql = (Path(__file__).parent / 'migrations/007_owner_name.sql').read_text(encoding='utf-8')
+                db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=7;\nCOMMIT;')
+
+    def character_name(self):
+        return self.person_name('miko')
+
+    def person_name(self, subject):
+        with self.connect() as db:
+            return db.execute('SELECT display_name FROM people WHERE id=?', (subject,)).fetchone()[0]
+
+    def rename_character(self, name, subject='miko'):
+        with self.connect() as db:
+            db.execute('UPDATE people SET display_name=? WHERE id=?', (name, subject))
+        return {'name': name}
 
     @contextmanager
     def connect(self):

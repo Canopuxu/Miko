@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from miko.adapters.memory.tulpa import SocialMemory
 from miko.adapters.memory.structured import StructuredMemory
+from miko.settings import ProviderConfig
 
 
 class Scope(BaseModel):
@@ -42,16 +43,20 @@ class Memory:
         self.error = None
         path = local / 'config/embedding.local.json'
         self.model = None
-        if path.exists() and chat.provider:
+        self.reranker = chat.settings.load_rerank()
+        if path.exists():
             config = json.loads(path.read_text(encoding='utf-8-sig'))
             self.model = config['model']
             if not self.model:
+                return
+            provider = ProviderConfig(api_base=config['api_base'], api_key=config['api_key'], model=self.model) if config.get('api_base') else chat.provider
+            if not provider:
                 return
             self.index = MemoryService(
                 database_config={'metadata_store': {'provider': 'sqlite',
                     'dsn': 'sqlite:///' + (local / 'data/database' / config.get('index_file', 'memu.sqlite3')).as_posix()}},
                 embedding_profiles={'default': {'provider': 'openai', 'client_backend': 'httpx',
-                    'base_url': chat.provider.api_base, 'api_key': chat.provider.api_key.get_secret_value(),
+                    'base_url': provider.api_base, 'api_key': provider.api_key.get_secret_value(),
                     'embed_model': self.model}},
                 progressive_retrieve_config={'file': {'top_k': 12, 'tracks': ['memory']}, 'resource': {'enabled': False}},
                 user_config={'model': Scope},
@@ -82,8 +87,9 @@ class Memory:
         for row in self.chat.profiles.list(active=True):
             name = 'profile:' + row['id']
             peer = f"qq:{row['account']}:{row['friend']}" if row['account'] else ''
-            result[name] = {'name': name, 'track': 'memory', 'description': f"{row['subject']}|{peer}|{row['title']}",
-                'content': f"# {row['title']}\n{row['content']}", 'subject': row['subject'],
+            category = row['category'].replace('/', ' · ')
+            result[name] = {'name': name, 'track': 'memory', 'description': f"{category}：{row['content']}",
+                'content': f"{category}：{row['content']}", 'subject': row['subject'],
                 'peer': peer, 'entry_id': name}
         if self.social.control()['enabled']:
             for row in self.structured.items(active=True):
@@ -139,7 +145,7 @@ class Memory:
 
     async def feedback(self, query, peer):
         from miko.adapters.memory.feedback import select_feedback
-        return await select_feedback(self.chat.provider, query, self.structured.feedback_candidates(peer))
+        return await select_feedback(self.reranker, query, self.structured.feedback_candidates(peer))
 
     async def context(self, query, key=None, conversation_id=None):
         await self.sync()

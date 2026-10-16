@@ -9,6 +9,7 @@ import { RuntimeProvider } from './components/RuntimeStatus';
 import { Workbench } from './components/Workbench';
 import { SettingsPage } from './pages/SettingsPage';
 import './styles/workbench.css';
+import { workbenchEnabled } from './features';
 
 function currentView(): View {
   const view = new URLSearchParams(location.search).get('view');
@@ -20,7 +21,7 @@ const pages = { chat: ChatPage, qq: QqPage, profiles: ProfilesPage, memory: Memo
 export function App() {
   const [workbench, setWorkbench] = useState(false);
   const [workbenchVisited, setWorkbenchVisited] = useState(false);
-  function toggleWorkbench() { setWorkbenchVisited(true); setWorkbench(value => !value); }
+  function toggleWorkbench() { if (workbenchEnabled) { setWorkbenchVisited(true); setWorkbench(value => !value); } }
   const [active, setActive] = useState<View>(currentView);
   const [visited, setVisited] = useState<View[]>([active]);
   const [expanded, setExpanded] = useState(true);
@@ -64,9 +65,9 @@ export function App() {
       return <div className="page-host" key={view} hidden={view !== active}><Page /></div>;
     })}
     </div>
-    <div className="workbench-surface" ref={element => { if (element) element.inert = !workbench; }} aria-hidden={!workbench}>
+    {workbenchEnabled && <div className="workbench-surface" ref={element => { if (element) element.inert = !workbench; }} aria-hidden={!workbench}>
       {workbenchVisited && <Workbench/>}
-    </div>
+    </div>}
     </div>
   </NavigationContext.Provider></RuntimeProvider>;
 }

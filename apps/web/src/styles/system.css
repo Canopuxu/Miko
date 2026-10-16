@@ -175,3 +175,10 @@ input, textarea, select { accent-color: var(--sage); }
 .conversation-row:hover .conversation-delete, .conversation-row:focus-within .conversation-delete { opacity: 1; }
 .conversation-delete:hover { background: #eee3dc; color: #995e46; }
 @media (hover: none) { .conversation-delete { opacity: 1; } }
+.qq-idle-option { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:#746f64; }
+.qq-idle-switch { position:relative; flex-shrink:0; width:36px; height:22px; padding:0; border:0; border-radius:999px; background:#b9b9b0; cursor:pointer; transition:background 160ms ease; }
+.qq-idle-switch[aria-checked="true"] { background:var(--sage); }
+.qq-idle-switch span { display:block; position:absolute; top:3px; left:0; width:16px; height:16px; border-radius:50%; background:white; transform:translateX(3px); transition:transform 160ms ease; }
+.qq-idle-switch[aria-checked="true"] span { transform:translateX(17px); }
+.qq-idle-switch:disabled { opacity:.6; cursor:default; }
+@media (prefers-reduced-motion:reduce) { .qq-idle-switch,.qq-idle-switch span { transition:none; } }

@@ -8,7 +8,6 @@ from miko.settings import REPO_ROOT
 from .memobase_upstream.prompts import (
     zh_merge_profile_yolo as merge,
     organize_profile as organize,
-    summary_profile as abstract,
     utils as parser,
 )
 from .memobase_upstream.processors import merge_by_topic_sub_topics
@@ -17,13 +16,17 @@ from .memobase_upstream.processors import merge_by_topic_sub_topics
 class MemobasePipeline:
     def __init__(self, social, chat):
         self.social, self.chat = social, chat
+        self.provider = chat.settings.load_task_provider('memory')
         path = chat.settings.local_root / 'config/memory.local.json'
         self.model = json.loads(path.read_text(encoding='utf-8-sig')).get('model') if path.exists() else None
+        if self.provider:
+            self.model = self.provider.model
 
     async def summarize(self,sid,payload,model=None):
         usage={};calls=[]
         async def ask(label,system,user,json_output=False):
-            result=await self.chat.complete_memory(system,user,model or self.model,json_output=json_output)
+            result=await self.chat.complete_memory(system,user,model or self.model,json_output=json_output,
+                **({'provider': self.provider} if self.provider else {}))
             calls.append(label)
             for key,value in result.get('usage',{}).items():
                 if isinstance(value,int):usage[key]=usage.get(key,0)+value
@@ -33,7 +36,6 @@ class MemobasePipeline:
             rows=[dict(db.execute('SELECT * FROM messages WHERE id=?',(mid,)).fetchone()) for mid in ids]
         subjects=list(dict.fromkeys(r['sender_id'] for r in rows))
         with self.chat.store.connect() as db:names={r['id']:r['display_name'] for r in db.execute('SELECT * FROM people')}
-        names['owner']='橙汁'
         _,cid=self.social.detail(sid)['conversation_id'].split('|',1);peer='' if cid=='web:owner' else cid
         existing={s:self.social.structured.items(subject=s) for s in subjects}
         relevant={s:[r for r in existing[s] if r['peer'] in ('',peer) and r['enabled'] and (r['valid'] or r['manual'])] for s in subjects}
@@ -89,13 +91,8 @@ class MemobasePipeline:
         """Use the original organizer on demand, returning a reviewable proposal."""
         rows = [r for r in self.social.structured.items(subject=subject, category=category, active=True) if r['peer']==peer]
         text = f'topic: {category}\n' + '\n'.join(f'- {r["topic"]}::{r["content"]}' for r in rows)
-        value = await self.chat.complete_memory(organize.get_prompt(8, ''), text, self.model)
+        value = await self.chat.complete_memory(organize.get_prompt(8, ''), text, self.model,
+            **({'provider': self.provider} if self.provider else {}))
         return {'items': parser.parse_string_into_subtopics(value['text']),
                 'revisions': {r['id']:r['revision'] for r in rows}, 'usage': value['usage'],
                 'subject':subject,'peer':peer,'category':category}
-
-    async def summarize_item(self, item_id):
-        # This upstream prompt generalizes preferences; use it for browsing only.
-        row = self.social.structured.detail(item_id)
-        value = await self.chat.complete_memory(abstract.get_prompt(), row['content'], self.model)
-        return {'summary': value['text'], 'entry_id': item_id, 'usage': value['usage']}

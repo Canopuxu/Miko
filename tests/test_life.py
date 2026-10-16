@@ -13,7 +13,8 @@ from miko.api.life import life_router
 from miko.api.profiles import ProfileInput
 from miko.domain.conversation.chat import ChatService, reply_context
 from miko.domain.life import Life, GoalInput
-from miko.domain.life_material import generation_material
+from miko.domain.life_material import conversation_background, generation_material
+from miko.storage.search import terms
 from miko.settings import Settings
 from miko.adapters.memory.service import Memory
 
@@ -61,8 +62,8 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             material = json.loads(message)
             inputs.append(material)
             if len(inputs) > 1:
-                self.assertIn('摄影', json.dumps(material['生活条目'], ensure_ascii=False))
-            self.assertIn('前端配色', json.dumps(material['role_material'], ensure_ascii=False))
+                self.assertIn('摄影', json.dumps(material['既有角色生活记录'], ensure_ascii=False))
+            self.assertIn('前端配色', json.dumps(material['真实用户资料'], ensure_ascii=False))
             return {'text': json.dumps({'entries': [{'text': '开始学摄影' if len(inputs) == 1 else '练构图'}]}, ensure_ascii=False)}
 
         self.chat.complete_memory = generate
@@ -253,6 +254,110 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('贝斯', json.dumps(material['role_material'], ensure_ascii=False))
         self.assertNotIn('小傲娇', json.dumps(material['role_material'], ensure_ascii=False))
         self.assertEqual(material['相关事项的最新进展'][0]['goal_id'], 'drawing')
-        self.assertTrue(all('goal_id' not in r for r in material['生活条目']))
+        self.assertTrue(all('goal_id' not in r for r in material['既有角色生活记录']))
         self.assertEqual(material['已经告一段落的事项'][0]['status'], 'completed')
         self.assertNotIn('id', material['已经告一段落的事项'][0])
+
+    async def test_owner_facts_are_separate_from_generated_stories_and_names_follow_settings(self):
+        self.chat.store.rename_character('青柠', subject='owner')
+        self.chat.store.rename_character('小禾')
+        overview = self.chat.profiles.save(ProfileInput(subject='miko', kind='overview', title='关系',
+                                            content='Miko；与橙汁一起生活的朋友；熟悉橙汁的日常').record())
+        self.chat.profiles.save(ProfileInput(subject='owner', kind='overview', title='身份',
+                                            content='研究生二年级').record())
+        self.chat.profiles.save(ProfileInput(subject='owner', kind='overview', title='姓名与性别',
+                                            content='名叫橙汁，男生').record())
+        self.life.save(date(2026, 10, 8), [{'text': '青柠在实验室赶论文'},
+            {'text': '橙汁新买了键盘'}, {'text': '继续画《秋天》的分镜'}], 0, 'generated')
+        captured = {}
+        async def complete(system, message, **kwargs):
+            captured.update(system=self.chat.named_prompt(system), material=json.loads(message))
+            return {'text': json.dumps({'entries': [{'text': '和青柠一起吃晚饭'}]}, ensure_ascii=False)}
+        self.chat.complete_memory = complete
+        await self.life.generate(date(2026, 10, 9))
+        material = captured['material']
+        self.assertNotIn('研究生', json.dumps(material, ensure_ascii=False))
+        self.assertNotIn('实验室', json.dumps(material, ensure_ascii=False))
+        self.assertNotIn('键盘', json.dumps(material['既有角色生活记录'], ensure_ascii=False))
+        self.assertIn('《秋天》', json.dumps(material['既有角色生活记录'], ensure_ascii=False))
+        self.assertIn('前端配色', json.dumps(material['真实用户资料'], ensure_ascii=False))
+        self.assertIn('男生', json.dumps(material['真实用户资料'], ensure_ascii=False))
+        self.assertIn('青柠', json.dumps(material['真实用户资料'], ensure_ascii=False))
+        self.assertIn('青柠', captured['system'])
+        self.assertIn('小禾', captured['system'])
+        self.assertNotIn('橙汁', captured['system'])
+        self.assertEqual(self.chat.profiles.get(overview['id'])['content'], overview['content'])
+        self.assertEqual(self.life.store.get(date(2026, 10, 9)).entries[0]['text'], '和青柠一起吃晚饭')
+
+    async def test_conversation_background_is_small_dated_and_specific_to_miko(self):
+        def event(day, text, subjects=('owner', 'miko'), updated=1):
+            return {'day': day, 'text': text, 'subjects': list(subjects), 'updated_at': updated}
+        rows = [event('2026-10-09', '橙汁与 Miko 约好今晚玩《双人成行》', updated=3),
+                event('2026-10-09', '橙汁与 Miko 约好饭后散步', updated=2),
+                event('2026-10-09', '较早的另一项安排'),
+                event('2026-10-08', '一起玩《双人成行》，改天继续'),
+                event('2026-10-07', '一起去税务局递交材料'),
+                event('2026-10-01', '一起玩《双人成行》'),
+                event('2026-10-10', '约好明天再玩《双人成行》'),
+                event('2026-10-20', '约好远期一起玩游戏'),
+                event('2026-10-09', '橙汁独自在实验室买键盘', subjects=('owner',))]
+        result = conversation_background(self.chat.profiles, rows, date(2026, 10, 9), terms('在家打游戏、看视频'))
+        self.assertEqual(len(result['当天']), 2)
+        self.assertEqual(len(result['近期对话']), 1)
+        self.assertNotIn('临近', result)
+        text = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn('税务局', text)
+        self.assertNotIn('实验室', text)
+        self.assertNotIn('2026-10-01', text)
+        self.assertNotIn('2026-10-20', text)
+        near = conversation_background(self.chat.profiles, [r for r in rows if r['day'] != '2026-10-09'],
+                                      date(2026, 10, 9), terms('继续玩《双人成行》'))
+        self.assertEqual(near['临近'][0]['日期'], '2026-10-10')
+        self.assertIn('约好', near['临近'][0]['内容'])
+
+    async def test_recall_uses_anchored_source_words_without_mixing_people_or_old_plans(self):
+        past = {'day': '2026-10-08', 'text': '一起玩《双人成行》，改天继续', 'subjects': ['owner', 'miko'],
+                'sources': [{'content': '今晚还打游戏吗？'}, {'content': '接着玩《双人成行》吧'}]}
+        result = conversation_background(self.chat.profiles, [past], date(2026, 10, 9), terms('在家打游戏'))
+        self.assertIn('双人成行', result['近期对话'][0]['内容'])
+        # A whole extraction batch can share sources: unrelated snippets must
+        # not make an old bedtime plan relevant to today's lunch.
+        rows = [{'day': '2026-10-09', 'text': '中午一起吃披萨', 'subjects': ['owner', 'miko']},
+                {'day': '2026-10-08', 'text': '另一位好友约好买披萨', 'subjects': ['miko', 'other']},
+                {'day': '2026-10-08', 'text': '约定今晚早睡', 'subjects': ['owner', 'miko'],
+                 'sources': [{'content': '中午一起吃披萨'}]}]
+        lunch = conversation_background(self.chat.profiles, rows, date(2026, 10, 9), terms('绘制分镜，吃饭休息'))
+        self.assertEqual(set(lunch), {'当天'})
+        unrelated = conversation_background(self.chat.profiles,
+            [{'day': '2026-10-10', 'text': '明天一起去听交响音乐会', 'subjects': ['owner', 'miko']}],
+            date(2026, 10, 9), terms('在家洗衣服和看电影'))
+        self.assertEqual(unrelated, {})
+
+    async def test_life_reads_committed_shared_memory_without_embedding_and_honors_memory_switch(self):
+        self.chat.memory = self.memory
+        self.chat.store.begin_turn('shared', 'shared-source', '10月9日晚上一起玩《双人成行》吧')
+        self.chat.store.finish('shared-source', '好，晚上一起玩', 'completed', None)
+        self.memory.social.store.sync()
+        with self.memory.social.store.connect() as db:
+            sid = db.execute('SELECT id FROM tulpa_scopes LIMIT 1').fetchone()[0]
+            sources = [r[0] for r in db.execute('SELECT id FROM messages')]
+            self.memory.structured.commit(db, sid, {'days': [
+                {'subject': '', 'subjects': ['owner', 'miko'], 'peer': '', 'day': '2026-10-09',
+                 'text': '橙汁与 Miko 约好今晚玩《双人成行》', 'sources': sources, 'through': 'shared'},
+                {'subject': 'owner', 'subjects': ['owner'], 'peer': '', 'day': '2026-10-09',
+                 'text': '橙汁独自在实验室买键盘', 'sources': sources, 'through': 'owner'}]})
+        inputs = []
+        async def complete(system, message, **kwargs):
+            inputs.append(json.loads(message))
+            return {'text': json.dumps({'entries': [{'text': '饭后在楼下散步'}]}, ensure_ascii=False)}
+        self.chat.complete_memory = complete
+        embeddings = self.memory.index._embedding_pool._cache['embedding']
+        with patch.object(embeddings, 'embed', side_effect=AssertionError('Life must not call embeddings')) as embed:
+            await self.life.generate(date(2026, 10, 9))
+            embed.assert_not_called()
+        self.assertEqual(len(inputs), 1)
+        self.assertIn('双人成行', json.dumps(inputs[0]['对话提炼记录'], ensure_ascii=False))
+        self.assertNotIn('实验室', json.dumps(inputs[0], ensure_ascii=False))
+        self.memory.social.toggle(False)
+        await self.life.generate(date(2026, 10, 9))
+        self.assertNotIn('对话提炼记录', inputs[1])

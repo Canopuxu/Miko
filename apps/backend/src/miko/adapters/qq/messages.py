@@ -70,11 +70,11 @@ def parse_message(source):
 
 
 def model_message(payload):
-    """Keep remote media URLs outside model input until image reading is configured."""
+    """Keep media references out of model text; image bytes are attached separately."""
     return [{k: v for k, v in item.items() if k != 'ref'} for item in payload.get('segments', [])]
 
 
-def parse_bubbles(raw, records, stickers, max_chars=400):
+def parse_bubbles(raw, records, stickers, max_chars=100):
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {'bubbles'}:
         raise ValueError('回复需要 bubbles JSON 对象')

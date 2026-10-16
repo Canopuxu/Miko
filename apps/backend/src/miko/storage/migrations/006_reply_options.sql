@@ -1,0 +1,1 @@
+ALTER TABLE qq_friends ADD COLUMN auto_reply_idle INTEGER NOT NULL DEFAULT 1;

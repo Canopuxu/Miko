@@ -48,6 +48,7 @@ class ProfilesTests(unittest.TestCase):
         legacy = self.profiles.save(ProfileInput(subject='owner', kind='recent', title='旧近况', content='旧记录', as_of='2026-10-12', enabled=False).record())
         with self.chat.connect() as db:
             db.execute('UPDATE profile_entries SET enabled=0 WHERE id=?', (clothing['id'],))
+            db.execute('ALTER TABLE qq_friends DROP COLUMN auto_reply_idle')
             db.execute('PRAGMA user_version=4')
         migrated = ProfileStore(ChatStore(self.path))
         self.assertEqual(migrated.get(clothing['id'])['enabled'], 1)
@@ -61,8 +62,9 @@ class ProfilesTests(unittest.TestCase):
             content='主人和朋友一起跑步', keywords='运动', account='123', friend='456').record())
         self.qq.update_friend(('123','456'), owner_relationship='常一起跑步', miko_relationship='刚认识')
         context = self.profiles.context('运动', ('123','456'))
-        self.assertEqual([r['id'] for r in context['role_material']], [overview['id'], activity['id'], excerpt['id']])
-        self.assertEqual([r['subject'] for r in context['role_material']], ['miko', 'owner', 'owner'])
+        self.assertEqual([r['id'] for r in context['role_material']], [activity['id'], excerpt['id']])
+        self.assertEqual([r['subject'] for r in context['role_material']], ['owner', 'owner'])
+        self.assertIn(overview['id'], [r['id'] for r in self.profiles.context('键盘')['role_material']])
         relation = context['friend_relationships'][0]
         self.assertEqual((relation['owner_relationship'], relation['miko_relationship']), ('常一起跑步','刚认识'))
         self.assertEqual(self.profiles.context('朋友甲')['friend_relationships'][0]['friend'], '456')
@@ -96,6 +98,37 @@ class ProfilesTests(unittest.TestCase):
             self.assertEqual(client.post('/api/profiles', json=body, headers={'origin':'https://elsewhere.example'}).status_code, 403)
             self.assertEqual(client.delete(f'/api/profiles/entries/{entry_id}').status_code, 200)
             self.assertEqual(self.profiles.list('设计'), [])
+
+    def test_character_rename_persists_without_changing_person_id(self):
+        app = FastAPI()
+        app.include_router(profiles_router(SimpleNamespace(profiles=self.profiles), SimpleNamespace(store=self.qq)))
+        with TestClient(app) as client:
+            self.assertEqual(client.get('/api/profiles/identity').json()['name'], 'Miko')
+            response = client.put('/api/profiles/identity', json={'name':' 小夏 '})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['name'], '小夏')
+            self.assertEqual(client.put('/api/profiles/identity', json={'name':'  '}).status_code, 422)
+        self.assertEqual(ChatStore(self.path).character_name(), '小夏')
+        from miko.domain.conversation.chat import ChatService
+        prompt = ChatService.named_prompt(SimpleNamespace(store=self.chat), '你是Miko。资料所属编号：miko；输出字段：introduces_miko')
+        self.assertEqual(prompt, '你是小夏。资料所属编号：miko；输出字段：introduces_miko')
+        with self.chat.connect() as db:
+            self.assertEqual(db.execute("SELECT kind FROM people WHERE id='miko'").fetchone()[0], 'miko')
+
+    def test_owner_rename_updates_injected_names_and_query_ownership(self):
+        from miko.domain.conversation.chat import ChatService
+        app = FastAPI()
+        app.include_router(profiles_router(SimpleNamespace(profiles=self.profiles), SimpleNamespace(store=self.qq)))
+        with TestClient(app) as client:
+            self.assertEqual(client.get('/api/profiles/identity?subject=owner').json()['name'], '橙汁')
+            self.assertEqual(client.put('/api/profiles/identity', json={'subject':'owner','name':'阿澄'}).status_code,200)
+        reopened = ChatStore(self.path)
+        self.assertEqual(reopened.person_name('owner'),'阿澄')
+        stub = SimpleNamespace(store=reopened)
+        self.assertEqual(ChatService.named_prompt(stub,'Miko 和橙汁一起生活，subject 为 owner/miko'),
+                         'Miko 和阿澄一起生活，subject 为 owner/miko')
+        self.assertEqual(ChatService.canonical_query(stub,'阿澄最近在忙什么'),'橙汁最近在忙什么')
+        self.assertEqual(reopened.character_name(),'Miko')
 
 
 if __name__ == '__main__':

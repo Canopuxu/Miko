@@ -401,6 +401,15 @@
       "licenseFiles": [
         "licenses/python/pyyaml-LICENSE.txt"
       ]
+    },
+    {
+      "name": "frida",
+      "version": "17.23.3",
+      "source": "https://pypi.org/project/frida/17.23.3/",
+      "license": "wxWindows",
+      "licenseFiles": [
+        "licenses/frida-COPYING.txt"
+      ]
     }
   ],
   "dshArtifacts": [

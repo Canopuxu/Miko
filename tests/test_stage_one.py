@@ -22,7 +22,7 @@ class StageOneTests(unittest.TestCase):
         cls.settings = Settings.load(LOCAL_ROOT)
         cls.settings.prepare()
         if recorded_process(cls.settings) is not None:
-            raise RuntimeError("Stop Miko before running the stage-one integration tests")
+            raise unittest.SkipTest("Stop Miko before running the stage-one integration tests")
 
     def cli(self, action, *, success=True):
         result = subprocess.run(

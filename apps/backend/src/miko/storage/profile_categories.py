@@ -1,22 +1,14 @@
 """Editable presentation categories over the existing profile entry API."""
 import json
 import uuid
+from pathlib import Path
 
 from miko.storage.search import terms
 
 
 def defaults(subject):
-    groups = [
-        ('核心设定' if subject == 'miko' else '个人概况', []),
-        ('外貌与穿着', ['外貌特征', '日常穿着', '配饰与风格']),
-        ('性格与表达', ['性格特点', '说话方式', '情绪与反应', '幽默与玩笑']),
-        ('喜好与厌恶', ['喜欢的食物', '讨厌的食物', '喜欢的运动', '音乐与作品', '其他喜好']),
-        ('兴趣与能力', ['乐器', '设计与创作', '运动', '学习与工作']),
-        ('生活习惯', ['作息', '日常习惯', '小动作']),
-        ('与我的关系' if subject == 'miko' else '与 Miko 的关系', []),
-        ('与他人的相处', []),
-        ('价值观与在意的事', []),
-    ]
+    template = json.loads(Path(__file__).with_name('profile-categories.json').read_text('utf-8'))
+    groups = [(group['name'], group['children']) for group in template[subject]]
     return [{'id': subject + '-core' if index == 0 else uuid.uuid4().hex, 'name': name,
              'children': [{'id': uuid.uuid4().hex, 'name': child} for child in children]}
             for index, (name, children) in enumerate(groups)]

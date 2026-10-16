@@ -62,7 +62,7 @@ class OneBot:
             raise SendError('接口不在 QQ 适配器允许范围内')
         try:
             token = self.config.http_token.get_secret_value()
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20 if sending else 4, connect=3),
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30 if sending or action in ('get_msg', 'set_qq_avatar') else 4, connect=3),
                                          trust_env=False, transport=self.transport) as client:
                 response = await client.post(self.config.http_url + '/' + action, json=payload,
                     headers={'Authorization': 'Bearer ' + token} if token else {})
@@ -162,7 +162,7 @@ class EventReceiver:
         delay = 1
         while True:
             try:
-                await self.update('connecting', '正在连接 SnowLuma…', account='')
+                await self.update('connecting', '正在连接 QQ 桥接…', account='')
                 account = await self.client.login()
                 if account != self.client.config.account:
                     await self.update('account_mismatch', '登录账号与 Miko 配置不一致，已停止接话', account='')
@@ -206,7 +206,7 @@ class EventReceiver:
                             verified = True
                             delay = 1
                         await self.update('connected' if healthy else 'upstream_offline',
-                            'SnowLuma 已连接' if healthy else 'QQ 接收链路不健康，已停止接话')
+                            'QQ 桥接已连接' if healthy else 'QQ 接收链路不健康，已停止接话')
                         if healthy:
                             await self.on_event(event)
             except InvalidStatus as exc:

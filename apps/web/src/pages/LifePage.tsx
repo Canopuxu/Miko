@@ -1,3 +1,4 @@
+import { useCharacterName } from '../components/RuntimeStatus';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
@@ -16,6 +17,7 @@ type Listing = {
 const today = () => new Date().toLocaleDateString('sv-SE');
 
 export function LifePage() {
+  const characterName = useCharacterName();
   const [day, setDay] = useState(today);
   const [data, setData] = useState<Listing | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -149,7 +151,7 @@ export function LifePage() {
         onClick={() => void saveGoal()}><Save size={14}/>保存目标</button>
     </aside>}
     {mode === 'day' && <div className="life-workspace">
-      <div className="life-record-header"><span>{data?.record.source === 'generated' ? 'Miko 的生活记录' : data?.record.source === 'manual' ? '你修正的记录' : '尚未记录'}</span>
+      <div className="life-record-header"><span>{data?.record.source === 'generated' ? `${characterName} 的生活记录` : data?.record.source === 'manual' ? '你修正的记录' : '尚未记录'}</span>
         <button className="life-button" disabled={busy} onClick={() => guard.proceed(()=>void load())}><RefreshCw size={14}/>刷新</button></div>
       {!entries.length && <div className="life-empty"><p>这一天还没有生活条目。</p><span>可以生成今天的记录，或直接写下简短的活动。</span></div>}
       <div className="life-entries">{entries.map((entry, index) => <article className={`life-entry ${editing === index ? 'editing' : 'reading'}`} key={index}>

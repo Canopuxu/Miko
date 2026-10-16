@@ -105,6 +105,21 @@ class StructuredMemory:
         value['content'] = value['manual'] or value['automatic']
         return value
 
+    def delete(self, item_id, kind='item'):
+        table = {'item': 'memory_items', 'day': 'memory_days'}[kind]
+        with self.projection.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(f'SELECT scope_id FROM {table} WHERE id=?', (item_id,)).fetchone()
+            if not row:
+                raise ValueError('找不到这条记忆')
+            db.execute('UPDATE tulpa_scopes SET revision=revision+1 WHERE id=?', (row['scope_id'],))
+            db.execute(f'DELETE FROM {table} WHERE id=?', (item_id,))
+            db.execute('DELETE FROM memory_sources WHERE item_id=?', (item_id,))
+            db.execute('DELETE FROM memory_fts WHERE item_id=?', (item_id,))
+            db.execute('DELETE FROM memory_audit WHERE item_id=?', (item_id,))
+            db.execute('DELETE FROM memory_event_people WHERE event_id=?', (item_id,))
+        return {'deleted': True}
+
     def organize(self, subject, peer, category, proposal, revisions):
         if not proposal or any(not r.get('sub_topic') or not r.get('memo') for r in proposal):
             raise ValueError('分类整理结果为空或不完整')
@@ -178,7 +193,7 @@ class StructuredMemory:
             db.executemany('INSERT INTO memory_event_people VALUES(?,?)',
                            [(event_id, person) for person in event.get('subjects', [event['subject']])])
 
-    def edit(self, item_id, text, revision, enabled=True):
+    def edit(self, item_id, text, revision, enabled=True, category=None, topic=None):
         if len(text) > 6000:
             raise ValueError('单条人工修正最多 6000 字')
         with self.projection.connect() as db:
@@ -186,12 +201,20 @@ class StructuredMemory:
             row = db.execute('SELECT * FROM memory_items WHERE id=?', (item_id,)).fetchone()
             if not row or row['revision'] != revision:
                 raise ValueError('记忆已更新，请刷新后保存')
+            category = row['category'] if category is None else category.strip()
+            topic = row['topic'] if topic is None else topic.strip()
+            if not category or not topic:
+                raise ValueError('分类和条目名称不能为空')
+            duplicate = db.execute('SELECT id FROM memory_items WHERE subject=? AND peer=? AND category=? AND topic=? AND id!=?',
+                (row['subject'], row['peer'], category, topic, item_id)).fetchone()
+            if duplicate:
+                raise ValueError('该分类已有同名条目，请使用不同的条目名称')
             self._audit(db, row, 'before_manual')
-            db.execute('UPDATE memory_items SET manual=?,enabled=?,revision=revision+1,updated_at=? WHERE id=?',
-                       (text.strip(), int(enabled), time.time_ns() // 1_000_000, item_id))
+            db.execute('UPDATE memory_items SET manual=?,enabled=?,category=?,topic=?,revision=revision+1,updated_at=? WHERE id=?',
+                       (text.strip(), int(enabled), category, topic, time.time_ns() // 1_000_000, item_id))
             db.execute('UPDATE tulpa_scopes SET revision=revision+1 WHERE id=?', (row['scope_id'],))
             fresh = db.execute('SELECT * FROM memory_items WHERE id=?', (item_id,)).fetchone()
-            self._index(db, item_id, f'{row["category"]} {row["topic"]} {text.strip() or row["automatic"]}')
+            self._index(db, item_id, f'{category} {topic} {text.strip() or row["automatic"]}')
             self._audit(db, fresh, 'manual')
         return self.detail(item_id)
 
@@ -203,7 +226,7 @@ class StructuredMemory:
             snapshot = json.loads(history[0])
         # Restoration is an explicit user correction, so future automatic merges
         # retain the restored content until the user clears the correction.
-        return self.edit(item_id, snapshot['manual'] or snapshot['automatic'], revision, bool(snapshot['enabled']))
+        return self.edit(item_id, snapshot['manual'] or snapshot['automatic'], revision, bool(snapshot['enabled']), snapshot['category'], snapshot['topic'])
 
     def days(self, day='', subject='', peer=None, query=''):
         clauses, args = ['d.valid=1'], []
@@ -233,12 +256,17 @@ class StructuredMemory:
 
     def review(self, day=''):
         day = day or datetime.now().astimezone().date().isoformat()
-        start = int(datetime.fromisoformat(day).astimezone().timestamp() * 1000)
+        time_filter = ''
+        args = ()
+        if day != 'all':
+            start = int(datetime.fromisoformat(day).astimezone().timestamp() * 1000)
+            time_filter = ' AND m.created_at>=? AND m.created_at<?'
+            args = (start, start + 86400000)
         with self.projection.source.connect() as db:
             rows = [dict(r) for r in db.execute('''SELECT m.id,m.text,m.created_at,m.conversation_id,c.title,c.source
               FROM messages m JOIN conversations c ON c.id=m.conversation_id
-              WHERE m.author_id='miko' AND m.status='completed' AND m.created_at>=? AND m.created_at<?
-              ORDER BY m.created_at DESC''', (start, start + 86400000))]
+              WHERE m.author_id='miko' AND m.status='completed' ''' + time_filter +
+              ' ORDER BY m.created_at DESC', args)]
             for row in rows:
                 row['context'] = [dict(r) for r in db.execute('''SELECT m.text,p.display_name AS author
                     FROM messages m JOIN people p ON p.id=m.author_id

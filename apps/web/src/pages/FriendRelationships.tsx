@@ -1,3 +1,4 @@
+import { useCharacterName } from '../components/RuntimeStatus';
 import { useEffect, useState } from 'react';
 import { responseError } from '../api/chat';
 
@@ -5,6 +6,7 @@ type Relationship = { account: string; friend: string; owner_relationship: strin
   miko_introduced: number; intro_receipt_id: number | null };
 
 export function FriendRelationships({ friend,onDirty }: { friend: Relationship;onDirty?:(dirty:boolean)=>void }) {
+  const characterName = useCharacterName();
   const [owner, setOwner] = useState('');
   const [miko, setMiko] = useState('');
   const [introduced, setIntroduced] = useState<boolean | undefined>();
@@ -35,10 +37,10 @@ export function FriendRelationships({ friend,onDirty }: { friend: Relationship;o
     <fieldset disabled={busy} className="profile-fields">
       <label>你与好友的关系<textarea value={owner} maxLength={3000} rows={3}
         onChange={event => setOwner(event.target.value)} /></label>
-      <label>Miko 与好友的交往<textarea value={miko} maxLength={3000} rows={3}
+      <label>{characterName} 与好友的交往<textarea value={miko} maxLength={3000} rows={3}
         onChange={event => setMiko(event.target.value)} /></label>
       <label className="check-field"><input type="checkbox" checked={introduced ?? !!friend.miko_introduced}
-        onChange={event => setIntroduced(event.target.checked)} />Miko 已介绍过自己／好友已认识她</label>
+        onChange={event => setIntroduced(event.target.checked)} />{characterName} 已介绍过自己／好友已认识她</label>
       {friend.intro_receipt_id !== null && <small>介绍消息已确认发送</small>}
       <button className="send-button" onClick={() => void save()}>保存关系</button>
     </fieldset>

@@ -135,8 +135,15 @@ async def attach_images(client, key, records):
                         break
                     remaining -= 1
                     try:
-                        url = sources[index].get('url', '')
-                        raw = await asyncio.to_thread(download, url, cancel)
+                        source = sources[index]
+                        file = source.get('file', '')
+                        if file.startswith('base64://'):
+                            encoded = file[len('base64://'):]
+                            if len(encoded) > ((MAX_BYTES + 2) // 3) * 4:
+                                raise ValueError('图片超过单张 6 MiB 上限。')
+                            raw = base64.b64decode(encoded, validate=True)
+                        else:
+                            raw = await asyncio.to_thread(download, source.get('url', ''), cancel)
                         info, frames = await asyncio.to_thread(pixels, raw)
                         record.setdefault('_image_inputs', []).extend([
                             {'type': 'text', 'text': f"消息 {record['message_id']} · 图片 {index + 1} · 采样帧 {info['frame_indices']}"},

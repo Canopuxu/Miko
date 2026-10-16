@@ -57,10 +57,13 @@ class LifeGeneration(LifeEntries):
 class Life:
     def __init__(self, chat):
         self.chat = chat
+        self.provider = chat.settings.load_task_provider('life')
         self.store = ScheduleDataManager(chat.settings.local_root / 'data/life/entries.json')
         self.config_path = chat.settings.local_root / 'config/life.local.json'
         self.enabled = json.loads(self.config_path.read_text(encoding='utf-8-sig')).get('enabled', True) if self.config_path.exists() else True
         self.model = json.loads(self.config_path.read_text(encoding='utf-8-sig')).get('model') if self.config_path.exists() else None
+        if self.provider:
+            self.model = self.provider.model
         self.generating = False
         self.error = None
         self.task = None
@@ -146,12 +149,16 @@ class Life:
         revision = current.revision if current else 0
         store_revision = self.store.revision
         try:
-            material = generation_material(self.chat.profiles, self.records(), self.store.goals, day)
+            memory = self.chat.memory
+            events = memory.structured.days(subject='miko') if memory and memory.social.control()['enabled'] else []
+            material = generation_material(self.chat.profiles, self.records(), self.store.goals, day, memory_events=events)
             # A manual addition to this day is already a fact to continue from.
             if current:
                 material['今天已有的记录'] = current.entries
             prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
-            value = await self.chat.complete_memory(prompt, json.dumps(material, ensure_ascii=False), model=self.model or None, json_output=True)
+            message = self.chat.named_prompt(json.dumps(material, ensure_ascii=False))
+            value = await self.chat.complete_memory(prompt, message, model=self.model or None,
+                json_output=True, **({'provider': self.provider} if self.provider else {}))
             output = LifeGeneration.model_validate_json(value['text'])
             goals = deepcopy(self.store.goals)
             for update in output.goal_updates:

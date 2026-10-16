@@ -12,6 +12,7 @@ import sqlite3
 import time
 
 from miko.adapters.qq.onebot import EventReceiver, OneBot, SendError, SendUncertain
+from miko.adapters.qq.native import NativeQq, create_client, create_receiver
 from miko.storage.qq import QqStore
 from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay, update_face_catalog
 from miko.adapters.qq.media import StickerLibrary
@@ -36,7 +37,7 @@ class QqService:
     wait_seconds = 120
     quiet_seconds = 2
     collect_seconds = 8
-    max_reply_chars = 400
+    max_reply_chars = 100
 
     def __init__(self, chat, config, *, client=None, clock=time.time):
         self.chat, self.clock = chat, clock
@@ -44,10 +45,10 @@ class QqService:
         self.store.recover()
         local_root = getattr(getattr(chat, 'settings', None), 'local_root', chat.store.path.parent)
         self.stickers = StickerLibrary(self.store, Path(local_root) / 'data/qq/stickers')
-        self.client = client or (OneBot(config) if config else None)
+        self.client = client or (create_client(config, Path(local_root)) if config else None)
         self.avatar = (ReplyAvatar(self.client, config.miko_avatar_file, config.owner_avatar_file)
                        if config and config.miko_avatar_file and config.owner_avatar_file else None)
-        self.receiver = EventReceiver(self.client, self.receive, self.source_changed) if self.client else None
+        self.receiver = create_receiver(self.client, self.receive, self.source_changed) if self.client else None
         if config:
             for friend in config.friends:
                 self.store.add_friend(config.account, friend['id'], friend.get('name') or friend['id'])
@@ -76,6 +77,8 @@ class QqService:
         await asyncio.gather(*(w.task for w in list(self.workers.values())), return_exceptions=True)
         if self.avatar:
             await self.avatar.close()
+        if isinstance(self.client, NativeQq):
+            await self.client.close()
 
     def status(self):
         receiver = self.receiver.status() if self.receiver else {'state': 'unconfigured', 'account': '', 'note': '尚未配置 QQ 连接'}
@@ -89,7 +92,8 @@ class QqService:
                 friend.update(state='blocked', blocked=1, note=self.storage_faults[key])
             friends.append(friend)
         return {'receiver': receiver, 'friends': friends, 'runs': self.store.runs(), 'faces': FACES,
-                'wait_seconds': self.wait_seconds, 'max_reply_chars': self.max_reply_chars}
+                'wait_seconds': self.wait_seconds, 'max_reply_chars': self.max_reply_chars,
+                'character_name': self.chat.store.character_name(), 'owner_name': self.chat.store.person_name('owner')}
 
     async def configure(self, key, enabled):
         if not self.store.friend(key):
@@ -176,9 +180,18 @@ class QqService:
         now = self.clock()
         first = cfg['pending_since'] if cfg['pending_since'] is not None else now
         batch_due = min(now + self.quiet_seconds, first + self.collect_seconds)
-        mentioned = any(re.search(r'(?<![A-Za-z0-9_])miko(?![A-Za-z0-9_])',
+        character = self.chat.store.character_name()
+        name_pattern = re.escape(character)
+        if character[0].isascii() and (character[0].isalnum() or character[0]=='_'):
+            name_pattern = r'(?<![A-Za-z0-9_])' + name_pattern
+        if character[-1].isascii() and (character[-1].isalnum() or character[-1]=='_'):
+            name_pattern += r'(?![A-Za-z0-9_])'
+        mentioned = any(re.search(name_pattern,
             segment.get('text', ''), re.IGNORECASE)
             for segment in payload['segments'] if segment['type'] == 'text')
+        if not mentioned and cfg['mode'] == 'owner' and not cfg['auto_reply_idle']:
+            self.store.update_friend(key, pending_since=None, pending_last=None, due_at=None)
+            return
         mode = 'miko' if mentioned else cfg['mode']
         due = batch_due if mode == 'miko' else max(first + self.wait_seconds, batch_due)
         self.store.update_friend(key, mode=mode, pending_since=first, pending_last=now, due_at=due,
@@ -280,11 +293,11 @@ class QqService:
             self.check(key, worker)
             cfg = self.store.friend(key)
             records = await self.context(key)
-            provider = getattr(self.chat, 'qq_provider', None)
-            if provider and provider.model.startswith('doubao-seed-2-1'):
-                await attach_images(self.client, key, records)
+            await attach_images(self.client, key, records)
             self.check(key, worker)
             candidates = self.stickers.candidates(key[0], '\n'.join(r['text'] for r in records[-8:]))
+            if isinstance(self.client, NativeQq) and not self.client.capabilities.get('send_images', True):
+                candidates = []
             for attempt in range(4):
                 self.check(key, worker)
                 worker.turn = self.chat.begin_qq(cfg['conversation_id'], records, candidates)
@@ -298,10 +311,11 @@ class QqService:
                 except ValueError:
                     if attempt == 3:
                         raise
+            warning = getattr(worker.turn, 'warning', None)
             if not bubbles:
-                self.store.update_run(worker.run_id, state='skipped')
+                self.store.update_run(worker.run_id, state='skipped', error=warning)
                 if self.versions.get(key, 0) == worker.version:
-                    self.store.update_friend(key, mode=worker.previous_mode, note='本轮无需回复，等待新消息',
+                    self.store.update_friend(key, mode=worker.previous_mode, note=warning or '本轮无需回复，等待新消息',
                         pending_since=None, pending_last=None, due_at=None)
                 return
             texts = [self.bubble_text(b, candidates) for b in bubbles]
@@ -338,9 +352,9 @@ class QqService:
                 await self.settle_echoes(key)
                 if bubble['kind'] == 'sticker':
                     self.stickers.used(key[0], bubble['sticker_id'])
-            self.store.update_run(worker.run_id, state='sent', receipt_id=receipt['message_id'])
+            self.store.update_run(worker.run_id, state='sent', receipt_id=receipt['message_id'], error=warning)
             if self.versions.get(key, 0) == worker.version:
-                self.store.update_friend(key, mode='miko', note='Miko 正在接话',
+                self.store.update_friend(key, mode='miko', note=warning or 'Miko 正在接话',
                     pending_since=None, pending_last=None, due_at=None)
             await self.settle_echoes(key)
         except StaleReply as exc:

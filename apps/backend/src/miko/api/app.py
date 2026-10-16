@@ -20,6 +20,8 @@ from miko.adapters.memory.service import Memory
 from miko.domain.conversation.chat import ChatService
 from miko.domain.conversation.qq import QqService
 from miko.settings import REPO_ROOT, Settings
+from miko.adapters.qq.managed import start_bridge
+from miko.adapters.qq.native import NativeQq
 
 
 def create_app(settings: Settings, control_token: str, request_stop: Callable[[], None]) -> FastAPI:
@@ -32,6 +34,8 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await asyncio.to_thread(runtime.start)
+        if isinstance(qq.client, NativeQq):
+            await asyncio.to_thread(start_bridge, settings.local_root)
         qq.start()
         chat.memory.start()
         chat.life.start()

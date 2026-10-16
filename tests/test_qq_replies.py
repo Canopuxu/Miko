@@ -28,7 +28,7 @@ class FakeChat:
 
     def begin_qq(self, cid, records, stickers=None):
         self.calls.append(records)
-        turn = SimpleNamespace(text=json.dumps({'bubbles': self.bubbles if self.bubbles is not None else [{'kind': 'text', 'text': self.text}]}, ensure_ascii=False), status='completed', error=None)
+        turn = SimpleNamespace(text=json.dumps({'bubbles': self.bubbles if self.bubbles is not None else [{'kind': 'text', 'text': self.text}]}, ensure_ascii=False), status='completed', error=None, warning=getattr(self, 'warning', None))
         async def run():
             if self.gate:
                 await self.gate.wait()
@@ -53,6 +53,9 @@ class FakeClient:
 
     async def quote(self, account, friend, event):
         self.quoted.append(event['message_id'])
+
+    async def message(self, *args, **kwargs):
+        raise SendError('图片不可用')
 
     async def target(self, account, friend):
         return '测试好友'
@@ -101,6 +104,70 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         tasks = [w.task for w in self.service.workers.values()]
         if tasks:
             await asyncio.wait_for(asyncio.gather(*tasks), 2)
+
+    async def assert_image_attached(self, shared):
+        provider = SimpleNamespace(model='new-user-selected-model')
+        self.chat.qq_provider = None if shared else provider
+        self.chat.provider = provider if shared else SimpleNamespace(model='text-model')
+        picture = io.BytesIO()
+        Image.new('RGB', (12, 8), 'blue').save(picture, 'PNG')
+        async def message(*args, **kwargs):
+            return {'message': [{'type': 'image', 'data': {
+                'file': 'base64://' + base64.b64encode(picture.getvalue()).decode()}}]}
+        self.client.message = message
+        await self.receive(1, media=True)
+        self.now = 1120
+        await self.due()
+        record = self.chat.calls[0][0]
+        self.assertEqual(record['segments'][0]['content_status'], 'attached')
+        images = [p for p in record['_image_inputs'] if p['type'] == 'image_url']
+        self.assertEqual(len(images), 1)
+        encoded = images[0]['image_url']['url'].split(',', 1)[1]
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
+            self.assertEqual(image.size, (12, 8))
+
+    async def test_arbitrary_qq_model_reads_image_before_generation(self):
+        await self.assert_image_attached(shared=False)
+
+    async def test_arbitrary_shared_model_reads_image_before_generation(self):
+        await self.assert_image_attached(shared=True)
+
+    async def test_model_image_error_reaches_page_status_without_retry_or_send(self):
+        original = self.chat.begin_qq
+        error = '模型接口拒绝了含图片的请求；请在设置中选择支持图片输入的 QQ 回复模型。'
+        def rejected(*args):
+            turn = original(*args)
+            turn.status, turn.error = 'error', error
+            return turn
+        with patch.object(self.chat, 'begin_qq', side_effect=rejected):
+            await self.receive(1)
+            self.now = 1120
+            await self.due()
+        self.assertEqual(len(self.chat.calls), 1)
+        self.assertFalse(self.client.sent)
+        run = self.service.store.runs()[0]
+        self.assertEqual((run['state'], run['error']), ('error', error))
+        self.assertEqual(self.service.status()['friends'][0]['note'], error)
+
+    async def test_text_fallback_sends_normally_and_preserves_visible_warning(self):
+        self.chat.warning = '模型接口未接受图片，本轮已自动改用文字处理。'
+        await self.receive(1)
+        self.now = 1120
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+        run = self.service.store.runs()[0]
+        self.assertEqual((run['state'], run['error']), ('sent', self.chat.warning))
+        self.assertEqual(self.service.status()['friends'][0]['note'], self.chat.warning)
+
+    async def test_text_fallback_silence_preserves_warning_without_sending(self):
+        self.chat.warning = '模型接口未接受图片，本轮已自动改用文字处理。'
+        self.chat.bubbles = []
+        await self.receive(1)
+        self.now = 1120
+        await self.due()
+        self.assertFalse(self.client.sent)
+        self.assertEqual(self.service.store.runs()[0]['state'], 'skipped')
+        self.assertEqual(self.service.status()['friends'][0]['note'], self.chat.warning)
 
     async def test_two_minute_wait_batches_then_continuous_chat(self):
         await self.receive(1, '第一句')
@@ -168,6 +235,45 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.now = 1003
         await self.due()
         self.assertEqual(len(self.client.sent), 1)
+
+    async def test_idle_switch_off_keeps_history_and_named_character_can_chat(self):
+        self.store.rename_character('小夏')
+        self.service.store.update_friend(self.key, auto_reply_idle=0)
+        await self.receive(1, '晚上好')
+        self.now = 1121
+        await self.due()
+        self.assertEqual(self.client.sent, [])
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+        self.assertEqual(len(self.service.store.messages(self.key)), 1)
+        await self.receive(2, 'Miko在吗')
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+        await self.receive(3, '小夏在吗')
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1123)
+        self.now = 1123
+        await self.due()
+        self.assertEqual(len(self.client.sent), 1)
+        self.now = 1124
+        await self.receive(4, '最近怎么样')
+        self.assertEqual(self.service.store.friend(self.key)['due_at'], 1126)
+        await self.receive(5, '我来回', own=True)
+        await self.receive(6, '好的')
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+
+    async def test_idle_option_cancels_pending_wait_without_changing_other_friends(self):
+        from fastapi import FastAPI
+        from miko.api.qq import qq_router
+        self.service.store.add_friend('123','789','其他好友')
+        await self.receive(1)
+        app=FastAPI();app.include_router(qq_router(self.service))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://127.0.0.1') as client:
+            response=await client.patch('/api/qq/friends/123/456/options',json={'auto_reply_idle':False})
+        self.assertEqual(response.status_code,200)
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+        self.assertEqual(self.service.store.friend(('123','789'))['auto_reply_idle'],1)
+        self.assertEqual(response.json()['character_name'],'Miko')
+        self.now=1121
+        await self.due()
+        self.assertEqual(self.client.sent,[])
 
     async def test_unintroduced_context_excludes_previous_activation_messages(self):
         await self.receive(1, '旧测试对话')
@@ -266,7 +372,7 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent),1)
 
     async def test_length_check_blocks_overlong_reply(self):
-        self.chat.text = '字'*401
+        self.chat.text = '字'*101
         await self.receive(1)
         self.now = 1120
         await self.due()
@@ -352,7 +458,7 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent),1)
         self.assertEqual(len(self.chat.calls[0]),9)
 
-    async def test_image_message_is_saved_as_unread_and_does_not_drop_batch(self):
+    async def test_unreadable_image_is_marked_unavailable_and_keeps_text_batch(self):
         await self.receive(1)
         await self.receive(2,media=True)
         self.now = 1200
@@ -360,7 +466,11 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.client.sent),1)
         messages=self.store.messages(self.service.store.friend(self.key)['conversation_id'])
         self.assertEqual(messages[1]['text'],'[图片]')
-        self.assertEqual(self.chat.calls[-1][1]['segments'][0]['content_status'], 'not_read')
+        self.assertEqual(self.chat.calls[-1][1]['segments'][0]['content_status'], 'unavailable')
+        await self.receive(3, 'miko，先聊别的')
+        self.now += 3
+        await self.due()
+        self.assertEqual(len(self.client.sent), 2)
 
     async def test_receipt_storage_failure_blocks_next_send_and_releases_worker(self):
         await self.receive(1)
