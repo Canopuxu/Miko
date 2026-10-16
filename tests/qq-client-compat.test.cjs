@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const folder = path.join(__dirname, '../apps/qq-bridge');
 const compat = fs.readFileSync(path.join(folder, 'compat.js'), 'utf8');
 
-async function fixture(t, kind) {
+async function fixture(t, kind, onSend) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
     const calls=[],writes=[],forwarded=[],records=new Map(),files=new Map();
@@ -41,11 +41,14 @@ async function fixture(t, kind) {
                 msgTime:'1792139000',elements:args[0].msgElements.map(element=>element.textElement?.atType===2
                     ? {...element,textElement:{...element.textElement,content:element.textElement.content.trimEnd()}}
                     : element)};
-            contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},{result:0});
-            queueMicrotask(()=>{
-                notify([{cmdName:'nodeIKernelMsgListener/onAddSendMsg',payload:{msgList:[{...record,sendStatus:1}]}}]);
-                notify([{cmdName:'nodeIKernelMsgListener/onMsgInfoListUpdate',payload:{msgList:[{...record,sendStatus:2}]}}]);
-            });
+            const accept=result=>contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},result);
+            const added=()=>notify([{cmdName:'nodeIKernelMsgListener/onAddSendMsg',payload:{msgList:[{...record,sendStatus:1}]}}]);
+            const confirmed=()=>notify([{cmdName:'nodeIKernelMsgListener/onMsgInfoListUpdate',payload:{msgList:[{...record,sendStatus:2}]}}]);
+            if(onSend)onSend({record,accept,added,confirmed});
+            else {
+                accept({result:0});
+                queueMicrotask(()=>{added();confirmed();});
+            }
         } else if(cmd==='nodeIKernelMsgService/setMsgEmojiLikes') {
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},{result:0});
         } else throw new Error('unexpected command '+cmd);
@@ -98,6 +101,44 @@ test('prepares original GIF and WebP using verified dimensions without re-encodi
         assert.ok(elements[0].picElement.sourcePath.endsWith('.'+extension));
         assert.deepEqual(bridge.files.get(elements[0].picElement.sourcePath),raw);
     }
+});
+
+test('a late image success receipt completes the send even without the native method callback',async t=>{
+    t.mock.timers.enable({apis:['setTimeout']});
+    let submitted;
+    const ready=new Promise(resolve=>submitted=resolve);
+    const bridge=await fixture(t,'renderer',send=>{send.added();submitted(send);});
+    const outcome=bridge.rpc('send_native',{group_id:'900',elements:[{picElement:{md5HexStr:'fixture-gif'}}]});
+    let settled=false;outcome.then(()=>settled=true,()=>settled=true);
+    const send=await ready;
+    t.mock.timers.tick(13000);
+    bridge.notify([{cmdName:'nodeIKernelMsgListener/onMsgInfoListUpdate',payload:{msgList:[{...send.record,msgId:'unrelated',sendStatus:2}]}}]);
+    await Promise.resolve();
+    assert.equal(settled,false,'another message must not confirm this send');
+    send.confirmed();
+    const result=await outcome;
+    assert.equal(result.sendStatus,2);assert.equal(result.msgId,'901');
+    assert.equal((await bridge.rpc('diagnostics')).pending,0);
+    // QQ may deliver its method callback after the message was confirmed.
+    send.accept({result:0});
+    assert.equal(bridge.calls.filter(c=>c.cmd.endsWith('/sendMsg')).length,1);
+});
+
+test('acceptance without a successful message receipt times out once without resending',async t=>{
+    t.mock.timers.enable({apis:['setTimeout']});
+    let submitted;
+    const ready=new Promise(resolve=>submitted=resolve);
+    const bridge=await fixture(t,'renderer',send=>{send.accept({result:0});send.added();submitted();});
+    const outcome=bridge.rpc('send_native',{group_id:'900',elements:[{textElement:{content:'test'}}]});
+    const failure=assert.rejects(outcome,/QQ bridge request failed/);
+    await ready;
+    await Promise.resolve();
+    t.mock.timers.tick(45000);
+    await failure;
+    const diagnostics=await bridge.rpc('diagnostics');
+    assert.match(diagnostics.lastFailure,/Send receipt timeout/);
+    assert.equal(diagnostics.pending,0);
+    assert.equal(bridge.calls.filter(c=>c.cmd.endsWith('/sendMsg')).length,1);
 });
 
 for(const kind of ['renderer','legacy2','legacy3']) {

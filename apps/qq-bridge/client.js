@@ -71,11 +71,20 @@
     };
     contents.send = wrappedSend;
 
-    const invoke = (cmdName, payload) => new Promise((resolve, reject) => {
+    const invoke = (cmdName, payload, confirmed = null) => new Promise((resolve, reject) => {
         identity();
         const id = 'miko-' + crypto.randomUUID();
-        const timer = setTimeout(() => {pending.delete(id); reject(new Error('QQ native timeout'));}, 12000);
+        // A send has its own receipt deadline. Its verified success event may
+        // arrive before (or without) the method callback, especially for media.
+        const timer = confirmed ? null : setTimeout(() => {pending.delete(id); reject(new Error('QQ native timeout'));}, 12000);
         pending.set(id, {resolve, reject, timer});
+        if(confirmed) {
+            const finish = error => {
+                if(!pending.delete(id))return;
+                if(error)reject(error);else resolve({result:0});
+            };
+            confirmed.then(()=>finish(),finish);
+        }
         try {
             ipcMain.emit(connection.channel, {sender: contents, senderFrame: contents.mainFrame},
                 ...compat.request(connection, id, cmdName, payload, peerId));
@@ -205,18 +214,18 @@
             if (config.test_targets && !config.test_targets.includes(String(payload.user_id))) throw new Error('Target not enabled for bridge test');
             const target=await peer(payload), sendKey=target.chatType+':'+target.peerUid;
             if(sends.has(sendKey))throw new Error('Send already in progress for this chat');
-            let resolve;const receipt=new Promise(r=>resolve=r);
+            let resolve,reject;const receipt=new Promise((ok,fail)=>{resolve=ok;reject=fail;});
             sends.set(sendKey,{resolve,fingerprint:fingerprint(payload.elements),id:null});
-            let timer;
+            const timer=setTimeout(()=>reject(new Error('Send receipt timeout')),45000);
             try {
                 const accepted=await invoke('nodeIKernelMsgService/sendMsg', [{msgId: '0',
                     peer: target,
                     msgElements: payload.elements.map(element => element.picElement
                         ? {...element, picElement: {...element.picElement,
                             thumbPath: new Map(Object.entries(element.picElement.thumbPath || {}).map(([k,v])=>[Number(k),v]))}}
-                        : element), msgAttributeInfos: new Map()}]);
+                        : element), msgAttributeInfos: new Map()}],receipt);
                 if(accepted?.result!==0)throw new Error('QQ rejected send: '+JSON.stringify(accepted));
-                return await Promise.race([receipt,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Send receipt timeout')),12000);})]);
+                return await receipt;
             } finally {clearTimeout(timer);sends.delete(sendKey);}
         }
         throw new Error('Unsupported bridge action');

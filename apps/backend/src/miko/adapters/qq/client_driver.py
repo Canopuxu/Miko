@@ -43,7 +43,8 @@ class NativeClientDriver:
                 self.db.execute("UPDATE sqlite_sequence SET seq=max(seq,2147483647) WHERE name='messages'")
 
     async def rpc(self, action, payload=None):
-        response = await self.http.post('/rpc', json={'action': action, 'payload': payload or {}})
+        response = await self.http.post('/rpc', json={'action': action, 'payload': payload or {}},
+            timeout=60 if action == 'send_native' else 25)
         response.raise_for_status()
         return response.json()['result']
 

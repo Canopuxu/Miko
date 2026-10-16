@@ -30,6 +30,7 @@ class DirectConnectionTests(unittest.IsolatedAsyncioTestCase):
             if body['action']=='get_login_info':result={'user_id':12345}
             elif body['action']=='get_friend_list':result=[{'user_id':67890,'nickname':'好友'}]
             elif body['action']=='send_native':
+                self.assertGreater(request.extensions['timeout']['read'],45,'HTTP must outlast the bridge receipt deadline')
                 result={'chatType':1,'msgId':'native-1','peerUin':'67890','senderUin':'12345',
                         'msgTime':'1791950400','sendStatus':2,'elements':body['payload']['elements']}
             else:self.fail(body['action'])
