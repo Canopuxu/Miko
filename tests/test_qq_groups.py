@@ -81,6 +81,21 @@ class GroupRepliesTests(unittest.IsolatedAsyncioTestCase):
         await self.service.receive(self.event(3,'几点',extra=[{'type':'reply','data':{'id':'800'}}]))
         self.assertLessEqual(self.service.store.friend(self.key)['due_at'],self.now+2)
 
+    async def test_ordinary_group_replies_drop_redundant_quotes(self):
+        self.chat.bubbles=[{'kind':'text','text':'还没想好','quote_message_id':1}]
+        await self.service.receive(self.event(1,'Miko，晚上吃啥'))
+        await self.service.receive(self.event(2,'吃面吗'))
+        await self.reply()
+        self.assertEqual(self.client.quoted,[])
+        self.assertFalse(any(s['type']=='reply' for s in self.client.payloads[-1]))
+
+    async def test_interleaved_group_messages_keep_quote_to_earlier_speaker(self):
+        self.chat.bubbles=[{'kind':'text','text':'还没想好','quote_message_id':1}]
+        await self.service.receive(self.event(1,'Miko，晚上吃啥'))
+        await self.service.receive(self.event(2,'我准备吃面',sender=789))
+        await self.reply()
+        self.assertEqual(self.client.quoted,[1])
+
     async def test_withdrawal_cancels_pending_reply_and_excludes_recalled_context(self):
         await self.service.receive(self.event(1,'Miko，撤回这句'))
         self.chat.gate=asyncio.Event()

@@ -88,11 +88,14 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
     assets = {s['sticker_id'] for s in stickers}
     total = 0
     current_ids = set()
+    current_authors = set()
     for record in reversed(records):
         if record.get('author', {}).get('kind') in ('miko', 'owner'):
             break
         if record.get('author', {}).get('kind') == 'contact':
             current_ids.add(record.get('message_id'))
+            current_authors.add(record['author'].get('id'))
+    ordinary_reply = not group or len(current_authors) <= 1
     for i, bubble in enumerate(bubbles):
         if not isinstance(bubble, dict):
             raise ValueError('气泡格式无效')
@@ -112,7 +115,7 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
             raise ValueError('表情不在本轮候选中')
         if 'quote_message_id' in bubble:
             mid = bubble['quote_message_id']
-            if not group and type(mid) is int and mid in current_ids:
+            if ordinary_reply and type(mid) is int and mid in current_ids:
                 bubble.pop('quote_message_id')
                 continue
             if i or type(mid) is not int or mid not in quotes:
@@ -120,7 +123,7 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
     if total > max_chars:
         raise ValueError(f'本轮文字总长度超过 {max_chars} 字，未发送')
     latest = next((r for r in reversed(records) if r.get('author', {}).get('kind') == 'contact'), None)
-    if latest and not group:
+    if latest and ordinary_reply:
         # Replying to the latest message already identifies the target in ordinary chat.
         for bubble in bubbles:
             if bubble.get('quote_message_id') == latest.get('message_id'):
