@@ -25,11 +25,16 @@ class NativeQq(OneBot):
                 raise ValueError('account changed')
             self.capabilities = info.get('capabilities', {})
             self.driver.self_uid = info.get('uid', '')
+        except Exception:
+            raise SendError('QQ 尚未连接，请检查 QQ 登录状态，或到设置中重新连接') from None
+        try:
             return info if action == 'get_login_info' else await self.driver.call(action, payload)
+        except SendError:
+            raise
         except Exception:
             if sending:
                 raise SendUncertain('发送结果未知，请到 QQ 核对；不会自动重发') from None
-            raise SendError('QQ 尚未连接，请检查 QQ 登录状态，或到设置中重新连接') from None
+            raise SendError('QQ 本次操作未完成，消息或图片可能暂不可用') from None
 
     async def target(self, account, friend):
         if not friend.startswith('group-'):
@@ -60,11 +65,12 @@ class NativeQq(OneBot):
             raise SendError('引用消息的发送者或时间发生变化，未发送')
 
     async def send(self, account, friend, text, guard):
-        if not friend.startswith('group-'):
-            return await super().send(account, friend, text, guard)
         await self.target(account, friend)
-        guard()
-        value = await self.call('send_group_msg', {'group_id': int(friend[6:]), 'message': text}, sending=True)
+        group = friend.startswith('group-')
+        value = await self.driver.send_message('send_group_msg' if group else 'send_private_msg', {
+            'group_id' if group else 'user_id': int(friend[6:] if group else friend),
+            'message': text if isinstance(text, list) else [{'type': 'text', 'data': {'text': text}}],
+        }, before_send=guard)
         if not isinstance(value, dict) or type(value.get('message_id')) is not int:
             raise SendUncertain('未取得可靠消息编号，请到 QQ 核对；不会自动重发')
         return {'message_id': value['message_id'], 'timestamp': time.time()}

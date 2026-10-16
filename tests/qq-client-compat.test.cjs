@@ -90,12 +90,14 @@ test('market face image reads QQ cached resource without accepting a caller file
     assert.equal(Buffer.from(result.base64,'base64').toString(),'fixture-image-bytes');
 });
 
-test('prepares the original GIF without relying on Electron GIF decoding or flattening frames',async t=>{
+test('prepares original GIF and WebP using verified dimensions without re-encoding',async t=>{
     const bridge=await fixture(t,'renderer');
-    const raw=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');
-    const elements=await bridge.rpc('prepare_image',{base64:raw.toString('base64'),extension:'gif'});
-    assert.ok(elements[0].picElement.sourcePath.endsWith('.gif'));
-    assert.deepEqual(bridge.files.get(elements[0].picElement.sourcePath),raw);
+    for(const extension of ['gif','webp']) {
+        const raw=Buffer.from('format fixture already validated by Python');
+        const elements=await bridge.rpc('prepare_image',{base64:raw.toString('base64'),extension,dimensions:[32,24]});
+        assert.ok(elements[0].picElement.sourcePath.endsWith('.'+extension));
+        assert.deepEqual(bridge.files.get(elements[0].picElement.sourcePath),raw);
+    }
 });
 
 for(const kind of ['renderer','legacy2','legacy3']) {

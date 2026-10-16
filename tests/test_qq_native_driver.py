@@ -13,6 +13,7 @@ from PIL import Image
 from miko.adapters.qq.client_driver import NativeClientDriver
 from miko.adapters.qq.images import attach_images, public_addresses
 from miko.adapters.qq.messages import parse_message
+from miko.adapters.qq.onebot import SendError
 
 
 def record(sender='67890', status=2):
@@ -70,7 +71,7 @@ class NativeDriverTest(unittest.IsolatedAsyncioTestCase):
         async def publish(event):
             received.append(event)
         async def reconnect_delay(seconds):
-            with self.assertRaises(ConnectionError):
+            with self.assertRaises(SendError):
                 await self.driver.call('send_private_msg', {})
         with patch('miko.adapters.qq.client_driver.asyncio.sleep', reconnect_delay):
             with self.assertRaises(httpx.HTTPStatusError):
@@ -94,10 +95,25 @@ class NativeDriverTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['segments'][0]['content_status'], 'attached')
         self.assertTrue(rows[0]['_image_inputs'][1]['image_url']['url'].startswith('data:image/jpeg;base64,'))
 
+    async def test_webp_preparation_uses_pillow_dimensions_and_keeps_original_bytes(self):
+        out=io.BytesIO();Image.new('RGB',(32,24),'green').save(out,'WEBP')
+        raw=out.getvalue();encoded=base64.b64encode(raw).decode()
+        calls=[]
+        async def rpc(action,payload=None):
+            calls.append((action,payload))
+            if action=='prepare_image':return [{'picElement':{'sourcePath':'QQ/prepared.webp'}}]
+            if action=='send_native':return {**record('12345'),'elements':payload['elements']}
+            self.fail(action)
+        self.driver.rpc=rpc
+        await self.driver.call('send_private_msg',{'user_id':67890,
+            'message':[{'type':'image','data':{'file':'base64://'+encoded}}]})
+        self.assertEqual(calls[0],('prepare_image',dict(base64=encoded,extension='webp',dimensions=[32,24])))
+        self.assertEqual(calls[1][0],'send_native')
+
     async def test_quote_cannot_cross_friend_conversations(self):
         mid = self.driver.remember(record())
         self.driver.rpc = AsyncMock()
-        with self.assertRaisesRegex(ValueError, 'another friend'):
+        with self.assertRaisesRegex(SendError, '未发送'):
             await self.driver.call('send_private_msg', {'user_id': '99999',
                 'message': [{'type': 'reply', 'data': {'id': str(mid)}}]})
         self.driver.rpc.assert_not_awaited()

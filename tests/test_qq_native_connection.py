@@ -41,8 +41,9 @@ class DirectConnectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(receipt['message_id'],2147483647)
         self.assertEqual(calls.count('send_native'),1)
         self.client.driver.receiving=False
-        with self.assertRaises(SendUncertain):
+        with self.assertRaises(SendError) as failed:
             await self.client.send('12345','67890','not sent',lambda:None)
+        self.assertNotIsInstance(failed.exception, SendUncertain)
         self.assertEqual(calls.count('send_native'),1)
 
     async def test_changed_account_and_failed_send_never_resend(self):
@@ -55,6 +56,51 @@ class DirectConnectionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SendUncertain):
             await self.client.call('send_private_msg',{},sending=True)
         self.client.driver.call.assert_awaited_once()
+
+    async def test_quote_preparation_failure_is_unsent_and_owner_check_runs_after_preparation(self):
+        mid=self.client.driver.remember(dict(chatType=1, msgId='source', peerUin='67890',
+            senderUin='67890', msgTime='1791950400', elements=[]))
+        message=[{'type':'reply','data':{'id':str(mid)}}, {'type':'text','data':{'text':'reply'}}]
+        calls=[]
+        prepared=False
+        async def rpc(action,payload=None):
+            nonlocal prepared
+            calls.append(action)
+            if action=='get_login_info':return {'user_id':12345}
+            if action=='get_friend_list':return [{'user_id':67890,'nickname':'好友'}]
+            if action=='prepare_reply':
+                if not prepared:raise OSError('QQ builder unavailable')
+                return [{'replyElement':{'fixture':True}}]
+            self.fail('unexpected dispatch: '+action)
+        self.client.driver.rpc=rpc
+        guarded=[]
+        with self.assertRaises(SendError) as failure:
+            await self.client.send('12345','67890',message,lambda:guarded.append(True))
+        self.assertNotIsInstance(failure.exception,SendUncertain)
+        self.assertIn('未发送',str(failure.exception))
+        self.assertFalse(guarded)
+        prepared=True
+        def owner_interrupted():
+            self.assertEqual(calls[-1],'prepare_reply')
+            raise ValueError('owner took over during preparation')
+        with self.assertRaisesRegex(ValueError,'owner took over'):
+            await self.client.send('12345','67890',message,owner_interrupted)
+        self.assertNotIn('send_native',calls)
+
+    async def test_missing_native_receipt_remains_uncertain_and_is_not_retried(self):
+        calls=[]
+        async def rpc(action,payload=None):
+            calls.append(action)
+            if action=='get_login_info':return {'user_id':12345}
+            if action=='get_friend_list':return [{'user_id':67890,'nickname':'好友'}]
+            if action=='send_native':raise httpx.ReadTimeout('receipt lost')
+            self.fail(action)
+        self.client.driver.rpc=rpc
+        guarded=[]
+        with self.assertRaises(SendUncertain):
+            await self.client.send('12345','67890','test',lambda:guarded.append(True))
+        self.assertEqual(guarded,[True])
+        self.assertEqual(calls.count('send_native'),1)
 
     async def test_same_session_replay_gap_pauses_instead_of_skipping_messages(self):
         receiver=NativeReceiver(self.client,AsyncMock(),AsyncMock())

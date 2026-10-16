@@ -9,6 +9,7 @@ import sqlite3
 import httpx
 
 from .media import image_info
+from .onebot import SendError, SendUncertain
 
 
 def recalled(record):
@@ -170,7 +171,7 @@ class NativeClientDriver:
 
     async def call(self, action, payload):
         if self.receiving is False and action in ('send_private_msg', 'send_group_msg', 'set_msg_emoji_like'):
-            raise ConnectionError('QQ event connection unavailable')
+            raise SendError('QQ 接收通道尚未就绪，本次未发送')
         if action in ('get_login_info', 'get_friend_list', 'get_group_list', 'fetch_sys_faces'):
             return await self.rpc(action)
         if action == 'set_qq_avatar':
@@ -180,7 +181,8 @@ class NativeClientDriver:
             raw = path.read_bytes()
             info = image_info(raw)
             extension = {'JPEG': 'jpg', 'PNG': 'png', 'GIF': 'gif', 'WEBP': 'webp'}[info['format']]
-            result = await self.rpc('set_avatar', {'base64': base64.b64encode(raw).decode(), 'extension': extension})
+            result = await self.rpc('set_avatar', {'base64': base64.b64encode(raw).decode(),
+                'extension': extension, 'dimensions': info['dimensions']})
             if result.get('updated') is not True:
                 raise ValueError('Avatar update not confirmed')
             return None
@@ -200,8 +202,15 @@ class NativeClientDriver:
                 raise ValueError('Message reaction was not confirmed')
             return None
         if action in ('send_private_msg', 'send_group_msg'):
-            group = action == 'send_group_msg'
-            target_field = 'group_id' if group else 'user_id'
+            return await self.send_message(action, payload)
+        raise ValueError('Unsupported client bridge action')
+
+    async def send_message(self, action, payload, before_send=None):
+        if self.receiving is False:
+            raise SendError('QQ 接收通道尚未就绪，本次未发送')
+        group = action == 'send_group_msg'
+        target_field = 'group_id' if group else 'user_id'
+        try:
             elements = []
             for segment in payload['message']:
                 data = segment['data']
@@ -222,7 +231,8 @@ class NativeClientDriver:
                     raw = base64.b64decode(file[9:], validate=True)
                     info = image_info(raw)
                     extension = {'JPEG': 'jpg', 'PNG': 'png', 'GIF': 'gif', 'WEBP': 'webp'}[info['format']]
-                    elements.extend(await self.rpc('prepare_image', {'base64': file[9:], 'extension': extension}))
+                    elements.extend(await self.rpc('prepare_image', {'base64': file[9:],
+                        'extension': extension, 'dimensions': info['dimensions']}))
                 elif segment['type'] == 'reply':
                     native_id, peer, original = self.lookup(data['id'])
                     if str(payload[target_field]) != peer or (original['chatType'] == 2) != group:
@@ -232,11 +242,19 @@ class NativeClientDriver:
                     raise ValueError('This message type is not enabled in the client bridge yet')
             if not elements:
                 raise ValueError('Empty message')
+        except Exception:
+            raise SendError('QQ 消息准备失败，本条未发送，请检查图片或引用内容') from None
+        # Image/quote preparation awaits QQ. Recheck owner interruption only
+        # after it finishes, immediately before the actual send request.
+        if before_send:
+            before_send()
+        try:
             record = await self.rpc('send_native', {target_field: payload[target_field], 'elements': elements})
             if record.get('sendStatus') != 2:
                 raise ValueError('No successful send receipt')
             return {'message_id': self.remember(record)}
-        raise ValueError('Unsupported client bridge action')
+        except Exception:
+            raise SendUncertain('发送结果未知，请到 QQ 核对；不会自动重发') from None
 
     async def listen(self, publish, after=None):
         state = await self.rpc('diagnostics')

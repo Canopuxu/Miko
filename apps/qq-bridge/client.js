@@ -131,12 +131,11 @@
         if (action === 'prepare_image' || action === 'set_avatar') {
             const raw=Buffer.from(payload.base64,'base64');
             if(!raw.length || raw.length>6*1024*1024 || !['png','jpg','gif','webp'].includes(payload.extension))throw new Error('Invalid image');
-            // Python has verified the original with Pillow. Electron's nativeImage
-            // does not decode GIF, so read its logical canvas without re-encoding it.
-            const size=raw.length>=10 && /^GIF8[79]a$/.test(raw.toString('ascii',0,6))
-                ? {width:raw.readUInt16LE(6),height:raw.readUInt16LE(8)}
-                : require('electron').nativeImage.createFromBuffer(raw).getSize();
-            if(!size.width || !size.height || size.width*size.height>12000000)throw new Error('Invalid image dimensions');
+            // Use dimensions from the existing Pillow validation. Electron's
+            // nativeImage cannot decode all formats QQ accepts (GIF/WebP).
+            const [width,height]=payload.dimensions || [];
+            if(!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+                || width<=0 || height<=0 || width*height>12000000)throw new Error('Invalid image dimensions');
             const fs=require('fs'),path=require('path');
             const folder=path.join(require('os').tmpdir(),'miko-qq-bridge',config.account);
             fs.mkdirSync(folder,{recursive:true});
