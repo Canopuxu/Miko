@@ -36,7 +36,9 @@ async function fixture(t, kind) {
         } else if(cmd==='nodeIKernelMsgService/sendMsg') {
             const record={msgId:'901',chatType:args[0].peer.chatType,peerUid:args[0].peer.peerUid,
                 peerUin:args[0].peer.chatType===2?'900':'67890',senderUin:'12345',
-                msgTime:'1792139000',elements:args[0].msgElements};
+                msgTime:'1792139000',elements:args[0].msgElements.map(element=>element.textElement?.atType===2
+                    ? {...element,textElement:{...element.textElement,content:element.textElement.content.trimEnd()}}
+                    : element)};
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},{result:0});
             queueMicrotask(()=>{
                 notify([{cmdName:'nodeIKernelMsgListener/onAddSendMsg',payload:{msgList:[{...record,sendStatus:1}]}}]);
@@ -97,5 +99,9 @@ for(const kind of ['renderer','legacy2','legacy3']) {
         assert.equal(grouped.sendStatus,2);
         assert.equal(bridge.calls[2].args[0].peer.chatType,2);
         assert.equal(bridge.calls[2].args[0].peer.peerUid,'900');
+        const mentioned=await bridge.rpc('send_native',{group_id:'900',elements:[
+            {textElement:{content:'@测试成员 ',atType:2,atUid:'67890',atNtUid:'u_friend'}},
+            {textElement:{content:'晚饭还没想好'}}]});
+        assert.equal(mentioned.sendStatus,2,'QQ may normalize mention display text before returning its receipt');
     });
 }

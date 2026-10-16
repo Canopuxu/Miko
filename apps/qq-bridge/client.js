@@ -17,7 +17,9 @@
     const eventBuffer = [];
     const sends = new Map();
     const fingerprint = elements => JSON.stringify(elements.map(e => e.textElement
-        ? ['text',e.textElement.content] : e.faceElement ? ['face',e.faceElement.faceIndex]
+        ? ([1,2].includes(e.textElement.atType)
+            ? ['at',e.textElement.atType,String(e.textElement.atUid)]
+            : ['text',e.textElement.content]) : e.faceElement ? ['face',e.faceElement.faceIndex]
         : e.picElement ? ['image',String(e.picElement.md5HexStr).toLowerCase()]
         : e.replyElement ? ['reply',e.replyElement.replayMsgId] : ['unknown',e.elementType]));
     let sequence = 0;
