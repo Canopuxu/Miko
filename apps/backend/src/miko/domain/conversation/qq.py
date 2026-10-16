@@ -113,7 +113,7 @@ class QqService:
             await self.client.target(*key)
         await self.invalidate(key)
         self.store.update_friend(key, enabled=int(enabled), blocked=0, mode='owner',
-            note='等待新私聊消息' if enabled else '已关闭', activated_at=self.clock(),
+            note='等待新消息' if enabled else '已关闭', activated_at=self.clock(),
             pending_since=None, pending_last=None, due_at=None)
         self.storage_faults.pop(key, None)
         self.sync_groups()
@@ -143,7 +143,9 @@ class QqService:
         if self.avatar:
             worker = self.workers.get(key)
             await self.avatar.interrupt(worker.run_id if worker else None)
-        self.store.update_friend(key, mode='owner', note='你正在主导；后续新消息将重新等待两分钟',
+        group = self.store.friend(key)['chat_type'] == 2
+        self.store.update_friend(key, mode='owner',
+            note='已暂停当前接话；被叫到或有合适话题时再回应' if group else '你正在主导；后续新消息将重新等待两分钟',
             pending_since=None, pending_last=None, due_at=None)
 
     async def receive(self, event):

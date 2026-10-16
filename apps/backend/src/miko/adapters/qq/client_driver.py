@@ -62,7 +62,9 @@ class NativeClientDriver:
     def quote_reference(self, record, element):
         quote = element['replyElement']
         peer = str(record['peerUin'])
-        sender = str(quote.get('senderUin') or quote.get('senderUinStr') or quote.get('senderUid', ''))
+        sender = next((str(quote.get(field)) for field in
+            ('senderUin', 'senderUinStr', 'senderUidStr', 'senderUid')
+            if quote.get(field) and str(quote[field]) != '0'), '')
         if record['chatType'] == 2 and not sender.isdigit():
             match = self.db.execute('''SELECT record FROM messages WHERE account=? AND peer=?
                 AND json_extract(record,'$.senderUid')=? LIMIT 1''', (self.account, peer, sender)).fetchone()

@@ -211,6 +211,9 @@ class GroupNativeTests(unittest.IsolatedAsyncioTestCase):
                     'senderUid':'u_member','replayMsgSeq':'10','replyMsgTime':'1000'}}]}
                 reply=await driver.event(quoted)
                 self.assertEqual(reply['message'][0]['data']['id'],str(event['message_id']))
+                quoted['elements'][0]['replyElement'].update(senderUid='0',senderUidStr='u_member')
+                reply=await driver.event(quoted)
+                self.assertEqual(reply['message'][0]['data']['id'],str(event['message_id']))
                 delivered=[]
                 await driver._publish_native({'name':'message','payload':{'msgList':[record]}},lambda e:delivered.append(e))
                 self.assertFalse(delivered)
