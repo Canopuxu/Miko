@@ -22,13 +22,13 @@ function compatible(document) {return vm.runInNewContext(source,context(document
 function buddy() {return {buddyMap:new Map([[123,{uin:123,uid:'u_123'}]])};}
 
 test('finds current nested service bindings',()=>{
-    const friends=buddy(), media={getMsgElements(){}}, faces={getQQFaceLabel(){}};
+    const friends=buddy(), groups={groupList:[]}, faces={getQQFaceLabel(){}};
     const provider={qq_container__vue:{container:{_bindingDictionary:{_map:new Map([
-        ['friends',[{cache:friends}]],['media',[{cache:media}]],['faces',[{cache:faces}]]])}}}};
+        ['friends',[{cache:friends}]],['groups',[{cache:groups}]],['faces',[{cache:faces}]]])}}}};
     const compat=compatible(documentFor(provider));
     const environment=compat.renderer();
     assert.equal(environment.services.length,3);
-    assert.deepEqual({...compat.capabilities(environment)},{friends:true,send_images:true,faces:true});
+    assert.deepEqual({...compat.capabilities(environment)},{friends:true,faces:true});
 });
 
 test('finds renamed mount, symbol provider and changed container shape',()=>{
@@ -36,7 +36,7 @@ test('finds renamed mount, symbol provider and changed container shape',()=>{
         ['composer',{getMsgElements(){}}]])}};
     const compat=compatible(documentFor(provider,{renamed:true,route:'/workspace',appContext:true}));
     assert.equal(compat.capabilities(compat.renderer()).friends,true);
-    assert.equal(compat.capabilities(compat.renderer()).send_images,true);
+    assert.equal(compat.capabilities(compat.renderer()).faces,false);
 });
 
 test('prioritizes live DI bindings over large unrelated page graphs',()=>{
@@ -50,7 +50,7 @@ test('prioritizes live DI bindings over large unrelated page graphs',()=>{
     root.children=Array.from({length:1500},()=>({component:{provides:provider}}));
     const compat=compatible(document);
     assert.deepEqual({...compat.capabilities(compat.renderer())},
-        {friends:true,send_images:true,faces:true});
+        {friends:true,faces:true});
 });
 
 test('reads inherited providers without evaluating unrelated getters',()=>{
@@ -60,26 +60,14 @@ test('reads inherited providers without evaluating unrelated getters',()=>{
     assert.equal(compat.capabilities(compat.renderer()).friends,true);
 });
 
-test('finds the AIO image builder exposed through component accessors',()=>{
-    const media={getMsgElements(){return 'native builder';}};
+test('account lookup does not touch the AIO message composer or its getters',()=>{
     const document=documentFor({friends:buddy()});
     const state={};
-    Object.defineProperty(state,'messageSendService',{get:()=>({get msgService(){return media;}})});
+    Object.defineProperty(state,'messageSendService',{get(){throw new Error('composer must not be touched');}});
     Object.defineProperty(state,'unrelated',{get(){throw new Error('must not run');}});
     document.querySelector('#app').__vue_app__._instance={setupState:state};
     const compat=compatible(document);
-    assert.equal(compat.capabilities(compat.renderer()).send_images,true);
-    assert.equal(compat.renderer().services.find(v=>v.getMsgElements).getMsgElements(),'native builder');
-});
-
-test('resolves AIO getter descriptors without invoking unrelated state accessors',()=>{
-    const media={getMsgElements(){}};
-    const state={messageSendService:{get:()=>({msgService:media}),set:undefined}};
-    Object.defineProperty(state,'unrelated',{get(){throw new Error('must not run');}});
-    const document=documentFor({friends:buddy()});
-    document.querySelector('#app').__vue_app__._instance={ctx:state};
-    const compat=compatible(document);
-    assert.equal(compat.capabilities(compat.renderer()).send_images,true);
+    assert.equal(compat.capabilities(compat.renderer()).friends,true);
 });
 
 function electronFor(windows) {
@@ -95,7 +83,7 @@ test('locates by capabilities despite changed renderer URL and route',async()=>{
     const view=await compat.locate(electronFor([{id:25,url:'file:///new/path/shell.html',document}]));
     assert.equal(view.contents.id,25);
     assert.equal(view.capabilities.friends,true);
-    assert.equal(view.capabilities.send_images,false);
+    assert.equal(view.capabilities.send_images,true);
 });
 
 test('prefers unique main view and rejects ambiguous contexts',async()=>{
@@ -106,13 +94,13 @@ test('prefers unique main view and rejects ambiguous contexts',async()=>{
     await assert.rejects(()=>compat.locate(electronFor(windows)),/MIKO_UI_AMBIGUOUS/);
 });
 
-test('account discovery permits text when optional image preparation is absent',async()=>{
+test('account discovery enables native images without an AIO preparation service',async()=>{
     const document=documentFor({friends:buddy()});
     const script=fs.readFileSync(path.join(folder,'discover.js'),'utf8').replace('__MIKO_COMPAT__',source);
     const electron={...electronFor([{id:1,document}]),app:{getVersion:()=> 'fixture'}};
     const result=await vm.runInNewContext(script,{...context(document),authData:{uin:'12345'},
         process:{pid:12,execPath:'Q:/QQ.exe',mainModule:{require:()=>electron}}});
-    assert.equal(result.state,'ready');assert.equal(result.capabilities.send_images,false);
+    assert.equal(result.state,'ready');assert.equal(result.capabilities.send_images,true);
     assert.equal(result.account,'12345');
 });
 

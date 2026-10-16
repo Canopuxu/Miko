@@ -13,8 +13,8 @@ async function fixture(t, kind, onSend) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
     const calls=[],writes=[],forwarded=[],records=new Map(),files=new Map();
-    const provider={builder:{getMsgElements:({items})=>items.map(item=>item.type==='pic'
-        ? {picElement:{sourcePath:item.src}} : {replyElement:{fixture:true}})},groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
+    const provider={builder:{getMsgElements(){throw new Error('renderer message builder must not be used');}},
+        groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
         ['u_friend',{coreInfo:{uin:'67890',uid:'u_friend',nick:'新版好友',remark:'备注'}}],
         ['u_older',{uin:'67891',uid:'u_older',nick:'旧版好友',remark:'旧备注'}]])}};
     const document={querySelector:()=>({__vue_app__:{
@@ -35,6 +35,9 @@ async function fixture(t, kind, onSend) {
         if(cmd==='nodeIKernelMsgService/getMsgsByMsgId') {
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},
                 {msgList:[records.get(args[0].msgIds[0]) || {msgId:args[0].msgIds[0],chatType:1}]});
+        } else if(cmd==='nodeIKernelMsgService/getRichMediaFilePathForGuild') {
+            contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},
+                path.join('/fixture-qq-cache',args[0].path_info.fileName));
         } else if(cmd==='nodeIKernelMsgService/sendMsg') {
             const record={msgId:'901',chatType:args[0].peer.chatType,peerUid:args[0].peer.peerUid,
                 peerUin:args[0].peer.chatType===2?'900':'67890',senderUin:'12345',
@@ -93,14 +96,29 @@ test('market face image reads QQ cached resource without accepting a caller file
     assert.equal(Buffer.from(result.base64,'base64').toString(),'fixture-image-bytes');
 });
 
-test('prepares original GIF and WebP using verified dimensions without re-encoding',async t=>{
+test('prepares original images through the kernel cache path without a renderer builder',async t=>{
     const bridge=await fixture(t,'renderer');
-    for(const extension of ['gif','webp']) {
+    for(const [extension,picType] of [['png',1001],['jpg',1000],['gif',2000],['webp',1002]]) {
         const raw=Buffer.from('format fixture already validated by Python');
         const elements=await bridge.rpc('prepare_image',{base64:raw.toString('base64'),extension,dimensions:[32,24]});
         assert.ok(elements[0].picElement.sourcePath.endsWith('.'+extension));
+        assert.equal(elements[0].picElement.picType,picType);
         assert.deepEqual(bridge.files.get(elements[0].picElement.sourcePath),raw);
+        const native=bridge.calls.at(-1);
+        assert.ok(native.cmd.endsWith('/getRichMediaFilePathForGuild'));
+        assert.equal(native.args[0].path_info.md5HexStr,crypto.createHash('md5').update(raw).digest('hex'));
     }
+});
+
+test('prepares a native quote from the real source and refuses withdrawn sources',async t=>{
+    const bridge=await fixture(t,'renderer');
+    const original={msgId:'source',chatType:2,msgSeq:'174',elements:[]};
+    bridge.records.set('source',original);
+    const elements=await bridge.rpc('prepare_reply',{group_id:'900',native_id:'source'});
+    assert.deepEqual(JSON.parse(JSON.stringify(elements)),[{elementType:7,elementId:'',
+        replyElement:{replayMsgId:'source',replayMsgSeq:'174'}}]);
+    original.elements=[{grayTipElement:{revokeElement:{}}}];
+    await assert.rejects(()=>bridge.rpc('prepare_reply',{group_id:'900',native_id:'source'}));
 });
 
 test('a late image success receipt completes the send even without the native method callback',async t=>{

@@ -100,14 +100,6 @@
             nickname:v.coreInfo?.nick||v.nick||'',remark:v.coreInfo?.remark||v.remark||''}));
     })()`);
 
-    const prepare = async item => JSON.parse(await contents.executeJavaScript(`(async () => {
-        const services=${rendererServices};
-        const service=services.find(v=>typeof v.getMsgElements==='function');
-        if(!service)throw new Error('QQ image/quote preparation unavailable');
-        const elements=await service.getMsgElements({items:[${JSON.stringify(item)}]});
-        return JSON.stringify(elements,(_,v)=>v instanceof Map?Object.fromEntries(v):v);
-    })()`));
-
     const groups = async () => contents.executeJavaScript(`(() => {
         const store=(${rendererServices}).find(v=>Array.isArray(v.groupList));
         if(!store)throw new Error('QQ group list unavailable');
@@ -146,25 +138,34 @@
             if(!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
                 || width<=0 || height<=0 || width*height>12000000)throw new Error('Invalid image dimensions');
             const fs=require('fs'),path=require('path');
-            const folder=path.join(require('os').tmpdir(),'miko-qq-bridge',config.account);
-            fs.mkdirSync(folder,{recursive:true});
-            const file=path.join(folder,crypto.createHash('sha256').update(raw).digest('hex')+'.'+payload.extension);
-            fs.writeFileSync(file,raw);
             if(action==='set_avatar') {
+                const folder=path.join(require('os').tmpdir(),'miko-qq-bridge',config.account);
+                fs.mkdirSync(folder,{recursive:true});
+                const file=path.join(folder,crypto.createHash('sha256').update(raw).digest('hex')+'.'+payload.extension);
+                fs.writeFileSync(file,raw);
                 try {
                     const result=await invoke('nodeIKernelProfileService/setHeader',[{path:file}]);
                     if(result?.result!==0)throw new Error('QQ avatar update failed: '+JSON.stringify(result));
                     return {updated:true};
                 } finally {fs.unlinkSync(file);}
             }
-            const elements=await prepare({type:'pic',src:file});
-            if(!elements[0]?.picElement?.sourcePath)throw new Error('QQ could not prepare image');
-            if(elements[0].picElement.sourcePath!==file)fs.unlinkSync(file);
-            return elements;
+            const md5HexStr=crypto.createHash('md5').update(raw).digest('hex');
+            const fileName=md5HexStr+'.'+payload.extension;
+            const sourcePath=await invoke('nodeIKernelMsgService/getRichMediaFilePathForGuild',[{path_info:{
+                md5HexStr,fileName,elementType:2,elementSubType:0,thumbSize:0,
+                needCreate:true,downloadType:1,file_uuid:''}}]);
+            if(typeof sourcePath!=='string' || !path.isAbsolute(sourcePath))throw new Error('QQ image cache path unavailable');
+            fs.writeFileSync(sourcePath,raw);
+            return [{elementType:2,elementId:'',picElement:{md5HexStr,fileName,sourcePath,
+                picWidth:width,picHeight:height,fileSize:String(raw.length),original:true,
+                picType:{jpg:1000,png:1001,webp:1002,gif:2000}[payload.extension],picSubType:0,summary:''}}];
         }
         if (action === 'prepare_reply') {
             const message=await dispatch('get_native_message',payload);
-            return prepare({type:'reply',reply:message});
+            if(!/^[1-9]\d*$/.test(String(message.msgSeq))
+                || message.elements?.some(e=>e.grayTipElement?.revokeElement))throw new Error('Quoted message unavailable');
+            return [{elementType:7,elementId:'',replyElement:{
+                replayMsgId:message.msgId,replayMsgSeq:String(message.msgSeq)}}];
         }
         if (action === 'set_reaction') {
             if (!payload.group_id || typeof payload.set!=='boolean' || !['128077','128170','10068','128557'].includes(String(payload.emoji_id))) throw new Error('Invalid message reaction');

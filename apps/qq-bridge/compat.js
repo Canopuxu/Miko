@@ -14,13 +14,6 @@
             const item = read(value, key);
             return item === undefined ? [] : [item];
         });
-        const captureBuilder = owner => {
-            if (!owner || !Object.getOwnPropertyDescriptor(owner, 'messageSendService')) return;
-            let sender = owner.messageSendService;
-            if (sender && typeof sender.get === 'function' && Object.hasOwn(sender, 'set')) sender = sender.get();
-            const builder = typeof sender?.getMsgElements === 'function' ? sender : sender?.msgService;
-            if (typeof builder?.getMsgElements === 'function' && !services.includes(builder)) services.push(builder);
-        };
         const elements = [document.querySelector('#app'), ...document.querySelectorAll('[data-v-app]')];
         // QQ can move or rename its mount element. Inspect only DOM nodes for
         // Vue's own component markers, without walking arbitrary page globals.
@@ -43,13 +36,6 @@
             const value = components.pop();
             if (!value || typeof value !== 'object' || seen.has(value)) continue;
             seen.add(value);
-            // AIO-local services may live in component state rather than the
-            // application's shared DI container.
-            for (const field of ['setupState', 'ctx']) {
-                const state = read(value, field);
-                if (!state || typeof state !== 'object') continue;
-                captureBuilder(state);
-            }
             if (value.provides) providers.push(value.provides);
             if (value.appContext?.provides) providers.push(value.appContext.provides);
             components.push(value.component, value.subTree);
@@ -88,12 +74,11 @@
             const [value, depth] = objects[cursor++];
             if (!value || typeof value !== 'object' || visited.has(value)) continue;
             visited.add(value);
-            if (typeof value.getMsgElements === 'function' || typeof value.getQQFaceLabel === 'function'
+            if (typeof value.getQQFaceLabel === 'function'
                     || value.buddyMap instanceof Map || (value.buddyMap && typeof value.buddyMap === 'object')
                     || Array.isArray(value.groupList)) {
                 services.push(value);
                 if (services.some(item => !!item.buddyMap)
-                        && services.some(item => typeof item.getMsgElements === 'function')
                         && services.some(item => typeof item.getQQFaceLabel === 'function')
                         && services.some(item => Array.isArray(item.groupList))) break;
                 continue;
@@ -114,7 +99,6 @@
     function capabilities(environment) {
         const services = environment.services;
         return {friends: services.some(value => !!value.buddyMap),
-                send_images: services.some(value => typeof value.getMsgElements === 'function'),
                 faces: services.some(value => typeof value.getQQFaceLabel === 'function')};
     }
 
@@ -161,8 +145,11 @@
                     const environment = (${renderer.toString()})();
                     return {route: environment.route, capabilities: (${capabilities.toString()})(environment)};
                 })()`);
-                if (result.route || result.capabilities.send_images || result.capabilities.faces) serviceWindows++;
-                if (result.capabilities.friends) candidates.push({contents, connection, ...result});
+                if (result.route || result.capabilities.faces) serviceWindows++;
+                // Image preparation belongs to the native message API, not an
+                // AIO renderer service. Binding its transport enables that path.
+                if (result.capabilities.friends) candidates.push({contents, connection, ...result,
+                    capabilities:{...result.capabilities,send_images:true}});
             } catch { /* A login/closing window is not a usable message view. */ }
         }
         if (!candidates.length) throw new Error(!ipcWindows ? 'MIKO_IPC_UNAVAILABLE'
