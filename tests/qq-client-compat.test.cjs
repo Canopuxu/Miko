@@ -12,7 +12,7 @@ const compat = fs.readFileSync(path.join(folder, 'compat.js'), 'utf8');
 async function fixture(t, kind) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
-    const calls=[],writes=[],forwarded=[];
+    const calls=[],writes=[],forwarded=[],records=new Map(),files=new Map();
     const provider={groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
         ['u_friend',{coreInfo:{uin:'67890',uid:'u_friend',nick:'新版好友',remark:'备注'}}],
         ['u_older',{uin:'67891',uid:'u_older',nick:'旧版好友',remark:'旧备注'}]])}};
@@ -32,7 +32,7 @@ async function fixture(t, kind) {
         calls.push({cmd,args});
         if(cmd==='nodeIKernelMsgService/getMsgsByMsgId') {
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},
-                {msgList:[{msgId:args[0].msgIds[0],chatType:1}]});
+                {msgList:[records.get(args[0].msgIds[0]) || {msgId:args[0].msgIds[0],chatType:1}]});
         } else if(cmd==='nodeIKernelMsgService/sendMsg') {
             const record={msgId:'901',chatType:args[0].peer.chatType,peerUid:args[0].peer.peerUid,
                 peerUin:args[0].peer.chatType===2?'900':'67890',senderUin:'12345',
@@ -57,7 +57,9 @@ async function fixture(t, kind) {
     const context={authData:{uin:'12345'},Buffer,URL,Map,Set,Reflect,Object,JSON,
         setTimeout,clearTimeout,setInterval,clearInterval,
         process:{pid:42,mainModule:{require:name=>name==='electron'?electron:name==='crypto'?crypto:
-            name==='http'?{createServer:callback=>{handler=callback;return server;}}:null}}};
+            name==='http'?{createServer:callback=>{handler=callback;return server;}}:
+            name==='fs'?{existsSync:path=>files.has(path),statSync:path=>({size:files.get(path).length}),
+                readFileSync:path=>files.get(path)}:null}}};
     await vm.runInNewContext(source,context);
     t.after(()=>context.__mikoClientBridge.close());
     async function rpc(action,payload={}) {
@@ -71,8 +73,17 @@ async function fixture(t, kind) {
     }
     await handler({method:'GET',url:'/events?after=0',headers:{authorization:'Bearer fixture-key'},on(){}},
         {writeHead(){return this;},flushHeaders(){},write(line){writes.push(JSON.parse(line));return true;},end(){}});
-    return {rpc,notify,calls,writes,forwarded};
+    return {rpc,notify,calls,writes,forwarded,records,files};
 }
+
+test('market face image reads QQ cached resource without accepting a caller file path',async t=>{
+    const bridge=await fixture(t,'renderer');
+    bridge.records.set('face',{msgId:'face',chatType:2,elements:[{elementId:'11',marketFaceElement:{
+        dynamicFacePath:'QQ/cache/face.gif',staticFacePath:'QQ/cache/face.png'}}]});
+    bridge.files.set('QQ/cache/face.gif',Buffer.from('fixture-image-bytes'));
+    const result=await bridge.rpc('read_image',{group_id:'900',native_id:'face',element_id:'11'});
+    assert.equal(Buffer.from(result.base64,'base64').toString(),'fixture-image-bytes');
+});
 
 for(const kind of ['renderer','legacy2','legacy3']) {
     test(`${kind}: actual adapter handles friend formats, message reads, incoming events and send receipts`,async t=>{

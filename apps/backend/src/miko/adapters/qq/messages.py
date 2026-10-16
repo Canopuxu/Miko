@@ -56,14 +56,16 @@ def parse_message(source):
                 ref['url'] = data['url']
             if isinstance(data.get('file'), str) and re.fullmatch(r'[A-Za-z0-9_{}.-]{1,180}', data['file']) and '..' not in data['file']:
                 ref['file'] = data['file']
-            segments.append({'type': 'image', 'ref': ref, 'content_status': 'not_read'})
-            parts.append('[图片]')
+            summary = str(data.get('summary', '')).strip().strip('[]')[:120] if kind == 'mface' else ''
+            segments.append({'type': 'image', 'ref': ref, 'content_status': 'not_read',
+                             **({'name': summary} if summary else {})})
+            parts.append('[表情包' + ('：' + summary if summary else '') + ']' if kind == 'mface' else '[图片]')
         elif kind == 'at':
             qq = str(data.get('qq', ''))[:30]
             segments.append({'type': 'at', 'qq': qq})
             parts.append('@' + qq)
         else:
-            label = {'record': '语音', 'video': '视频', 'file': '文件', 'forward': '合并转发'}.get(kind, '非文本消息')
+            label = {'record': '语音', 'video': '视频', 'file': '文件', 'forward': '合并转发', 'share': '分享卡片'}.get(kind, '非文本消息')
             segments.append({'type': str(kind), 'name': label, 'content_status': 'not_read'})
             parts.append('[' + label + ']')
     return {'text': ''.join(parts)[:12000], 'segments': segments}

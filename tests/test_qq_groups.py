@@ -81,6 +81,25 @@ class GroupRepliesTests(unittest.IsolatedAsyncioTestCase):
         await self.service.receive(self.event(3,'几点',extra=[{'type':'reply','data':{'id':'800'}}]))
         self.assertLessEqual(self.service.store.friend(self.key)['due_at'],self.now+2)
 
+    async def test_withdrawal_cancels_pending_reply_and_excludes_recalled_context(self):
+        await self.service.receive(self.event(1,'Miko，撤回这句'))
+        self.chat.gate=asyncio.Event()
+        self.now+=2
+        await self.service.tick()
+        while not self.chat.calls:await asyncio.sleep(0)
+        worker=self.service.workers[self.key]
+        await self.service.receive({'post_type':'notice','notice_type':'group_recall',
+            'self_id':123,'group_id':900,'user_id':456,'message_id':1})
+        await worker.task
+        self.assertEqual(self.client.sent,[])
+        self.assertIsNone(self.service.store.friend(self.key)['due_at'])
+        self.assertEqual(self.service.store.context(self.key),[])
+        self.assertTrue(self.service.store.messages(self.key)[0]['recalled'])
+        self.chat.gate=None
+        await self.service.receive(self.event(2,'Miko，还在吗'))
+        await self.reply()
+        self.assertEqual(len(self.client.sent),1)
+
     async def test_unknown_disabled_groups_and_other_conversations_are_independent(self):
         await self.service.receive(self.event(1,'miko',group=901))
         self.assertEqual(self.service.store.context(self.key),[])

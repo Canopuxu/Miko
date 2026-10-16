@@ -2,12 +2,19 @@
 import asyncio
 import base64
 import json
+import re
 from pathlib import Path
 import sqlite3
 
 import httpx
 
 from .media import image_info
+
+
+def recalled(record):
+    return bool(record.get('recalled') or any(
+        (e.get('grayTipElement') or {}).get('revokeElement') is not None
+        for e in record.get('elements', [])))
 
 
 class NativeClientDriver:
@@ -65,10 +72,11 @@ class NativeClientDriver:
         sender = next((str(quote.get(field)) for field in
             ('senderUin', 'senderUinStr', 'senderUidStr', 'senderUid')
             if quote.get(field) and str(quote[field]) != '0'), '')
-        if record['chatType'] == 2 and not sender.isdigit():
+        if not sender.isdigit():
             match = self.db.execute('''SELECT record FROM messages WHERE account=? AND peer=?
                 AND json_extract(record,'$.senderUid')=? LIMIT 1''', (self.account, peer, sender)).fetchone()
-            sender = str(json.loads(match[0])['senderUin']) if match else ''
+            sender = (str(json.loads(match[0])['senderUin']) if match else self.account if sender == self.self_uid
+                else peer if record['chatType'] == 1 and sender == record.get('peerUid') else '')
         if not sender.isdigit() or (record['chatType'] == 1 and sender not in (self.account, peer)):
             raise ValueError('Unknown quoted author')
         seq, stamp = str(quote.get('replayMsgSeq', '')), str(quote.get('replyMsgTime', ''))
@@ -103,9 +111,12 @@ class NativeClientDriver:
         for element in record.get('elements', []):
             if element.get('textElement'):
                 text = element['textElement']
-                if group and text.get('atType') in (1, 2):
-                    uid = str(text.get('atUid') or text.get('atNtUid') or '')
+                if group and text.get('atType') in (1, 2, 4):
+                    uid = next((str(text[field]) for field in ('atUid', 'atNtUid')
+                        if text.get(field) and str(text[field]) != '0'), '')
                     if uid == self.self_uid and uid:
+                        uid = self.account
+                    if text['atType'] == 4:
                         uid = self.account
                     segments.append({'type': 'at', 'data': {'qq': 'all' if text['atType'] == 1 else uid}})
                 else:
@@ -126,11 +137,32 @@ class NativeClientDriver:
                     image_info(raw)
                     data['file'] = 'base64://' + result['base64']
                 segments.append({'type': 'image', 'data': data})
+            elif element.get('marketFaceElement'):
+                face = element['marketFaceElement']
+                data = {'summary': face.get('faceName', '')}
+                emoji = str(face.get('emojiId', '')).lower()
+                if re.fullmatch(r'[0-9a-f]{32}', emoji):
+                    data['url'] = f'https://gxh.vip.qq.com/club/item/parcel/item/{emoji[:2]}/{emoji}/300x300.png'
+                if images:
+                    try:
+                        result = await self.rpc('read_image', {('group_id' if group else 'user_id'): peer,
+                            'native_id': record['msgId'], 'element_id': element['elementId']})
+                        image_info(base64.b64decode(result['base64'], validate=True))
+                        data['file'] = 'base64://' + result['base64']
+                    except (httpx.HTTPError, ValueError):
+                        pass  # QQ may not have downloaded the local cache yet.
+                segments.append({'type': 'mface', 'data': data})
+            else:
+                kind = next((kind for field, kind in (
+                    ('pttElement', 'record'), ('videoElement', 'video'), ('fileElement', 'file'),
+                    ('multiForwardMsgElement', 'forward'), ('arkElement', 'share')) if element.get(field)), None)
+                if kind:
+                    segments.append({'type': kind, 'data': {}})
         return {'post_type': 'message_sent' if sender == self.account else 'message',
             'message_type': 'group' if group else 'private', 'sub_type': 'normal' if group else 'friend', 'self_id': int(self.account),
             **({'group_id': int(peer)} if group else {}),
             'user_id': int(sender if group else peer), 'target_id': int(peer), 'message_id': mid,
-            'time': int(record['msgTime']), 'recalled': bool(record.get('recalled')), 'sender': {'user_id': int(sender),
+            'time': int(record['msgTime']), 'recalled': recalled(record), 'sender': {'user_id': int(sender),
                 'nickname': record.get('sendNickName', ''), 'card': record.get('sendMemberName', ''),
                 'uid': record.get('senderUid', '')}, 'message': segments}
 
@@ -244,11 +276,16 @@ class NativeClientDriver:
             event = await self.event(record)
             emitted = self.db.execute('SELECT emitted FROM messages WHERE id=?',
                 (event['message_id'],)).fetchone()[0]
-            if emitted:
+            # Persist withdrawal separately so an update to an emitted message
+            # still reaches the scheduler, while repeated updates stay quiet.
+            state = 2 if event['recalled'] else 1
+            if emitted >= state:
                 continue
+            if event['recalled']:
+                event.update(post_type='notice', notice_type='group_recall' if record['chatType'] == 2 else 'friend_recall')
             await publish(event)
             with self.db:
-                self.db.execute('UPDATE messages SET emitted=1 WHERE id=?', (event['message_id'],))
+                self.db.execute('UPDATE messages SET emitted=? WHERE id=?', (state, event['message_id']))
 
     async def close(self):
         await self.http.aclose()

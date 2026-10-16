@@ -150,11 +150,23 @@ class QqService:
 
     async def receive(self, event):
         post = event.get('post_type')
-        if post == 'notice' and event.get('notice_type') == 'friend_recall':
-            key = (str(event.get('self_id', '')), str(event.get('user_id', '')))
-            if self.store.friend(key) and type(event.get('message_id')) is int:
+        if post == 'notice' and event.get('notice_type') in ('friend_recall', 'group_recall'):
+            group = event['notice_type'] == 'group_recall'
+            key = (str(event.get('self_id', '')),
+                   'group-' + str(event.get('group_id', '')) if group else str(event.get('user_id', '')))
+            target = self.store.get_event(key, event['message_id']) if type(event.get('message_id')) is int else None
+            if target and not target['recalled']:
                 self.store.recall(key, event['message_id'])
                 await self.invalidate(key)
+                cfg = self.store.friend(key)
+                remaining = pending_contacts(self.store.context(key))
+                if not remaining or (group and not cfg['natural_chat'] and not any(r.get('directed') for r in remaining)):
+                    self.store.update_friend(key, note='消息已撤回，等待新消息',
+                        pending_since=None, pending_last=None, due_at=None)
+                else:
+                    now = self.clock()
+                    self.store.update_friend(key, pending_since=cfg['pending_since'] or now,
+                        pending_last=now, due_at=cfg['due_at'] or now + self.quiet_seconds)
             return
         if post not in ('message', 'message_sent') or event.get('message_type') not in ('private', 'group'):
             return

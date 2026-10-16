@@ -161,8 +161,14 @@
             if (!message) throw new Error('QQ message unavailable');
             if(action==='get_native_message')return message;
             const element=message.elements.find(e=>e.elementId===String(payload.element_id));
-            if(!element?.picElement)throw new Error('Not an image');
+            if(!element?.picElement && !element?.marketFaceElement)throw new Error('Not an image');
             const fs=require('fs');const image=element.picElement;
+            if(element.marketFaceElement) {
+                const face=element.marketFaceElement;
+                const path=[face.dynamicFacePath,face.staticFacePath].find(path=>path && fs.existsSync(path));
+                if(!path || fs.statSync(path).size>6*1024*1024)throw new Error('Market face cache unavailable');
+                return {base64:fs.readFileSync(path).toString('base64')};
+            }
             if(!image.sourcePath || Number(image.fileSize)>6*1024*1024)throw new Error('Image unavailable or too large');
             if(!fs.existsSync(image.sourcePath)) {
                 await invoke('nodeIKernelMsgService/downloadRichMedia',[{getReq:{

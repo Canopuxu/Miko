@@ -30,8 +30,8 @@ def public_addresses(host, port):
     # TUN proxies commonly synthesize RFC2544 addresses for public domains.
     # Resolve the already-allowlisted hostname via authenticated public DNS;
     # do not exempt private addresses from the download boundary.
-    fake=ipaddress.ip_network('198.18.0.0/15')
-    if records and all(ipaddress.ip_address(r[4][0]) in fake for r in records):
+    fake=(ipaddress.ip_network('198.18.0.0/15'), ipaddress.ip_network('2001:2::/48'))
+    if records and all(any(ipaddress.ip_address(r[4][0]) in network for network in fake) for r in records):
         try:
             with httpx.Client(timeout=4,trust_env=False,follow_redirects=False) as client:
                 with client.stream('GET','https://dns.alidns.com/resolve',params={'name':host,'type':'A'}) as response:
