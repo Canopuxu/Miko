@@ -263,6 +263,7 @@ def settings_router(chat, qq):
                 value = {**reranker.model_dump(exclude={'api_key'}), 'api_key': reranker.api_key.get_secret_value()} if reranker else read('rerank.local.json')
                 write_json(root / 'rerank.local.json', {**value, 'enabled': body.rerank_enabled, 'shared': body.rerank_shared})
             chat.provider, chat.qq_provider = primary, secondary
+            chat.memory.social.configured = primary is not None
             if chat.memory.social.pipeline:
                 chat.memory.social.pipeline.provider = task_providers['memory']
                 chat.memory.social.pipeline.model = (task_providers['memory'].model if task_providers['memory'] else body.memory_model.strip()) or None

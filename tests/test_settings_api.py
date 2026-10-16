@@ -18,7 +18,7 @@ class SettingsTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / 'config').mkdir()
         self.memory = SimpleNamespace(lock=asyncio.Lock(), configure_index=Mock(),
-            social=SimpleNamespace(active_jobs=set(), pipeline=SimpleNamespace(model=None)))
+            social=SimpleNamespace(active_jobs=set(), configured=False, pipeline=SimpleNamespace(model=None)))
         self.chat = SimpleNamespace(settings=SimpleNamespace(local_root=self.root), provider=None, qq_provider=None,
             turns={}, life=SimpleNamespace(generating=False, model=None), memory=self.memory)
         self.qq = SimpleNamespace(workers={}, client=None, store=SimpleNamespace(add_friend=Mock(), friends=Mock(return_value=[])))
@@ -42,6 +42,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.chat.provider.model, 'chat-model')
         self.assertEqual(self.chat.life.model, 'life-model')
         self.assertEqual(self.memory.social.pipeline.model, 'memory-model')
+        self.assertTrue(self.memory.social.configured)
         self.memory.configure_index.assert_called_once()
 
     def test_blank_key_preserved_and_changed_host_requires_new_key(self):
