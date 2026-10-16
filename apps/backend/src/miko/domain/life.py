@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import json
+import re
 from typing import Literal
 from uuid import uuid4
 
@@ -52,6 +53,19 @@ class LifeGeneration(LifeEntries):
     entries: list[LifeEntry] = Field(max_length=20)
     new_goals: list[NewGoal] = Field(default_factory=list, max_length=10)
     goal_updates: list[GoalUpdate] = Field(default_factory=list)
+
+
+class ConversationActivity(BaseModel):
+    kind: Literal['experience', 'plan', 'cancelled']
+    date: date | None
+    period: Literal['清晨', '上午', '中午', '下午', '傍晚', '晚上', '深夜'] | None
+    people: list[str]
+    text: str = Field(min_length=1, max_length=240)
+    source_ids: list[int] = Field(min_length=1)
+
+
+class ConversationActivities(BaseModel):
+    events: list[ConversationActivity] = Field(max_length=20)
 
 
 class Life:
@@ -139,6 +153,47 @@ class Life:
         self.config_path.write_text(json.dumps({'enabled': enabled, 'model': self.model}), encoding='utf-8')
         return self.status()
 
+    async def conversation_activities(self, material, day):
+        background = material.pop('对话提炼记录', {})
+        quotes = []
+        for rows in background.values():
+            for row in rows:
+                for quote in row.get('相关原话', []):
+                    if quote not in quotes:
+                        quotes.append(quote)
+        if not quotes:
+            return []
+        quotes.sort(key=lambda q: q.get('发言时间', ''))
+        prompt = (REPO_ROOT / 'config/defaults/life-conversation.txt').read_text(encoding='utf-8').strip()
+        message = json.dumps({'生活日期': day.isoformat(),
+                              '原话': [{'id': i + 1, **q} for i, q in enumerate(quotes)]}, ensure_ascii=False)
+        result = await self.chat.complete_memory(self.chat.named_prompt(prompt), message,
+            model=self.model or None, json_output=True, **({'provider': self.provider} if self.provider else {}))
+        activities = ConversationActivities.model_validate_json(result['text']).events
+        character = self.chat.store.character_name()
+        kept = []
+        for activity in activities:
+            if any(i < 1 or i > len(quotes) for i in activity.source_ids):
+                raise ValueError('生活背景引用了不存在的原话')
+            # A fictional reply on its own does not establish another person's
+            # real-world arrangements. Undated plans also stay in chat memory.
+            human_source = any(quotes[i - 1]['发言人'] in activity.people
+                               and quotes[i - 1]['发言人'] != character
+                               for i in activity.source_ids)
+            if (character in activity.people and human_source and activity.date
+                    and activity.date <= day and activity.kind != 'cancelled'):
+                kept.append(activity)
+        today = [a for a in kept if a.date == day][:2]
+        past = [a.text for a in kept if a.date < day and a.kind == 'experience'][-1:]
+        if past:
+            material['过去的共同经历'] = past
+        if today:
+            # The writer only fills unoccupied time. It never rewrites these
+            # facts, so a friend's name cannot turn into the owner's name.
+            material['已占用时段'] = [a.period or '部分时间' for a in today]
+            material['本次补充片段数'] = max(2, 4 - len(today))
+        return today
+
     async def generate(self, day=None):
         if self.generating:
             raise ValueError('生活条目正在生成')
@@ -152,12 +207,13 @@ class Life:
             memory = self.chat.memory
             events = memory.structured.days(subject='miko') if memory and memory.social.control()['enabled'] else []
             material = generation_material(self.chat.profiles, self.records(), self.store.goals, day, memory_events=events)
+            confirmed = await self.conversation_activities(material, day)
             # A manual addition to this day is already a fact to continue from.
             if current:
                 material['今天已有的记录'] = current.entries
             prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
             message = self.chat.named_prompt(json.dumps(material, ensure_ascii=False))
-            value = await self.chat.complete_memory(prompt, message, model=self.model or None,
+            value = await self.chat.complete_memory(self.chat.named_prompt(prompt), message, model=self.model or None,
                 json_output=True, **({'provider': self.provider} if self.provider else {}))
             output = LifeGeneration.model_validate_json(value['text'])
             goals = deepcopy(self.store.goals)
@@ -181,7 +237,20 @@ class Life:
                 goals[goal_id] = {'id': goal_id, 'text': new.text, 'start_date': day.isoformat(),
                                   'target_date': new.target_date.isoformat(), 'status': 'active'}
             entries = deepcopy(current.entries) if current else []
-            for entry in output.entries:
+            generated = output.entries
+            if confirmed:
+                # Keep ordinary prose generation unchanged; requesting a full
+                # time grid encourages filling every slot with extra activity.
+                hours = {'清晨': 6, '早上': 8, '早晨': 8, '上午': 10, '中午': 12, '午后': 14,
+                         '下午': 15, '傍晚': 18, '晚上': 20, '晚间': 20, '夜里': 22, '深夜': 23, '凌晨': 0}
+                ordered = []
+                for i, entry in enumerate(generated):
+                    cue = re.search('|'.join(hours), entry.text[:16])
+                    hour = hours[cue[0]] if cue else 8 + 14 * i / max(1, len(generated) - 1)
+                    ordered.append((hour, entry))
+                ordered.extend((hours.get(a.period, 12), LifeEntry(text=a.text)) for a in confirmed)
+                generated = [entry for _, entry in sorted(ordered, key=lambda pair: pair[0])]
+            for entry in generated:
                 row = entry.model_dump(exclude_none=True)
                 if row.get('goal_id'):
                     if row['goal_id'] not in references:

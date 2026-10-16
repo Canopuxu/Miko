@@ -2,7 +2,8 @@
 import hashlib
 import random
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from miko.storage.search import terms
 
@@ -71,8 +72,30 @@ def conversation_background(profiles, events, day, query):
         return {}
     with profiles.chat.connect() as db:
         names = {r['id']: r['display_name'] for r in db.execute('SELECT id,display_name FROM people')}
-    return {key: [{'日期': r['day'], '涉及的人': [names.get(person, '好友') for person in r.get('subjects', [r.get('subject')])],
-                   '内容': r['text']} for r in values] for key, values in groups.items() if values}
+    def background(row):
+        item = {'日期': row['day'],
+                '涉及的人': [names.get(person, person) for person in row.get('subjects', [row.get('subject')])],
+                '内容': row['text']}
+        # A summary date can be the date an invitation was said, not a booked
+        # outing. Preserve the wording and speakers instead of promoting it to
+        # a confirmed plan. Sources are shared by an extraction batch, so only
+        # include the matching exchange and its immediate neighbors.
+        sources = row.get('sources', [])
+        words = terms(row['text'])
+        anchors = [i for i, source in enumerate(sources) if words & terms(source['content'])]
+        indices = sorted({j for i in anchors for j in range(max(0, i - 2), min(len(sources), i + 3))})[-12:]
+        quotes = []
+        for i in indices:
+            source = sources[i]
+            speaker = source.get('sender_id', source.get('author', ''))
+            quote = {'发言人': names.get(speaker, speaker), '原话': source['content']}
+            if source.get('timestamp'):
+                quote['发言时间'] = datetime.fromtimestamp(source['timestamp'] / 1000, ZoneInfo('Asia/Shanghai')).isoformat()
+            quotes.append(quote)
+        if quotes:
+            item['相关原话'] = quotes
+        return item
+    return {key: [background(r) for r in values] for key, values in groups.items() if values}
 
 
 def generation_material(profiles, records, goals, day, rhythm=None, memory_events=()):

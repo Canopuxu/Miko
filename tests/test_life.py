@@ -348,16 +348,32 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
                  'text': '橙汁独自在实验室买键盘', 'sources': sources, 'through': 'owner'}]})
         inputs = []
         async def complete(system, message, **kwargs):
-            inputs.append(json.loads(message))
+            material = json.loads(message)
+            inputs.append(material)
+            if '原话' in material:
+                return {'text': json.dumps({'events': [
+                    {'kind': 'plan', 'date': '2026-10-09', 'period': '晚上', 'people': ['Miko', '橙汁'],
+                     'text': '晚上与橙汁约好玩《双人成行》', 'source_ids': [1]},
+                    {'kind': 'plan', 'date': None, 'period': None, 'people': ['Miko', '橙汁'],
+                     'text': '下次一起去演唱会', 'source_ids': [1]},
+                    {'kind': 'experience', 'date': '2026-10-09', 'period': '晚上', 'people': ['好友'],
+                     'text': '好友去了音乐节', 'source_ids': [1]},
+                    {'kind': 'plan', 'date': '2026-10-10', 'period': '晚上', 'people': ['Miko', '橙汁'],
+                     'text': '明天去音乐会', 'source_ids': [1]}]}, ensure_ascii=False)}
             return {'text': json.dumps({'entries': [{'text': '饭后在楼下散步'}]}, ensure_ascii=False)}
         self.chat.complete_memory = complete
         embeddings = self.memory.index._embedding_pool._cache['embedding']
         with patch.object(embeddings, 'embed', side_effect=AssertionError('Life must not call embeddings')) as embed:
             await self.life.generate(date(2026, 10, 9))
             embed.assert_not_called()
-        self.assertEqual(len(inputs), 1)
-        self.assertIn('双人成行', json.dumps(inputs[0]['对话提炼记录'], ensure_ascii=False))
+        self.assertEqual(len(inputs), 2)
+        self.assertIn('双人成行', json.dumps(inputs[0]['原话'], ensure_ascii=False))
         self.assertNotIn('实验室', json.dumps(inputs[0], ensure_ascii=False))
+        self.assertNotIn('对话提炼记录', inputs[1])
+        self.assertEqual(inputs[1]['已占用时段'], ['晚上'])
+        stored = self.life.store.get(date(2026, 10, 9)).entries
+        self.assertEqual([r['text'] for r in stored], ['饭后在楼下散步', '晚上与橙汁约好玩《双人成行》'])
         self.memory.social.toggle(False)
         await self.life.generate(date(2026, 10, 9))
-        self.assertNotIn('对话提炼记录', inputs[1])
+        self.assertEqual(len(inputs), 3)
+        self.assertNotIn('对话提炼记录', inputs[-1])

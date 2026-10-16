@@ -259,7 +259,9 @@ class Tulpa:
             context=[]
             if s['kind']=='group':
                 # A few actual neighboring messages, never a full group transcript.
-                for row in rows[::20]:
+                # Miko's unified extraction needs the speaker before each reply,
+                # rather than a periodic sample of only its own participation.
+                for row in (rows if getattr(self.store, 'structured', False) else rows[::20]):
                     context.extend(db.execute('''SELECT * FROM messages WHERE platform=? AND conversation_id=?
                       AND timestamp BETWEEN ? AND ? AND is_self=0 ORDER BY timestamp DESC,id DESC LIMIT 12''',
                       (s['platform'],s['conversation_id'],row['timestamp']-120000,row['timestamp'])).fetchall())

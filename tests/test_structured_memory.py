@@ -207,6 +207,41 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(active),1)
         self.assertTrue(self.memory.structured.detail(rows[0]['id'])['history'])
 
+    async def test_group_extraction_keeps_invitation_before_later_replies(self):
+        from miko.adapters.memory.tulpa_upstream.tulpa import collect
+        from miko.domain.life_material import conversation_background
+        from miko.storage.chat import now_ms
+        from miko.storage.search import terms
+        from datetime import date
+
+        stamp = now_ms()
+        cid = 'miko|qq:123:group-456'
+        messages = [('miko', '今天想吃面', stamp),
+                    ('qq:789', '下次带你去演唱会', stamp + 180000),
+                    ('miko', '有机会一起去', stamp + 181000)]
+        with self.social.store.connect() as db:
+            for i, (speaker, text, timestamp) in enumerate(messages):
+                mid = db.execute('''INSERT INTO messages(original_id,author,platform,conversation_id,
+                  conversation,conversation_type,sender_id,timestamp,content,is_self,source_id)
+                  VALUES(?,?,'qq',?,'测试群','group',?,?,?,?,?)''',
+                  (f'group:{i}', 'miko' if speaker == 'miko' else 'contact', cid,
+                   speaker, timestamp, text, int(speaker == 'miko'), str(i))).lastrowid
+                collect(db, mid)
+            sid = db.execute('SELECT id FROM tulpa_scopes WHERE conversation_id=?', (cid,)).fetchone()[0]
+
+        async def extract(system, message, model=None, json_output=False):
+            self.assertIn('下次带你去演唱会', message)
+            return {'text': json.dumps({'facts': [], 'events': [{'subjects': ['miko', 'qq:789'],
+                'date': date.today().isoformat(), 'text': '好友说下次有机会一起去演唱会，尚未定时间'}]}), 'usage': {}}
+        self.chat.complete_memory = extract
+        result = await asyncio.to_thread(self.social.consolidate, sid, None, True)
+        self.assertEqual(result['status'], 'updated')
+        event = self.memory.structured.days(subject='miko')[0]
+        self.assertTrue(any(s['content'] == '下次带你去演唱会' for s in event['sources']))
+        material = conversation_background(self.chat.profiles, [event], date.today(), terms('闲聊吃饭'))
+        self.assertTrue(any(q['原话'] == '下次带你去演唱会' and q['发言人'] == 'qq:789'
+                            for q in material['当天'][0]['相关原话']))
+
 
 class ReviewAndFeedbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_dates_review_includes_multiple_days_and_excludes_deleted(self):
