@@ -29,6 +29,11 @@ class StickerEdit(BaseModel):
     enabled: StrictBool
 
 
+class LanguageEdit(BaseModel):
+    enabled: StrictBool | None = None
+    meaning: str | None = Field(default=None, min_length=1, max_length=600)
+
+
 def qq_router(service: QqService):
     router = APIRouter(prefix='/api/qq', dependencies=[Depends(local_request)])
 
@@ -94,6 +99,35 @@ def qq_router(service: QqService):
             fields.update(pending_since=None, pending_last=None, due_at=None)
         service.store.update_friend(key, **fields)
         return service.status()
+
+    @router.get('/friends/{account}/{friend}/language')
+    async def language(account: str, friend: str):
+        try:
+            return service.language.status((account, friend))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.put('/friends/{account}/{friend}/language')
+    async def language_switch(account: str, friend: str, body: FriendSwitch):
+        try:
+            return await service.language.configure((account, friend), body.enabled)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.patch('/friends/{account}/{friend}/language/{kind}/{item_id}')
+    async def language_edit(account: str, friend: str, kind: str, item_id: str, body: LanguageEdit):
+        try:
+            return service.language.manage((account, friend), kind, item_id,
+                                           enabled=body.enabled, meaning=body.meaning)
+        except ValueError:
+            raise HTTPException(400, '未能修改这条记录，请刷新后重试') from None
+
+    @router.delete('/friends/{account}/{friend}/language/{kind}/{item_id}')
+    async def language_delete(account: str, friend: str, kind: str, item_id: str):
+        try:
+            return service.language.manage((account, friend), kind, item_id, delete=True)
+        except ValueError:
+            raise HTTPException(400, '未能删除这条记录，请刷新后重试') from None
 
     def known_account(account):
         if not any(f['account'] == account for f in service.store.friends()):

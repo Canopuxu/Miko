@@ -96,12 +96,17 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
             current_ids.add(record.get('message_id'))
             current_authors.add(record['author'].get('id'))
     ordinary_reply = not group or len(current_authors) <= 1
+    contacts = {r['message_id']: r for r in records if r.get('author', {}).get('kind') == 'contact' and 'message_id' in r}
+    people = {r['author']['id'] for r in contacts.values()}
     for i, bubble in enumerate(bubbles):
         if not isinstance(bubble, dict):
             raise ValueError('气泡格式无效')
         kind = bubble.get('kind')
         field = {'text': 'text', 'face': 'face_id', 'sticker': 'sticker_id'}.get(kind)
-        if not field or set(bubble) - {'kind', field, 'quote_message_id', 'introduces_miko'}:
+        allowed = {'kind', field, 'quote_message_id', 'introduces_miko'}
+        if group and kind == 'text':
+            allowed |= {'reply_to_message_id', 'mention_user_ids'}
+        if not field or set(bubble) - allowed:
             raise ValueError('气泡类型或字段无效')
         if 'introduces_miko' in bubble and (kind != 'text' or type(bubble['introduces_miko']) is not bool):
             raise ValueError('介绍标记只能用于文字气泡，并需要布尔值')
@@ -113,6 +118,15 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
             total += len(bubble['text'])
         elif content not in (faces if kind == 'face' else assets):
             raise ValueError('表情不在本轮候选中')
+        if 'reply_to_message_id' in bubble:
+            target = bubble['reply_to_message_id']
+            if type(target) is not int or target not in contacts:
+                raise ValueError('回应对象需要本轮群聊中的群友消息编号')
+        if 'mention_user_ids' in bubble:
+            mentions = bubble['mention_user_ids']
+            if (not isinstance(mentions, list) or any(not isinstance(uid, str) or uid not in people for uid in mentions)
+                    or len(mentions) > len(people) or len(set(mentions)) != len(mentions)):
+                raise ValueError('@ 对象需要本轮群聊中的人物编号')
         if 'quote_message_id' in bubble:
             mid = bubble['quote_message_id']
             if ordinary_reply and type(mid) is int and mid in current_ids:

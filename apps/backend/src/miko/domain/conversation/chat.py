@@ -165,6 +165,11 @@ class ChatService:
             if turn.qq_records is not None:
                 background = await compose_qq_context(self, turn.qq_records, turn.memory_key)
                 group = turn.memory_key[1].startswith('group-')
+                language = getattr(self, 'qq_language', None)
+                if group and language:
+                    reference = await language.reference(turn.memory_key, turn.qq_records, turn.id)
+                    if reference:
+                        background += '\n\n' + reference
                 turn.system_prompt = '\n\n'.join([
                     (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
                     for name in ('qq-system-prompt.txt', 'qq-group-context.txt' if group else 'qq-role-context.txt')
@@ -172,6 +177,8 @@ class ChatService:
                     (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
                     for name in ('qq-expression.txt', 'qq-output-format.txt')
                 ])
+                if group:
+                    turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-group-output.txt').read_text(encoding='utf-8').strip()
             elif self.memory and turn.memory_query is not None:
                 context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
@@ -213,6 +220,7 @@ class ChatService:
         except Exception:
             status = "cancelled" if turn.cancelled else "error"
             if status == "error" and not turn.error:
+                logging.getLogger(__name__).exception('Unable to generate chat turn')
                 turn.error = "生成连接中断，请重试"
         finally:
             await asyncio.to_thread(turn.close_runtime)
@@ -256,6 +264,11 @@ class ChatService:
         if friend.startswith('group-'):
             conversation = self.store.conversation(conversation_id)
             turn.qq_input['group'] = {'id': friend[6:], 'name': conversation['title'] if conversation else friend[6:]}
+            mention_ids = list(dict.fromkeys(r['author']['id'] for r in records if r['author']['kind'] == 'contact'))
+            for bubble in turn.qq_input['output_format']['bubbles']:
+                if bubble['kind'] == 'text':
+                    bubble.update(reply_to_message_id='optional integer',
+                        mention_user_ids='optional array; available author ids: ' + json.dumps(mention_ids, ensure_ascii=False))
         turn.message = render_dialogue(turn.qq_input)
         image_parts = [part for r in records for part in r.get('_image_inputs', [])]
         content = [{'type': 'text', 'text': turn.message}, *image_parts] if image_parts else turn.message

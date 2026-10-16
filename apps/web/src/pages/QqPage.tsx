@@ -4,6 +4,7 @@ import { BookOpen, NotebookPen, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerLibrary } from './StickerLibrary';
+import { GroupLanguage } from './GroupLanguage';
 import { FriendManager } from '../components/FriendManager';
 import { FriendRelationships } from './FriendRelationships';
 
@@ -171,6 +172,7 @@ export function QqPage() {
                   {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
               <StickerLibrary key={friend.account} account={friend.account} />
+              {friend.chat_type===2 && <GroupLanguage key={`${friend.account}:${friend.friend}`} account={friend.account} friend={friend.friend}/>}
               {friend.chat_type!==2 && <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} onDirty={setRelationshipDirty}/>}
               <div ref={bottom} />
             </div>}

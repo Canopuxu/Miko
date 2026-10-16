@@ -17,6 +17,7 @@ from miko.storage.qq import QqStore
 from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay, update_face_catalog
 from miko.adapters.qq.media import StickerLibrary
 from miko.domain.conversation.context_selection import pending_contacts
+from miko.domain.conversation.language import GroupLanguage
 
 
 class StaleReply(ValueError):
@@ -59,10 +60,13 @@ class QqService:
         self.epoch = self.clock()
         self.loop_task = None
         self.halted = False
+        self.language = GroupLanguage(self, Path(local_root), clock=clock)
+        self.chat.qq_language = self.language
 
     def start(self):
         self.halted = False
         self.sync_groups()
+        self.language.start()
         if self.receiver:
             self.receiver.start()
         self.loop_task = asyncio.create_task(self.loop())
@@ -74,6 +78,7 @@ class QqService:
 
     async def close(self):
         self.halted = True
+        await self.language.close()
         if self.loop_task:
             self.loop_task.cancel()
             await asyncio.gather(self.loop_task, return_exceptions=True)
@@ -112,6 +117,8 @@ class QqService:
                 raise ValueError('QQ 接收账号与好友配置不一致')
             await self.client.target(*key)
         await self.invalidate(key)
+        if not enabled and self.store.friend(key)['chat_type'] == 2:
+            await self.language.pause(key)
         self.store.update_friend(key, enabled=int(enabled), blocked=0, mode='owner',
             note='等待新消息' if enabled else '已关闭', activated_at=self.clock(),
             pending_since=None, pending_last=None, due_at=None)
@@ -126,6 +133,7 @@ class QqService:
             await self.chat.cancel(worker.turn)
 
     async def source_changed(self, state):
+        await self.language.reset()
         if state == 'connected':
             self.epoch = self.clock()
             if isinstance(self.client, OneBot):
@@ -157,6 +165,8 @@ class QqService:
             target = self.store.get_event(key, event['message_id']) if type(event.get('message_id')) is int else None
             if target and not target['recalled']:
                 self.store.recall(key, event['message_id'])
+                if group:
+                    await self.language.pause(key)
                 await self.invalidate(key)
                 cfg = self.store.friend(key)
                 remaining = pending_contacts(self.store.context(key))
@@ -208,6 +218,8 @@ class QqService:
             await self.invalidate(key)
         if not cfg['enabled'] or cfg['blocked'] or key in self.storage_faults or stamp < int(cfg['activated_at']):
             return
+        if group:
+            self.language.observe(key, mid, stamp, payload['segments'])
         now = self.clock()
         first = cfg['pending_since'] if cfg['pending_since'] is not None else now
         batch_due = min(now + self.quiet_seconds, first + self.collect_seconds)
@@ -338,11 +350,16 @@ class QqService:
                 raise StaleReply('引用原消息已失效，未发送')
             await self.client.quote(*key, event)
             segments.insert(0, {'type': 'reply', 'data': {'id': str(event['message_id'])}})
-        if self.store.friend(key)['chat_type'] == 2 and worker.position == 0 and bubble['kind'] == 'text':
-            pending = pending_contacts(self.store.context(key))
-            target = pending[-1] if pending and pending[-1].get('directed') else None
-            if target:
-                segments.insert(0, {'type': 'at', 'data': {'qq': target['author']['id'].removeprefix('qq:'),
+        if self.store.friend(key)['chat_type'] == 2 and bubble['kind'] == 'text':
+            records = self.store.context(key)
+            target_id = bubble.get('reply_to_message_id')
+            if target_id is not None and not any(r['message_id'] == target_id for r in records):
+                raise StaleReply('回应原消息已失效，未发送')
+            for uid in reversed(bubble.get('mention_user_ids', [])):
+                target = next((r for r in reversed(records) if r['author']['id'] == uid), None)
+                if not target:
+                    raise StaleReply('@ 对象已不在当前上下文中，未发送')
+                segments.insert(0, {'type': 'at', 'data': {'qq': uid.removeprefix('qq:'),
                     'name': target['author']['name'], 'uid': target.get('sender_uid', '')}})
         self.check(key, worker)
         return segments

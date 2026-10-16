@@ -54,6 +54,7 @@ class GroupRepliesTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(asyncio.gather(*(w.task for w in self.service.workers.values())), 3)
 
     async def test_direct_mention_combines_people_and_uses_native_at(self):
+        self.chat.bubbles = [dict(kind='text', text='还没想好', reply_to_message_id=2, mention_user_ids=['qq:789'])]
         await self.service.receive(self.event(1, '今天好累'))
         self.assertIsNone(self.service.store.friend(self.key)['due_at'])
         await self.service.receive(self.event(2, '你晚上吃啥', sender=789,
@@ -95,6 +96,31 @@ class GroupRepliesTests(unittest.IsolatedAsyncioTestCase):
         await self.service.receive(self.event(2,'我准备吃面',sender=789))
         await self.reply()
         self.assertEqual(self.client.quoted,[1])
+
+    async def test_response_target_does_not_force_quote_or_at(self):
+        self.chat.bubbles=[dict(kind='text',text='晚上吃面吧',reply_to_message_id=1,mention_user_ids=[])]
+        await self.service.receive(self.event(1,'Miko，晚上吃啥'))
+        await self.service.receive(self.event(2,'我刚下班',sender=789))
+        await self.reply()
+        self.assertEqual([s['type'] for s in self.client.payloads[-1]],['text'])
+        self.assertEqual(self.client.quoted,[])
+
+    async def test_at_and_quote_are_chosen_separately(self):
+        self.chat.bubbles=[dict(kind='text',text='你觉得呢',reply_to_message_id=1,
+            quote_message_id=1,mention_user_ids=['qq:789'])]
+        await self.service.receive(self.event(1,'Miko，电影看哪部'))
+        await self.service.receive(self.event(2,'我也去',sender=789))
+        await self.reply()
+        self.assertEqual(self.client.quoted,[1])
+        at=next(s for s in self.client.payloads[-1] if s['type']=='at')
+        self.assertEqual(at['data']['qq'],'789')
+
+    async def test_unseen_at_target_is_not_sent(self):
+        self.chat.bubbles=[dict(kind='text',text='你也来吗',mention_user_ids=['qq:999'])]
+        await self.service.receive(self.event(1,'Miko，周末去看电影'))
+        await self.reply()
+        self.assertEqual(self.client.sent,[])
+        self.assertEqual(self.service.store.runs(self.key)[0]['state'],'error')
 
     async def test_withdrawal_cancels_pending_reply_and_excludes_recalled_context(self):
         await self.service.receive(self.event(1,'Miko，撤回这句'))
