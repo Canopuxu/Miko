@@ -14,6 +14,13 @@
             const item = read(value, key);
             return item === undefined ? [] : [item];
         });
+        const captureBuilder = owner => {
+            if (!owner || !Object.getOwnPropertyDescriptor(owner, 'messageSendService')) return;
+            let sender = owner.messageSendService;
+            if (sender && typeof sender.get === 'function' && Object.hasOwn(sender, 'set')) sender = sender.get();
+            const builder = typeof sender?.getMsgElements === 'function' ? sender : sender?.msgService;
+            if (typeof builder?.getMsgElements === 'function' && !services.includes(builder)) services.push(builder);
+        };
         const elements = [document.querySelector('#app'), ...document.querySelectorAll('[data-v-app]')];
         // QQ can move or rename its mount element. Inspect only DOM nodes for
         // Vue's own component markers, without walking arbitrary page globals.
@@ -36,6 +43,13 @@
             const value = components.pop();
             if (!value || typeof value !== 'object' || seen.has(value)) continue;
             seen.add(value);
+            // AIO-local services may live in component state rather than the
+            // application's shared DI container.
+            for (const field of ['setupState', 'ctx']) {
+                const state = read(value, field);
+                if (!state || typeof state !== 'object') continue;
+                captureBuilder(state);
+            }
             if (value.provides) providers.push(value.provides);
             if (value.appContext?.provides) providers.push(value.appContext.provides);
             components.push(value.component, value.subTree);
@@ -145,8 +159,6 @@
             try {
                 const result = await contents.executeJavaScript(`(() => {
                     const environment = (${renderer.toString()})();
-                    const builder=environment.services.find(value=>typeof value.getMsgElements==='function');
-                    if(builder)globalThis.__mikoElementBuilder={builder};
                     return {route: environment.route, capabilities: (${capabilities.toString()})(environment)};
                 })()`);
                 if (result.route || result.capabilities.send_images || result.capabilities.faces) serviceWindows++;

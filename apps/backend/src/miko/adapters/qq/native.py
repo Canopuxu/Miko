@@ -78,7 +78,7 @@ class NativeReceiver(EventReceiver):
         result = super().status()
         if result['state'] == 'connected':
             result['note'] = ('QQ 已连接' if self.client.capabilities.get('send_images', True)
-                              else 'QQ 已连接；请在 QQ 打开聊天窗口以启用图片发送')
+                              else 'QQ 已连接；图片发送暂不可用，请重新检测 QQ 连接')
         return result
 
     async def run(self):

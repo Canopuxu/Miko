@@ -13,7 +13,8 @@ async function fixture(t, kind) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
     const calls=[],writes=[],forwarded=[],records=new Map(),files=new Map();
-    const provider={builder:{getMsgElements:()=>[{replyElement:{fixture:true}}]},groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
+    const provider={builder:{getMsgElements:({items})=>items.map(item=>item.type==='pic'
+        ? {picElement:{sourcePath:item.src}} : {replyElement:{fixture:true}})},groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
         ['u_friend',{coreInfo:{uin:'67890',uid:'u_friend',nick:'新版好友',remark:'备注'}}],
         ['u_older',{uin:'67891',uid:'u_older',nick:'旧版好友',remark:'旧备注'}]])}};
     const document={querySelector:()=>({__vue_app__:{
@@ -62,7 +63,8 @@ async function fixture(t, kind) {
         process:{pid:42,mainModule:{require:name=>name==='electron'?electron:name==='crypto'?crypto:
             name==='http'?{createServer:callback=>{handler=callback;return server;}}:
             name==='fs'?{existsSync:path=>files.has(path),statSync:path=>({size:files.get(path).length}),
-                readFileSync:path=>files.get(path)}:null}}};
+                readFileSync:path=>files.get(path),mkdirSync(){},writeFileSync:(path,raw)=>files.set(path,raw),
+                unlinkSync:path=>files.delete(path)}:name==='path'?path:name==='os'?{tmpdir:()=>'/fixture-temp'}:null}}};
     await vm.runInNewContext(source,context);
     t.after(()=>context.__mikoClientBridge.close());
     async function rpc(action,payload={}) {
@@ -88,12 +90,12 @@ test('market face image reads QQ cached resource without accepting a caller file
     assert.equal(Buffer.from(result.base64,'base64').toString(),'fixture-image-bytes');
 });
 
-test('QQ image/quote builder survives its chat pane unmounting',async t=>{
+test('prepares the original GIF without relying on Electron GIF decoding or flattening frames',async t=>{
     const bridge=await fixture(t,'renderer');
-    delete bridge.provider.builder;
-    bridge.records.set('quote',{msgId:'quote',chatType:2,elements:[]});
-    const result=await bridge.rpc('prepare_reply',{group_id:'900',native_id:'quote'});
-    assert.equal(result[0].replyElement.fixture,true);
+    const raw=Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7','base64');
+    const elements=await bridge.rpc('prepare_image',{base64:raw.toString('base64'),extension:'gif'});
+    assert.ok(elements[0].picElement.sourcePath.endsWith('.gif'));
+    assert.deepEqual(bridge.files.get(elements[0].picElement.sourcePath),raw);
 });
 
 for(const kind of ['renderer','legacy2','legacy3']) {

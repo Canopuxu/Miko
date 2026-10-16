@@ -82,16 +82,7 @@
         } catch (error) {pending.delete(id); clearTimeout(timer); reject(error);}
     });
 
-    const rendererServices = `(() => {
-        const services=((${compat.renderer.toString()})()).services;
-        const builder=services.find(v=>typeof v.getMsgElements==='function');
-        if(builder)globalThis.__mikoElementBuilder={account:${JSON.stringify(config.account)},builder};
-        else if(globalThis.__mikoElementBuilder && (!globalThis.__mikoElementBuilder.account || globalThis.__mikoElementBuilder.account===${JSON.stringify(config.account)})){
-            globalThis.__mikoElementBuilder.account=${JSON.stringify(config.account)};
-            services.push(globalThis.__mikoElementBuilder.builder);
-        }
-        return services;
-    })()`;
+    const rendererServices = `((${compat.renderer.toString()})()).services`;
     const friends = async () => contents.executeJavaScript(`(() => {
         const store=(${rendererServices}).find(v=>!!v.buddyMap);
         if(!store) throw new Error('QQ friend store unavailable');
@@ -103,7 +94,7 @@
     const prepare = async item => JSON.parse(await contents.executeJavaScript(`(async () => {
         const services=${rendererServices};
         const service=services.find(v=>typeof v.getMsgElements==='function');
-        if(!service)throw new Error('QQ image/quote preparation unavailable; open the QQ chat pane');
+        if(!service)throw new Error('QQ image/quote preparation unavailable');
         const elements=await service.getMsgElements({items:[${JSON.stringify(item)}]});
         return JSON.stringify(elements,(_,v)=>v instanceof Map?Object.fromEntries(v):v);
     })()`));
@@ -140,8 +131,12 @@
         if (action === 'prepare_image' || action === 'set_avatar') {
             const raw=Buffer.from(payload.base64,'base64');
             if(!raw.length || raw.length>6*1024*1024 || !['png','jpg','gif','webp'].includes(payload.extension))throw new Error('Invalid image');
-            const size=require('electron').nativeImage.createFromBuffer(raw).getSize();
-            if(!size.width || size.width*size.height>12000000)throw new Error('Invalid image dimensions');
+            // Python has verified the original with Pillow. Electron's nativeImage
+            // does not decode GIF, so read its logical canvas without re-encoding it.
+            const size=raw.length>=10 && /^GIF8[79]a$/.test(raw.toString('ascii',0,6))
+                ? {width:raw.readUInt16LE(6),height:raw.readUInt16LE(8)}
+                : require('electron').nativeImage.createFromBuffer(raw).getSize();
+            if(!size.width || !size.height || size.width*size.height>12000000)throw new Error('Invalid image dimensions');
             const fs=require('fs'),path=require('path');
             const folder=path.join(require('os').tmpdir(),'miko-qq-bridge',config.account);
             fs.mkdirSync(folder,{recursive:true});
@@ -261,17 +256,7 @@
             response.writeHead(502,{'Content-Type':'application/json'}).end(JSON.stringify({error:'QQ bridge request failed'}));
         }
     });
-    let imageProbe=null;
-    const refreshImages=()=>{
-        if(closed || selected.capabilities.send_images || imageProbe)return;
-        imageProbe=contents.executeJavaScript(`(${rendererServices}).some(v=>typeof v.getMsgElements==='function')`)
-            .then(ready=>{if(!closed)selected.capabilities.send_images=ready;})
-            .catch(()=>{}).finally(()=>{imageProbe=null;});
-    };
-    const heartbeat=setInterval(()=>{
-        publish('bridge/heartbeat',{online:String(globalThis.authData?.uin)===config.account});
-        refreshImages();
-    },15000);
+    const heartbeat=setInterval(()=>publish('bridge/heartbeat',{online:String(globalThis.authData?.uin)===config.account}),15000);
     const close = async () => {
         closed=true; clearInterval(heartbeat);
         if (!contents.isDestroyed() && contents.send === wrappedSend) contents.send=originalSend;

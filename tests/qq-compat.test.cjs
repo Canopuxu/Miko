@@ -60,6 +60,28 @@ test('reads inherited providers without evaluating unrelated getters',()=>{
     assert.equal(compat.capabilities(compat.renderer()).friends,true);
 });
 
+test('finds the AIO image builder exposed through component accessors',()=>{
+    const media={getMsgElements(){return 'native builder';}};
+    const document=documentFor({friends:buddy()});
+    const state={};
+    Object.defineProperty(state,'messageSendService',{get:()=>({get msgService(){return media;}})});
+    Object.defineProperty(state,'unrelated',{get(){throw new Error('must not run');}});
+    document.querySelector('#app').__vue_app__._instance={setupState:state};
+    const compat=compatible(document);
+    assert.equal(compat.capabilities(compat.renderer()).send_images,true);
+    assert.equal(compat.renderer().services.find(v=>v.getMsgElements).getMsgElements(),'native builder');
+});
+
+test('resolves AIO getter descriptors without invoking unrelated state accessors',()=>{
+    const media={getMsgElements(){}};
+    const state={messageSendService:{get:()=>({msgService:media}),set:undefined}};
+    Object.defineProperty(state,'unrelated',{get(){throw new Error('must not run');}});
+    const document=documentFor({friends:buddy()});
+    document.querySelector('#app').__vue_app__._instance={ctx:state};
+    const compat=compatible(document);
+    assert.equal(compat.capabilities(compat.renderer()).send_images,true);
+});
+
 function electronFor(windows) {
     return {BrowserWindow:{getAllWindows:()=>windows.map(row=>({webContents:{id:row.id,
         isDestroyed:()=>false,getURL:()=>row.url,
