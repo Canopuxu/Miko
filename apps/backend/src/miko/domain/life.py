@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from miko.adapters.life.store import ScheduleData, ScheduleDataManager
-from miko.domain.conversation.chat import reply_context
+from miko.domain.life_material import generation_material
 from miko.settings import REPO_ROOT
 from miko.storage.search import terms
 
@@ -146,14 +146,10 @@ class Life:
         revision = current.revision if current else 0
         store_revision = self.store.revision
         try:
-            material = reply_context(self.chat.profiles.context('兴趣 生活 学习 乐器 设计 运动'))
-            # Stable Miko facts inform her activities; owner input stays recent.
-            material['role_material'] = [r for r in material.get('role_material', [])
-                                         if r['subject'] == 'miko' or r['kind'] == 'recent']
-            material.pop('friend_relationships', None)
-            material['生活条目'] = [row for row in self.records()[:40] if row['day'] <= day.isoformat()]
-            material['生活目标'] = list(self.store.goals.values())
-            material['日期'] = day.isoformat()
+            material = generation_material(self.chat.profiles, self.records(), self.store.goals, day)
+            # A manual addition to this day is already a fact to continue from.
+            if current:
+                material['今天已有的记录'] = current.entries
             prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
             value = await self.chat.complete_memory(prompt, json.dumps(material, ensure_ascii=False), model=self.model or None, json_output=True)
             output = LifeGeneration.model_validate_json(value['text'])

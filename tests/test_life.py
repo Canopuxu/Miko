@@ -13,6 +13,7 @@ from miko.api.life import life_router
 from miko.api.profiles import ProfileInput
 from miko.domain.conversation.chat import ChatService, reply_context
 from miko.domain.life import Life, GoalInput
+from miko.domain.life_material import generation_material
 from miko.settings import Settings
 from miko.adapters.memory.service import Memory
 
@@ -167,7 +168,9 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             inputs.append(json.loads(message))
             return {'text': json.dumps(outputs.pop(0), ensure_ascii=False)}
         self.chat.complete_memory = complete
-        with patch('miko.domain.life.date', SimulatedDay):
+        with patch('miko.domain.life.date', SimulatedDay), patch('miko.domain.life_material.day_rhythm',
+                return_value={'白天的时间去向': '半天处理本职事务，另外处理生活琐事',
+                              '空下来之后': '做一会儿自己有兴致的活动，之后休息'}):
             SimulatedDay.current = date(2026, 10, 6)
             self.life.save(SimulatedDay.today(), [{'text': '午后小憩'}], 0)
             await self.life.generate()
@@ -227,3 +230,29 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): await self.life.generate()
         self.assertEqual(Life(self.chat).store.goals[goal_id]['status'], 'paused')
         self.assertFalse(self.life.store.has(date.today()))
+
+    async def test_daily_background_does_not_turn_all_hobbies_into_a_task_list(self):
+        self.chat.profiles.save(ProfileInput(subject='miko', kind='fact', category='兴趣与能力/学习与工作',
+                                            title='职业', content='绘本插画师').record())
+        self.chat.profiles.save(ProfileInput(subject='miko', kind='fact', category='性格与表达/性格',
+                                            title='性格', content='好胜、小傲娇').record())
+        self.chat.profiles.save(ProfileInput(subject='miko', kind='fact', category='兴趣与能力/乐器',
+                                            title='乐器', content='贝斯').record())
+        old = {'id': 'old', 'text': '完成绘本《秋天》分镜', 'status': 'completed',
+               'completed_date': '2026-10-05', 'start_date': '2026-10-01'}
+        drawing = {'id': 'drawing', 'text': '绘本《小树》第1页上色', 'status': 'active',
+                   'start_date': '2026-10-06', 'target_date': '2026-10-30'}
+        piano = {'id': 'piano', 'text': '练习电子琴《River Flows in You》', 'status': 'active',
+                 'start_date': '2026-10-06', 'target_date': '2026-11-30'}
+        records = [{'day': '2026-10-05', 'text': '《秋天》分镜已经交付', 'goal_id': 'old'},
+                   {'day': '2026-10-05', 'text': '《小树》第1页铺好了底色', 'goal_id': 'drawing'}]
+        material = generation_material(self.chat.profiles, records,
+            {g['id']: g for g in (old, drawing, piano)}, date(2026, 10, 6),
+            {'白天的时间去向': '处理手上工作和家务', '空下来之后': '看电影，吃饭洗澡后休息'})
+        self.assertEqual([g['id'] for g in material['生活目标']], ['drawing'])
+        self.assertNotIn('贝斯', json.dumps(material['role_material'], ensure_ascii=False))
+        self.assertNotIn('小傲娇', json.dumps(material['role_material'], ensure_ascii=False))
+        self.assertEqual(material['相关事项的最新进展'][0]['goal_id'], 'drawing')
+        self.assertTrue(all('goal_id' not in r for r in material['生活条目']))
+        self.assertEqual(material['已经告一段落的事项'][0]['status'], 'completed')
+        self.assertNotIn('id', material['已经告一段落的事项'][0])
