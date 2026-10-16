@@ -43,14 +43,19 @@ class QqStore:
                                {'segments': json.loads(piece['segments'])})
             self.record(key, piece['receipt_id'], 'miko')
 
-    def add_friend(self, account, friend, name):
+    def add_friend(self, account, friend, name, chat_type=1):
         cid = f'qq:{account}:{friend}'
         stamp = time.time_ns() // 1_000_000
         with self.chat.connect() as db:
-            db.execute("INSERT OR IGNORE INTO people VALUES (?, 'contact', ?)", (f'qq:{friend}', name))
+            if chat_type == 1:
+                db.execute("INSERT OR IGNORE INTO people VALUES (?, 'contact', ?)", (f'qq:{friend}', name))
             db.execute("INSERT OR IGNORE INTO conversations VALUES (?, ?, 'qq', ?, ?)", (cid, name, stamp, stamp))
-            db.execute("INSERT OR IGNORE INTO qq_friends(account, friend, name, conversation_id) VALUES (?, ?, ?, ?)",
-                       (account, friend, name, cid))
+            db.execute("INSERT OR IGNORE INTO qq_friends(account, friend, name, conversation_id,chat_type) VALUES (?, ?, ?, ?,?)",
+                       (account, friend, name, cid, chat_type))
+
+    def member(self, uin, name):
+        with self.chat.connect() as db:
+            db.execute("INSERT OR IGNORE INTO people VALUES (?, 'contact', ?)", (f'qq:{uin}', name or uin))
 
     def friends(self):
         with self.chat.connect() as db:
@@ -176,14 +181,19 @@ class QqStore:
             if event:
                 row.update(message_id=event['message_id'], segments=payload.get('segments', []),
                            quoted_message=payload.get('quoted_message'), recalled=bool(event['recalled']))
+                if payload.get('sender_name') and row['author']['kind'] == 'contact':
+                    row['author']['name'] = payload['sender_name']
+                row['directed'] = payload.get('directed', False)
+                row['sender_uid'] = payload.get('sender_uid', '')
         return rows
 
     def context(self, key):
         # Recent messages include confirmed owner / Miko sends, independent of QQ account identity.
         friend = self.friend(key)
         # A fresh introduction must not inherit old test exchanges claiming they already met.
-        since = friend['activated_at'] * 1000 if not friend['miko_introduced'] else 0
+        since = friend['activated_at'] * 1000 if not friend['miko_introduced'] or friend['chat_type'] == 2 else 0
         rows = [r for r in self.messages(key) if not r['recalled'] and r['created_at'] >= since][-40:]
         return [{'author': r['author'], 'text': r['text'], 'created_at': r['created_at'],
                  'message_id': r['message_id'], 'segments': model_message(r),
+                 'directed': r.get('directed', False), 'sender_uid': r.get('sender_uid', ''),
                  **({'quoted_message': r['quoted_message']} if r['quoted_message'] else {})} for r in rows]

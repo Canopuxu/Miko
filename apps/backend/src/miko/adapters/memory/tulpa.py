@@ -69,11 +69,12 @@ class Projection(ChatStore):
                         if old['content'] != r['text']:
                             db.execute('UPDATE messages SET content=? WHERE id=?', (r['text'], old['id']))
                         continue
+                    conversation_type = 'group' if r['source'] == 'qq' and friend.startswith('group-') else 'direct'
                     inserted = db.execute('''INSERT INTO messages(original_id,author,platform,conversation_id,
                       conversation,conversation_type,sender_id,timestamp,content,is_self,source_id)
-                      VALUES(?,?,'qq',?,?,'direct',?,?,?,?,?)''',
-                      (r['id'], r['kind'], cid, name, r['author_id'], r['created_at'], r['text'], is_self, native))
-                    db.execute("INSERT OR IGNORE INTO tulpa_scopes(platform,conversation_id,kind) VALUES('qq',?,'direct')", (cid,))
+                      VALUES(?,?,'qq',?,?,?,?,?,?,?,?)''',
+                      (r['id'], r['kind'], cid, name, conversation_type, r['author_id'], r['created_at'], r['text'], is_self, native))
+                    db.execute("INSERT OR IGNORE INTO tulpa_scopes(platform,conversation_id,kind) VALUES('qq',?,?)", (cid, conversation_type))
                     if not initial and (r['sequence'] > after or r['created_at'] >= db.execute('SELECT since FROM tulpa_control').fetchone()[0]):
                         collect(db, inserted.lastrowid)
             live_originals=eligible_originals

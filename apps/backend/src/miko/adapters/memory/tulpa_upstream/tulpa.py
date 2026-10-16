@@ -261,8 +261,9 @@ class Tulpa:
                 # A few actual neighboring messages, never a full group transcript.
                 for row in rows[::20]:
                     context.extend(db.execute('''SELECT * FROM messages WHERE platform=? AND conversation_id=?
-                      AND timestamp BETWEEN ? AND ? AND is_self=0 ORDER BY timestamp DESC,id DESC LIMIT 1''',
+                      AND timestamp BETWEEN ? AND ? AND is_self=0 ORDER BY timestamp DESC,id DESC LIMIT 12''',
                       (s['platform'],s['conversation_id'],row['timestamp']-120000,row['timestamp'])).fetchall())
+            context=list({r['id']:r for r in context}.values())
             refs={r['id']:fingerprint(r) for r in list(rows)+context}
             previous=s['automatic'] if s['valid'] else ''
         payload=dict(kind=s['kind'],previous=previous,manual_corrections=s['manual'],

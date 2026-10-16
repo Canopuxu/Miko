@@ -75,11 +75,13 @@
             if (!value || typeof value !== 'object' || visited.has(value)) continue;
             visited.add(value);
             if (typeof value.getMsgElements === 'function' || typeof value.getQQFaceLabel === 'function'
-                    || value.buddyMap instanceof Map || (value.buddyMap && typeof value.buddyMap === 'object')) {
+                    || value.buddyMap instanceof Map || (value.buddyMap && typeof value.buddyMap === 'object')
+                    || Array.isArray(value.groupList)) {
                 services.push(value);
                 if (services.some(item => !!item.buddyMap)
                         && services.some(item => typeof item.getMsgElements === 'function')
-                        && services.some(item => typeof item.getQQFaceLabel === 'function')) break;
+                        && services.some(item => typeof item.getQQFaceLabel === 'function')
+                        && services.some(item => Array.isArray(item.groupList))) break;
                 continue;
             }
             if (depth >= 8) continue;

@@ -49,6 +49,8 @@ class ProfilesTests(unittest.TestCase):
         with self.chat.connect() as db:
             db.execute('UPDATE profile_entries SET enabled=0 WHERE id=?', (clothing['id'],))
             db.execute('ALTER TABLE qq_friends DROP COLUMN auto_reply_idle')
+            for column in ('chat_type', 'natural_chat', 'last_response_at'):
+                db.execute('ALTER TABLE qq_friends DROP COLUMN ' + column)
             db.execute('PRAGMA user_version=4')
         migrated = ProfileStore(ChatStore(self.path))
         self.assertEqual(migrated.get(clothing['id'])['enabled'], 1)

@@ -4,10 +4,11 @@ import { BookOpen, NotebookPen, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerLibrary } from './StickerLibrary';
+import { FriendManager } from '../components/FriendManager';
 import { FriendRelationships } from './FriendRelationships';
 
 type Friend = { account: string; friend: string; name: string; enabled: number; blocked: number;
-  auto_reply_idle:number;
+  auto_reply_idle:number; chat_type:number; natural_chat:number;
   state: string; mode: string; note: string; due_at: number | null;
   owner_relationship: string; miko_relationship: string; miko_introduced: number; intro_receipt_id: number | null };
 type Run = { id: string; state: string; text: string; error: string | null; created_at: number;
@@ -27,6 +28,9 @@ export function QqPage() {
   const navigation = useContext(NavigationContext)!;
   const [status, setStatus] = useState<QqStatus | null>(null);
   const [selected, setSelected] = useState(new URLSearchParams(location.search).get('friend'));
+  const [groupMode,setGroupMode]=useState(selected?.startsWith('group-')??false);
+  const [manager,setManager]=useState(false);
+  const [notice,setNotice]=useState('');
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState('');
   const [changing, setChanging] = useState(false);
@@ -70,7 +74,7 @@ export function QqPage() {
   }, [selected, detail?.messages.length,navigation.active,navigation.search]);
 
   function select(id: string,preserveFocus=false) {
-    setSelected(id); setDetail(null); setError('');
+    setSelected(id); setGroupMode(id.startsWith('group-')); setDetail(null); setError('');
     navigation.replace({friend:id,...(preserveFocus?{}:{message:undefined})});
   }
 
@@ -92,15 +96,17 @@ export function QqPage() {
     setChanging(true);setError('');
     try {
       const response=await fetch(`/api/qq/friends/${friend.account}/${friend.friend}/options`,{
-        method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_reply_idle})});
+        method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(friend.chat_type===2?{natural_chat:auto_reply_idle}:{auto_reply_idle})});
       if(!response.ok)throw new Error(await responseError(response));
       setStatus(await response.json());
     } catch(cause) {setError(String(cause));} finally {setChanging(false);}
   }
 
   return <AppShell view="qq" sidebar={<>
-      <nav className="conversation-list" aria-label="QQ 好友">
-        {status?.friends.map(item => <button key={`${item.account}:${item.friend}`}
+      <div className="qq-chat-tabs"><button className={!groupMode?'active':''} onClick={()=>guard.proceed(()=>{setGroupMode(false);setSelected(null);setDetail(null);})}>私聊</button><button className={groupMode?'active':''} onClick={()=>guard.proceed(()=>{setGroupMode(true);setSelected(null);setDetail(null);})}>群聊</button></div>
+      <button className="new-chat" onClick={()=>setManager(true)}>＋ 添加{groupMode?'群聊':'好友'}</button>
+      <nav className="conversation-list" aria-label={groupMode?'QQ 群聊':'QQ 私聊'}>
+        {status?.friends.filter(item=>(item.chat_type===2)===groupMode).map(item => <button key={`${item.account}:${item.friend}`}
           className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => {if(item.friend!==selected)guard.proceed(()=>select(item.friend));}}>
           <span className="conversation-title">{item.name}</span>
           <span className="conversation-preview">{stateLabel(item.state)}</span>
@@ -108,24 +114,25 @@ export function QqPage() {
       </nav>
     </>}>
     <main className="main-panel">
-      <header className="page-header"><div><h1>{friend?.name ?? 'QQ 好友'}</h1>
-        <p>{friend?.friend ?? '选择一位好友查看接话状态'}</p></div>
+      <header className="page-header"><div><h1>{friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}</h1>
+        <p>{friend?.friend.replace('group-','') ?? (groupMode?'选择一个群聊查看接话状态':'选择一位好友查看接话状态')}</p></div>
         <div className="header-actions">{friend && <><button className="ui-button" onClick={()=>navigation.navigate('review',
           {day:new Date().toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:undefined})}><NotebookPen size={15}/>回顾</button>
           <button className="ui-button" onClick={()=>navigation.navigate('memory',
             {person:'miko',relation:`qq:${friend.account}:${friend.friend}`})}><BookOpen size={15}/>关系记忆</button></>}
           <span className="model-label">{status?.receiver.state==='connected'?'QQ 已连接':'QQ 未连接'}</span></div></header>
       {error && <div role="alert" className="qq-error error-notice">{error}<button className="text-button" aria-label="关闭提示" onClick={()=>setError('')}><X size={15}/></button></div>}
+      {notice && <p className="qq-caption" role="status">{notice}</p>}
       {replyNotice && <div role="alert" className="qq-error error-notice"><span>{replyNotice}</span>
         <button className="text-button" onClick={()=>navigation.navigate('settings')}>模型设置</button></div>}
       {friend ? <>
         <div className="friend-controls">
           <div><strong>{stateLabel(friend.state)}</strong>
-            <p>{!friend.enabled && '开启后，'}好友明确提到 {characterName}{friend.auto_reply_idle ? ' 或用户两分钟没回复好友消息' : ''}时会自动接话</p>
+            <p>{friend.chat_type===2?`被 @、叫到 ${characterName} 或引用她的消息时接话；各群独立运行。`:<>好友明确提到 {characterName}{friend.auto_reply_idle ? ' 或用户两分钟没回复好友消息' : ''}时会自动接话</>}</p>
             {!!friend.blocked && <p>{friend.note}</p>}
-            <label className="qq-idle-option"><button type="button" role="switch" aria-checked={!!friend.auto_reply_idle}
-              aria-label="用户两分钟没回复自动接话" className="qq-idle-switch" disabled={changing}
-              onClick={()=>void toggleIdle(!friend.auto_reply_idle)}><span/></button>用户两分钟没回复自动接话</label>
+            <label className="qq-idle-option"><button type="button" role="switch" aria-checked={!!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle)}
+              aria-label={friend.chat_type===2?'自然参与群聊':'用户两分钟没回复自动接话'} className="qq-idle-switch" disabled={changing}
+              onClick={()=>void toggleIdle(!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle))}><span/></button>{friend.chat_type===2?'自然参与群聊（允许保持安静）':'用户两分钟没回复自动接话'}</label>
             {friend.state === 'waiting' && friend.due_at && <small>约 {Math.max(0, Math.ceil(friend.due_at - Date.now()/1000))} 秒后接话</small>}
           </div>
           <div className="friend-actions">
@@ -164,12 +171,13 @@ export function QqPage() {
                   {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
               <StickerLibrary key={friend.account} account={friend.account} />
-              <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} onDirty={setRelationshipDirty}/>
+              {friend.chat_type!==2 && <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} onDirty={setRelationshipDirty}/>}
               <div ref={bottom} />
             </div>}
         </section>
-        <p className="qq-caption">你发言后，该会话重新由你主导。</p>
-      </> : <section className="conversation"><EmptyState title="选择一位好友"/></section>}
+        <p className="qq-caption">{friend.chat_type===2?'只记录已开启群聊的新消息。你在本群发言会中断本群正在生成的回复。':'你发言后，该会话重新由你主导。'}</p>
+      </> : <section className="conversation"><EmptyState title={groupMode?'选择或添加一个群聊':'选择一位好友'}/></section>}
+      <FriendManager open={manager} kind={groupMode?'groups':'friends'} onClose={()=>setManager(false)} onAdded={message=>setNotice(message)}/>
       {guard.dialog}
     </main>
   </AppShell>;

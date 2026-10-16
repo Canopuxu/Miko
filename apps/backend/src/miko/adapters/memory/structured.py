@@ -75,7 +75,7 @@ class StructuredMemory:
             if value:
                 clauses.append(f'i.{column}=?'); args.append(value)
         if peer is not None:
-            clauses.append("i.peer IN ('',?)"); args.append(peer)
+            clauses.append('i.peer=?' if ':group-' in peer else "i.peer IN ('',?)"); args.append(peer)
         if active:
             clauses.append("i.enabled=1 AND (i.valid=1 OR i.manual!='')")
         match = fts_query(query)
@@ -237,7 +237,7 @@ class StructuredMemory:
             clauses.append('(d.subject=? OR EXISTS (SELECT 1 FROM memory_event_people p WHERE p.event_id=d.id AND p.subject=?))')
             args.extend([subject, subject])
         if peer is not None:
-            clauses.append("d.peer IN ('',?)"); args.append(peer)
+            clauses.append('d.peer=?' if ':group-' in peer else "d.peer IN ('',?)"); args.append(peer)
         join = ''
         if query.strip():
             match = fts_query(query)

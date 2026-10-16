@@ -31,14 +31,16 @@ class MemobasePipeline:
             for key,value in result.get('usage',{}).items():
                 if isinstance(value,int):usage[key]=usage.get(key,0)+value
             return result['text']
-        ids=[r['id'] for r in payload['stage']]
+        ids=list(dict.fromkeys(r['id'] for r in payload['stage'] + payload.get('context', [])))
         with self.social.store.connect() as db:
             rows=[dict(db.execute('SELECT * FROM messages WHERE id=?',(mid,)).fetchone()) for mid in ids]
+        rows.sort(key=lambda row: (row['timestamp'], row['id']))
         subjects=list(dict.fromkeys(r['sender_id'] for r in rows))
         with self.chat.store.connect() as db:names={r['id']:r['display_name'] for r in db.execute('SELECT * FROM people')}
         _,cid=self.social.detail(sid)['conversation_id'].split('|',1);peer='' if cid=='web:owner' else cid
         existing={s:self.social.structured.items(subject=s) for s in subjects}
-        relevant={s:[r for r in existing[s] if r['peer'] in ('',peer) and r['enabled'] and (r['valid'] or r['manual'])] for s in subjects}
+        permitted_peers = (peer,) if ':group-' in peer else ('', peer)
+        relevant={s:[r for r in existing[s] if r['peer'] in permitted_peers and r['enabled'] and (r['valid'] or r['manual'])] for s in subjects}
         previous='\n'.join(f'{names.get(s,s)}[{s}] · {r["category"]}::{r["topic"]}::{r["content"]}' for s in subjects for r in relevant[s]) or 'NONE'
         events=self.social.structured.days(peer=peer)[:20]
         previous_events='\n'.join(r['day']+' · '+r['text'] for r in events) or 'NONE'
@@ -77,7 +79,7 @@ class MemobasePipeline:
                 action=actions.get(change['memo_id'],{'action':'APPEND','memo':'APPEND'})
                 if action['action']=='ABORT':continue
                 content=action['memo'] if action['action']=='UPDATE' else ((current['automatic']+';' if current else '')+change['new_info'])
-                item_peer=peer if subject not in ('owner','miko') or change['topic']=='人物关系' else ''
+                item_peer=peer if ':group-' in peer or subject not in ('owner','miko') or change['topic']=='人物关系' else ''
                 exact=next((r for r in existing[subject] if (r['peer'],r['category'],r['topic'])==(item_peer,*key)),None)
                 plans.append({'subject':subject,'peer':item_peer,'category':key[0],'topic':key[1],'content':content,'expected_revision':exact['revision'] if exact else 0,'sources':ids})
         for i,event in enumerate(value['events']):

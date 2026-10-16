@@ -13,7 +13,7 @@ async function fixture(t, kind) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
     const calls=[],writes=[],forwarded=[];
-    const provider={friends:{buddyMap:new Map([
+    const provider={groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
         ['u_friend',{coreInfo:{uin:'67890',uid:'u_friend',nick:'新版好友',remark:'备注'}}],
         ['u_older',{uin:'67891',uid:'u_older',nick:'旧版好友',remark:'旧备注'}]])}};
     const document={querySelector:()=>({__vue_app__:{
@@ -34,7 +34,8 @@ async function fixture(t, kind) {
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},
                 {msgList:[{msgId:args[0].msgIds[0],chatType:1}]});
         } else if(cmd==='nodeIKernelMsgService/sendMsg') {
-            const record={msgId:'901',chatType:1,peerUid:'u_friend',peerUin:'67890',senderUin:'12345',
+            const record={msgId:'901',chatType:args[0].peer.chatType,peerUid:args[0].peer.peerUid,
+                peerUin:args[0].peer.chatType===2?'900':'67890',senderUin:'12345',
                 msgTime:'1792139000',elements:args[0].msgElements};
             contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},{result:0});
             queueMicrotask(()=>{
@@ -90,5 +91,11 @@ for(const kind of ['renderer','legacy2','legacy3']) {
         assert.equal(bridge.calls.filter(value=>value.cmd.endsWith('/sendMsg')).length,1);
         assert.equal(bridge.calls[0].args[0].peer.peerUid,'u_friend');
         assert.equal(bridge.calls[1].args[0].msgElements[0].textElement.content,'测试');
+        const groups=await bridge.rpc('get_group_list');
+        assert.equal(groups[0].group_id,'900');
+        const grouped=await bridge.rpc('send_native',{group_id:'900',elements:[{textElement:{content:'群聊测试'}}]});
+        assert.equal(grouped.sendStatus,2);
+        assert.equal(bridge.calls[2].args[0].peer.chatType,2);
+        assert.equal(bridge.calls[2].args[0].peer.peerUid,'900');
     });
 }

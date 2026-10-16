@@ -29,7 +29,7 @@
         if (compat.account(globalThis.authData) !== config.account || contents.isDestroyed()) throw new Error('QQ session changed');
         return {user_id: Number(config.account), nickname: globalThis.authData.nickName || '',
             pid: process.pid, version: require('electron').app.getVersion(),
-            capabilities: selected.capabilities, transport: connection.kind, adapter_hash: config.adapter_hash};
+            uid: globalThis.authData.uid || '', capabilities: selected.capabilities, transport: connection.kind, adapter_hash: config.adapter_hash};
     };
     const publish = (name, payload) => {
         try { identity(); } catch { return; }
@@ -56,8 +56,8 @@
                     'nodeIKernelMsgListener/onActiveMsgInfoUpdate'].includes(notification?.cmdName)) continue;
             const records = notification.payload?.msgList || (notification.payload?.msgRecord ? [notification.payload.msgRecord] : []);
             for (const message of records) {
-                if (message.chatType !== 1) continue;
-                const send = sends.get(message.peerUid);
+                if (![1,2].includes(message.chatType)) continue;
+                const send = sends.get(message.chatType+':'+message.peerUid);
                 if (send && String(message.senderUin) === config.account) {
                     if (!send.id && notification.cmdName.endsWith('/onAddSendMsg') && fingerprint(message.elements) === send.fingerprint) send.id=message.msgId;
                     if (send.id === message.msgId && message.sendStatus === 2) send.resolve(message);
@@ -96,11 +96,27 @@
         return JSON.stringify(elements,(_,v)=>v instanceof Map?Object.fromEntries(v):v);
     })()`));
 
+    const groups = async () => contents.executeJavaScript(`(() => {
+        const store=(${rendererServices}).find(v=>Array.isArray(v.groupList));
+        if(!store)throw new Error('QQ group list unavailable');
+        return store.groupList.map(v=>({group_id:String(v.groupCode),group_name:v.groupName||String(v.groupCode)}));
+    })()`);
+    const peer = async payload => {
+        if(payload.group_id) {
+            if(!(await groups()).some(g=>g.group_id===String(payload.group_id)))throw new Error('Not a joined QQ group');
+            return {chatType:2,peerUid:String(payload.group_id),guildId:''};
+        }
+        const friend=(await friends()).find(f=>String(f.user_id)===String(payload.user_id));
+        if(!friend)throw new Error('Not a QQ friend');
+        return {chatType:1,peerUid:friend.uid,guildId:''};
+    };
+
     const dispatch = async (action, payload) => {
         if (action === 'disconnect') {setTimeout(() => close(), 50); return {closing: true};}
         const self = identity();
         if (action === 'get_login_info') return self;
         if (action === 'get_friend_list') return friends();
+        if (action === 'get_group_list') return groups();
         if (action === 'fetch_sys_faces') return contents.executeJavaScript(`(() => {
             const store=(${rendererServices}).find(v=>typeof v.getQQFaceLabel==='function');
             if(!store)throw new Error('QQ face catalog unavailable');
@@ -136,10 +152,9 @@
             return prepare({type:'reply',reply:message});
         }
         if (action === 'get_native_message' || action === 'read_image') {
-            const friend=(await friends()).find(f=>String(f.user_id)===String(payload.user_id));
-            if (!friend) throw new Error('Not a QQ friend');
+            const target=await peer(payload);
             const reply=await invoke('nodeIKernelMsgService/getMsgsByMsgId',[
-                {peer:{chatType:1,peerUid:friend.uid,guildId:''},msgIds:[String(payload.native_id)]}]);
+                {peer:target,msgIds:[String(payload.native_id)]}]);
             const message=reply?.msgList?.find(m=>m.msgId===String(payload.native_id));
             if (!message) throw new Error('QQ message unavailable');
             if(action==='get_native_message')return message;
@@ -150,7 +165,7 @@
             if(!fs.existsSync(image.sourcePath)) {
                 await invoke('nodeIKernelMsgService/downloadRichMedia',[{getReq:{
                     fileModelId:'',downSourceType:0,triggerType:1,msgId:message.msgId,
-                    chatType:1,peerUid:friend.uid,elementId:element.elementId,
+                    chatType:target.chatType,peerUid:target.peerUid,elementId:element.elementId,
                     thumbSize:0,downloadType:1,filePath:image.sourcePath}}]);
                 const deadline=Date.now()+10000;
                 while(Date.now()<deadline && (!fs.existsSync(image.sourcePath) || !fs.statSync(image.sourcePath).size))await new Promise(r=>setTimeout(r,100));
@@ -164,22 +179,21 @@
         }
         if (action === 'send_native') {
             if (config.test_targets && !config.test_targets.includes(String(payload.user_id))) throw new Error('Target not enabled for bridge test');
-            const friend = (await friends()).find(f => String(f.user_id) === String(payload.user_id));
-            if (!friend) throw new Error('Not a QQ friend');
-            if(sends.has(friend.uid))throw new Error('Send already in progress for this friend');
+            const target=await peer(payload), sendKey=target.chatType+':'+target.peerUid;
+            if(sends.has(sendKey))throw new Error('Send already in progress for this chat');
             let resolve;const receipt=new Promise(r=>resolve=r);
-            sends.set(friend.uid,{resolve,fingerprint:fingerprint(payload.elements),id:null});
+            sends.set(sendKey,{resolve,fingerprint:fingerprint(payload.elements),id:null});
             let timer;
             try {
                 const accepted=await invoke('nodeIKernelMsgService/sendMsg', [{msgId: '0',
-                    peer: {chatType: 1, peerUid: friend.uid, guildId: ''},
+                    peer: target,
                     msgElements: payload.elements.map(element => element.picElement
                         ? {...element, picElement: {...element.picElement,
                             thumbPath: new Map(Object.entries(element.picElement.thumbPath || {}).map(([k,v])=>[Number(k),v]))}}
                         : element), msgAttributeInfos: new Map()}]);
                 if(accepted?.result!==0)throw new Error('QQ rejected send: '+JSON.stringify(accepted));
                 return await Promise.race([receipt,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Send receipt timeout')),12000);})]);
-            } finally {clearTimeout(timer);sends.delete(friend.uid);}
+            } finally {clearTimeout(timer);sends.delete(sendKey);}
         }
         throw new Error('Unsupported bridge action');
     };

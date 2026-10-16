@@ -16,6 +16,8 @@ class NativeClientDriver:
         self.receiving = None
         self.on_connected = None
         self.event_session = None
+        self.self_uid = ''
+        self.group_ids = set()
         self.http = httpx.AsyncClient(base_url=f"http://127.0.0.1:{int(config['port'])}",
             headers={'Authorization': 'Bearer ' + config['token']}, trust_env=False, timeout=25)
         database.parent.mkdir(parents=True, exist_ok=True)
@@ -39,27 +41,33 @@ class NativeClientDriver:
 
     def remember(self, record):
         peer = str(record['peerUin'])
-        if record['chatType'] != 1 or not peer.isdigit():
-            raise ValueError('Expected private QQ message')
+        if record['chatType'] not in (1, 2) or not peer.isdigit():
+            raise ValueError('Expected QQ chat message')
+        native_id = f"group-{peer}:{record['msgId']}" if record['chatType'] == 2 else record['msgId']
         with self.db:
             self.db.execute('''INSERT INTO messages(account,native_id,peer,record) VALUES(?,?,?,?)
                 ON CONFLICT(account,native_id) DO UPDATE SET record=excluded.record''',
-                (self.account, record['msgId'], peer, json.dumps(record, ensure_ascii=False)))
+                (self.account, native_id, peer, json.dumps(record, ensure_ascii=False)))
         return self.db.execute('SELECT id FROM messages WHERE account=? AND native_id=?',
-            (self.account, record['msgId'])).fetchone()[0]
+            (self.account, native_id)).fetchone()[0]
 
     def lookup(self, mid):
         row = self.db.execute('SELECT native_id,peer,record FROM messages WHERE account=? AND id=?',
             (self.account, int(mid))).fetchone()
         if not row:
             raise ValueError('Unknown bridge message ID')
-        return row[0], row[1], json.loads(row[2])
+        record = json.loads(row[2])
+        return record['msgId'], row[1], record
 
     def quote_reference(self, record, element):
         quote = element['replyElement']
         peer = str(record['peerUin'])
-        sender = str(quote.get('senderUid', ''))
-        if sender not in (self.account, peer):
+        sender = str(quote.get('senderUin') or quote.get('senderUinStr') or quote.get('senderUid', ''))
+        if record['chatType'] == 2 and not sender.isdigit():
+            match = self.db.execute('''SELECT record FROM messages WHERE account=? AND peer=?
+                AND json_extract(record,'$.senderUid')=? LIMIT 1''', (self.account, peer, sender)).fetchone()
+            sender = str(json.loads(match[0])['senderUin']) if match else ''
+        if not sender.isdigit() or (record['chatType'] == 1 and sender not in (self.account, peer)):
             raise ValueError('Unknown quoted author')
         seq, stamp = str(quote.get('replayMsgSeq', '')), str(quote.get('replyMsgTime', ''))
         # QQ commonly sends replayMsgId=0. Match an already received original
@@ -70,14 +78,14 @@ class NativeClientDriver:
         if not unavailable:
             for mid, raw in rows:
                 original = json.loads(raw)
-                if str(original['senderUin']) == sender and str(original['msgTime']) == stamp:
+                if original['chatType'] == record['chatType'] and str(original['senderUin']) == sender and str(original['msgTime']) == stamp:
                     return mid
         # Preserve the quote preview QQ actually supplied when the original
         # predates this bridge. This is a snapshot, not a fabricated native ID.
         text = quote.get('sourceMsgText') or ''.join(
             item.get('textElemContent') or ('[图片]' if item.get('picElem') else '[表情]')
             for item in quote.get('sourceMsgTextElems', []))
-        snapshot = dict(chatType=1, peerUin=peer, senderUin=sender, msgTime=stamp or '0',
+        snapshot = dict(chatType=record['chatType'], peerUin=peer, senderUin=sender, msgTime=stamp or '0',
             msgId=f"quote:{record['msgId']}:{element['elementId']}", quote_snapshot=True,
             recalled=unavailable, elements=[{'textElement': {'content': text}}])
         return self.remember(snapshot)
@@ -86,12 +94,20 @@ class NativeClientDriver:
         mid = self.remember(record)
         sender = str(record['senderUin'])
         peer = str(record['peerUin'])
-        if sender not in (self.account, peer):
+        group = record['chatType'] == 2
+        if not sender.isdigit() or (not group and sender not in (self.account, peer)):
             raise ValueError('Message author mismatch')
         segments = []
         for element in record.get('elements', []):
             if element.get('textElement'):
-                segments.append({'type': 'text', 'data': {'text': element['textElement']['content']}})
+                text = element['textElement']
+                if group and text.get('atType') in (1, 2):
+                    uid = str(text.get('atUid') or text.get('atNtUid') or '')
+                    if uid == self.self_uid and uid:
+                        uid = self.account
+                    segments.append({'type': 'at', 'data': {'qq': 'all' if text['atType'] == 1 else uid}})
+                else:
+                    segments.append({'type': 'text', 'data': {'text': text['content']}})
             elif element.get('replyElement'):
                 try:
                     segments.append({'type': 'reply', 'data': {'id': str(self.quote_reference(record, element))}})
@@ -102,22 +118,24 @@ class NativeClientDriver:
             elif element.get('picElement'):
                 data = {'file': element['picElement']['fileName']}
                 if images:
-                    result = await self.rpc('read_image', {'user_id': peer, 'native_id': record['msgId'],
+                    result = await self.rpc('read_image', {('group_id' if group else 'user_id'): peer, 'native_id': record['msgId'],
                         'element_id': element['elementId']})
                     raw = base64.b64decode(result['base64'], validate=True)
                     image_info(raw)
                     data['file'] = 'base64://' + result['base64']
                 segments.append({'type': 'image', 'data': data})
         return {'post_type': 'message_sent' if sender == self.account else 'message',
-            'message_type': 'private', 'sub_type': 'friend', 'self_id': int(self.account),
-            'user_id': int(peer), 'target_id': int(peer), 'message_id': mid,
+            'message_type': 'group' if group else 'private', 'sub_type': 'normal' if group else 'friend', 'self_id': int(self.account),
+            **({'group_id': int(peer)} if group else {}),
+            'user_id': int(sender if group else peer), 'target_id': int(peer), 'message_id': mid,
             'time': int(record['msgTime']), 'recalled': bool(record.get('recalled')), 'sender': {'user_id': int(sender),
-                'nickname': record.get('sendNickName', '')}, 'message': segments}
+                'nickname': record.get('sendNickName', ''), 'card': record.get('sendMemberName', ''),
+                'uid': record.get('senderUid', '')}, 'message': segments}
 
     async def call(self, action, payload):
-        if self.receiving is False and action == 'send_private_msg':
+        if self.receiving is False and action in ('send_private_msg', 'send_group_msg'):
             raise ConnectionError('QQ event connection unavailable')
-        if action in ('get_login_info', 'get_friend_list', 'fetch_sys_faces'):
+        if action in ('get_login_info', 'get_friend_list', 'get_group_list', 'fetch_sys_faces'):
             return await self.rpc(action)
         if action == 'set_qq_avatar':
             path = Path(payload['file'])
@@ -134,15 +152,21 @@ class NativeClientDriver:
             native_id, peer, stored = self.lookup(payload['message_id'])
             if stored.get('quote_snapshot'):
                 return await self.event(stored)
-            record = await self.rpc('get_native_message', {'user_id': peer, 'native_id': native_id})
+            record = await self.rpc('get_native_message', {('group_id' if stored['chatType'] == 2 else 'user_id'): peer, 'native_id': native_id})
             return await self.event(record, images=True)
-        if action == 'send_private_msg':
+        if action in ('send_private_msg', 'send_group_msg'):
+            group = action == 'send_group_msg'
+            target_field = 'group_id' if group else 'user_id'
             elements = []
             for segment in payload['message']:
                 data = segment['data']
                 if segment['type'] == 'text':
                     elements.append({'elementType': 1, 'elementId': '',
                         'textElement': {'content': data['text'], 'atType': 0}})
+                elif segment['type'] == 'at' and group and str(data['qq']).isdigit():
+                    elements.append({'elementType': 1, 'elementId': '', 'textElement': {
+                        'content': '@' + data.get('name', str(data['qq'])) + ' ', 'atType': 2,
+                        'atUid': str(data['qq']), 'atNtUid': data.get('uid', ''), 'atTinyId': ''}})
                 elif segment['type'] == 'face':
                     elements.append({'elementType': 6, 'elementId': '',
                         'faceElement': {'faceIndex': int(data['id']), 'faceType': 1}})
@@ -155,15 +179,15 @@ class NativeClientDriver:
                     extension = {'JPEG': 'jpg', 'PNG': 'png', 'GIF': 'gif', 'WEBP': 'webp'}[info['format']]
                     elements.extend(await self.rpc('prepare_image', {'base64': file[9:], 'extension': extension}))
                 elif segment['type'] == 'reply':
-                    native_id, peer, _ = self.lookup(data['id'])
-                    if str(payload['user_id']) != peer:
+                    native_id, peer, original = self.lookup(data['id'])
+                    if str(payload[target_field]) != peer or (original['chatType'] == 2) != group:
                         raise ValueError('Quote belongs to another friend')
-                    elements.extend(await self.rpc('prepare_reply', {'user_id': peer, 'native_id': native_id}))
+                    elements.extend(await self.rpc('prepare_reply', {target_field: peer, 'native_id': native_id}))
                 else:
                     raise ValueError('This message type is not enabled in the client bridge yet')
             if not elements:
                 raise ValueError('Empty message')
-            record = await self.rpc('send_native', {'user_id': payload['user_id'], 'elements': elements})
+            record = await self.rpc('send_native', {target_field: payload[target_field], 'elements': elements})
             if record.get('sendStatus') != 2:
                 raise ValueError('No successful send receipt')
             return {'message_id': self.remember(record)}
@@ -209,7 +233,9 @@ class NativeClientDriver:
         if native['name'] == 'bridge/heartbeat':
             return
         for record in native['payload'].get('msgList', []):
-            if record.get('chatType') != 1:
+            if record.get('chatType') not in (1, 2):
+                continue
+            if record['chatType'] == 2 and str(record['peerUin']) not in self.group_ids:
                 continue
             if str(record['senderUin']) == self.account and record['sendStatus'] != 2:
                 continue

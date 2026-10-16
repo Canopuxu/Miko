@@ -9,7 +9,7 @@ export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life' | 'review' | '
 export const views: { id: View; label: string; icon: LucideIcon; title: string }[] = [
   { id: 'chat', label: '聊天', icon: MessageCircle, title: '最近对话' },
   { id: 'life', label: '生活', icon: Sprout, title: '生活记录' },
-  { id: 'qq', label: 'QQ 好友', icon: Users, title: 'QQ 好友' },
+  { id: 'qq', label: 'QQ 聊天', icon: Users, title: 'QQ 聊天' },
   { id: 'review', label: '回复回顾', icon: NotebookPen, title: '回顾与批注' },
   { id: 'profiles', label: '设定与资料', icon: UserRound, title: '资料库' },
   { id: 'memory', label: '记忆', icon: BookOpen, title: '记忆对象' },

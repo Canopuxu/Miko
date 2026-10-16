@@ -23,7 +23,7 @@ class ChatStorageTests(unittest.TestCase):
             {'role': 'user', 'content': '你好'}, {'role': 'assistant', 'content': '你好呀'},
         ])
         with reopened.connect() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 7)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 8)
 
     def test_interrupted_partial_reply_is_kept_but_excluded_from_context(self):
         self.store.begin_turn('conversation', 'finished', '第一轮')
@@ -63,7 +63,7 @@ class ChatStorageTests(unittest.TestCase):
         upgraded=ChatStore(old_path)
         self.assertEqual(upgraded.list_conversations()[0]['title'],'原来的对话')
         with upgraded.connect() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],7)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],8)
             self.assertEqual(db.execute('SELECT count(*) FROM qq_friends').fetchone()[0],0)
 
 

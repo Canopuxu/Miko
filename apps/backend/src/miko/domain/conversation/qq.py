@@ -16,6 +16,7 @@ from miko.adapters.qq.native import NativeQq, create_client, create_receiver
 from miko.storage.qq import QqStore
 from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubble_delay, update_face_catalog
 from miko.adapters.qq.media import StickerLibrary
+from miko.domain.conversation.context_selection import pending_contacts
 
 
 class StaleReply(ValueError):
@@ -61,9 +62,15 @@ class QqService:
 
     def start(self):
         self.halted = False
+        self.sync_groups()
         if self.receiver:
             self.receiver.start()
         self.loop_task = asyncio.create_task(self.loop())
+
+    def sync_groups(self):
+        if isinstance(self.client, NativeQq):
+            self.client.driver.group_ids = {r['friend'][6:] for r in self.store.friends()
+                if r['chat_type'] == 2 and r['enabled'] and r['account'] == self.client.config.account}
 
     async def close(self):
         self.halted = True
@@ -109,6 +116,7 @@ class QqService:
             note='等待新私聊消息' if enabled else '已关闭', activated_at=self.clock(),
             pending_since=None, pending_last=None, due_at=None)
         self.storage_faults.pop(key, None)
+        self.sync_groups()
         return self.status()
 
     async def invalidate(self, key):
@@ -146,21 +154,29 @@ class QqService:
                 self.store.recall(key, event['message_id'])
                 await self.invalidate(key)
             return
-        if post not in ('message', 'message_sent') or event.get('message_type') != 'private':
+        if post not in ('message', 'message_sent') or event.get('message_type') not in ('private', 'group'):
             return
         account, uid = str(event.get('self_id', '')), str(event.get('user_id', ''))
+        group = event.get('message_type') == 'group'
         is_self = post == 'message_sent' or uid == account
-        friend = str(event.get('target_id', '')) if is_self else uid
+        friend = 'group-' + str(event.get('group_id', '')) if group else str(event.get('target_id', '')) if is_self else uid
         key = (account, friend)
         cfg = self.store.friend(key)
         stamp, mid = event.get('time'), event.get('message_id')
         if (not cfg or type(stamp) not in (int, float) or type(mid) is not int
                 or stamp < int(self.epoch) or stamp > self.clock() + 10):
             return
+        if group and not cfg['enabled']:
+            return
         payload = parse_message(event.get('message'))
         text = payload['text']
         if not text:
             return
+        if group:
+            sender = event.get('sender', {})
+            name = sender.get('card') or sender.get('nickname') or uid
+            payload.update(sender_id=uid, sender_name=name, sender_uid=sender.get('uid', ''))
+            self.store.member(uid, sender.get('nickname') or uid)
         known = is_self and self.store.receipt(key, mid)
         sending = key in self.workers and self.workers[key].phase == 'sending'
         origin = 'miko' if known else 'pending' if is_self and sending else 'unknown' if is_self and cfg['blocked'] else 'manual' if is_self else 'friend'
@@ -168,13 +184,14 @@ class QqService:
             return
         if origin in ('pending', 'unknown'):
             return
-        author = 'miko' if known else 'owner' if is_self else f'qq:{friend}'
+        author = 'miko' if known else 'owner' if is_self else f'qq:{uid}'
         self.store.record(key, mid, author)
         if is_self:
             if not known:
                 await self.manual(key)
             return
-        await self.invalidate(key)
+        if not group:
+            await self.invalidate(key)
         if not cfg['enabled'] or cfg['blocked'] or key in self.storage_faults or stamp < int(cfg['activated_at']):
             return
         now = self.clock()
@@ -189,6 +206,22 @@ class QqService:
         mentioned = any(re.search(name_pattern,
             segment.get('text', ''), re.IGNORECASE)
             for segment in payload['segments'] if segment['type'] == 'text')
+        if group:
+            quoted_ids = [s['message_id'] for s in payload['segments'] if s['type'] == 'reply']
+            quoted_miko = any((self.store.get_event(key, mid) or {}).get('origin') == 'miko' for mid in quoted_ids)
+            directed = mentioned or quoted_miko or any(s['type'] == 'at' and s['qq'] == account for s in payload['segments'])
+            payload['directed'] = directed
+            with self.store.chat.connect() as db:
+                db.execute('UPDATE qq_events SET payload=? WHERE account=? AND friend=? AND message_id=?',
+                    (json.dumps(payload, ensure_ascii=False), *key, mid))
+            if not directed and not cfg['natural_chat']:
+                return
+            if directed:
+                await self.invalidate(key)
+            due = batch_due if directed else max(batch_due, cfg['last_response_at'] + 30)
+            self.store.update_friend(key, mode='miko', pending_since=first, pending_last=now, due_at=due,
+                note='正在合并群消息' if directed else '等待合适的话题')
+            return
         if not mentioned and cfg['mode'] == 'owner' and not cfg['auto_reply_idle']:
             self.store.update_friend(key, pending_since=None, pending_last=None, due_at=None)
             return
@@ -214,6 +247,8 @@ class QqService:
                     and friend['due_at'] <= self.clock() and key not in self.workers):
                 worker = Worker(self.versions.get(key, 0), self.store.new_run(key, self.clock()), previous_mode=friend['mode'])
                 self.store.update_friend(key, due_at=None, mode='miko', pending_since=None, pending_last=None)
+                if friend['chat_type'] == 2:
+                    self.store.update_friend(key, last_response_at=self.clock())
                 self.workers[key] = worker
                 worker.task = asyncio.create_task(self.reply(key, worker))
 
@@ -246,12 +281,17 @@ class QqService:
                     record['quoted_message'] = {'message_id': quoted['message_id'], 'text': quoted['text'],
                         'author': '好友' if quoted['origin'] == 'friend' else 'Miko' if quoted['origin'] == 'miko' else '橙汁',
                         'recalled': bool(quoted['recalled'])}
+                    if self.store.friend(key)['chat_type'] == 2:
+                        info = json.loads(quoted['payload'])
+                        record['quoted_message']['author'] = info.get('sender_name') or record['quoted_message']['author']
                 elif not record.get('quoted_message') or record['quoted_message'].get('content_status') == 'unavailable':
                     try:
                         value = await self.client.message(*key, segment['message_id'])
                         record['quoted_message'] = {'message_id': segment['message_id'],
                             'text': parse_message(value.get('message'))['text'],
                             'author': '好友' if str(value['sender']['user_id']) == key[1] else '橙汁'}
+                        if self.store.friend(key)['chat_type'] == 2:
+                            record['quoted_message']['author'] = value['sender'].get('card') or value['sender'].get('nickname') or str(value['sender']['user_id'])
                     except (SendError, AttributeError):
                         record['quoted_message'] = {'message_id': segment['message_id'], 'content_status': 'unavailable'}
                 self.store.quote_snapshot(key, record['message_id'], record['quoted_message'])
@@ -284,6 +324,12 @@ class QqService:
                 raise StaleReply('引用原消息已失效，未发送')
             await self.client.quote(*key, event)
             segments.insert(0, {'type': 'reply', 'data': {'id': str(event['message_id'])}})
+        if self.store.friend(key)['chat_type'] == 2 and worker.position == 0 and bubble['kind'] == 'text':
+            pending = pending_contacts(self.store.context(key))
+            target = pending[-1] if pending and pending[-1].get('directed') else None
+            if target:
+                segments.insert(0, {'type': 'at', 'data': {'qq': target['author']['id'].removeprefix('qq:'),
+                    'name': target['author']['name'], 'uid': target.get('sender_uid', '')}})
         self.check(key, worker)
         return segments
 
@@ -306,7 +352,7 @@ class QqService:
                 if worker.turn.status != 'completed':
                     raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
                 try:
-                    bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars)
+                    bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars, group=cfg['chat_type'] == 2)
                     break
                 except ValueError:
                     if attempt == 3:
@@ -314,7 +360,7 @@ class QqService:
             warning = getattr(worker.turn, 'warning', None)
             if not bubbles:
                 self.store.update_run(worker.run_id, state='skipped', error=warning)
-                if self.versions.get(key, 0) == worker.version:
+                if self.versions.get(key, 0) == worker.version and not (cfg['chat_type'] == 2 and self.store.friend(key)['pending_since'] is not None):
                     self.store.update_friend(key, mode=worker.previous_mode, note=warning or '本轮无需回复，等待新消息',
                         pending_since=None, pending_last=None, due_at=None)
                 return
@@ -353,7 +399,7 @@ class QqService:
                 if bubble['kind'] == 'sticker':
                     self.stickers.used(key[0], bubble['sticker_id'])
             self.store.update_run(worker.run_id, state='sent', receipt_id=receipt['message_id'], error=warning)
-            if self.versions.get(key, 0) == worker.version:
+            if self.versions.get(key, 0) == worker.version and not (cfg['chat_type'] == 2 and self.store.friend(key)['pending_since'] is not None):
                 self.store.update_friend(key, mode='miko', note=warning or 'Miko 正在接话',
                     pending_since=None, pending_last=None, due_at=None)
             await self.settle_echoes(key)

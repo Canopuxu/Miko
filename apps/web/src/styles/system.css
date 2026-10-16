@@ -182,3 +182,7 @@ input, textarea, select { accent-color: var(--sage); }
 .qq-idle-switch[aria-checked="true"] span { transform:translateX(17px); }
 .qq-idle-switch:disabled { opacity:.6; cursor:default; }
 @media (prefers-reduced-motion:reduce) { .qq-idle-switch,.qq-idle-switch span { transition:none; } }
+
+.qq-chat-tabs { display:flex; gap:4px; padding:4px; margin:0 18px 12px; background:var(--surface-muted,#eae6de); border-radius:12px; }
+.qq-chat-tabs button { flex:1; border:0; padding:10px; border-radius:9px; background:transparent; color:inherit; cursor:pointer; }
+.qq-chat-tabs button.active { background:var(--surface,#fffdfa); }

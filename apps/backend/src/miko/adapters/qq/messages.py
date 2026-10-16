@@ -74,7 +74,7 @@ def model_message(payload):
     return [{k: v for k, v in item.items() if k != 'ref'} for item in payload.get('segments', [])]
 
 
-def parse_bubbles(raw, records, stickers, max_chars=100):
+def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {'bubbles'}:
         raise ValueError('回复需要 bubbles JSON 对象')
@@ -110,7 +110,7 @@ def parse_bubbles(raw, records, stickers, max_chars=100):
             raise ValueError('表情不在本轮候选中')
         if 'quote_message_id' in bubble:
             mid = bubble['quote_message_id']
-            if type(mid) is int and mid in current_ids:
+            if not group and type(mid) is int and mid in current_ids:
                 bubble.pop('quote_message_id')
                 continue
             if i or type(mid) is not int or mid not in quotes:
@@ -118,7 +118,7 @@ def parse_bubbles(raw, records, stickers, max_chars=100):
     if total > max_chars:
         raise ValueError(f'本轮文字总长度超过 {max_chars} 字，未发送')
     latest = next((r for r in reversed(records) if r.get('author', {}).get('kind') == 'contact'), None)
-    if latest:
+    if latest and not group:
         # Replying to the latest message already identifies the target in ordinary chat.
         for bubble in bubbles:
             if bubble.get('quote_message_id') == latest.get('message_id'):

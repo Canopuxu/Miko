@@ -164,9 +164,10 @@ class ChatService:
         try:
             if turn.qq_records is not None:
                 background = await compose_qq_context(self, turn.qq_records, turn.memory_key)
+                group = turn.memory_key[1].startswith('group-')
                 turn.system_prompt = '\n\n'.join([
                     (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
-                    for name in ('qq-system-prompt.txt', 'qq-role-context.txt')
+                    for name in ('qq-system-prompt.txt', 'qq-group-context.txt' if group else 'qq-role-context.txt')
                 ] + [background] + [
                     (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
                     for name in ('qq-expression.txt', 'qq-output-format.txt')
@@ -252,6 +253,9 @@ class ChatService:
         turn.memory_key = (account, friend)
         turn.qq_records = records
         turn.qq_input = json.loads(message)
+        if friend.startswith('group-'):
+            conversation = self.store.conversation(conversation_id)
+            turn.qq_input['group'] = {'id': friend[6:], 'name': conversation['title'] if conversation else friend[6:]}
         turn.message = render_dialogue(turn.qq_input)
         image_parts = [part for r in records for part in r.get('_image_inputs', [])]
         content = [{'type': 'text', 'text': turn.message}, *image_parts] if image_parts else turn.message

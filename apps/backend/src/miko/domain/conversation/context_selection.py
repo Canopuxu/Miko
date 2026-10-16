@@ -80,7 +80,7 @@ def scoped_row(row,subjects):
     subject=row['source'].get('subject')
     if row['group'].startswith('life_'):subject='miko'
     # Use stored ownership; do not infer ownership from a matching word in content.
-    return subject in subjects if subject in ('miko','owner') else False
+    return subject in subjects
 
 
 def near_duplicate(a,b):
@@ -106,6 +106,8 @@ def scoring_query(topic):
 
 def scoring_document(row):
     source=row['source']
+    if row['group']=='people_memory' and ':group-' in source.get('peer', ''):
+        return source.get('category', '')+' · '+source.get('topic', '')+'：'+source.get('content', '')
     if row['group']!='role_material':return row['text']
     content=source.get('content','')
     name=NAMES.get(source.get('subject'))
@@ -142,7 +144,11 @@ async def select(provider,query,context,threshold=.70,limit=5):
     if not rows:return core,[],[]
     topics=list(dict.fromkeys([query]+topic_queries(query)));ranks=[]
     previous=context.get('_previous_contact_texts',[])
-    scopes=[subjects_for(topic,previous) for topic in topics]
+    scopes=[subjects_for(topic,previous) | set(context.get('_contact_subjects', [])) for topic in topics]
+    speaker=context.get('_group_speaker')
+    personal = speaker and re.search(r'按我|照我|适合我|我(?:的|平时|一般|喜欢|爱听|口味)',speaker['text'])
+    if personal:
+        scopes=[{speaker['id']} for _ in topics]
     all_subjects=set().union(*scopes)
     pinned_core={f"{NAMES.get(r.get('subject'), r.get('subject', ''))}：{r.get('content', '')}" for r in context.get('role_material', []) if r.get('pinned')}
     core=[line for line in core if line in pinned_core or not line.startswith('橙汁：') or 'owner' in all_subjects]
@@ -160,6 +166,8 @@ async def select(provider,query,context,threshold=.70,limit=5):
     def eligible(row):
         literal=row['source'].get('content','').strip()
         cutoff=.60 if row['group']=='role_material' and row['source'].get('kind')=='fact' else threshold
+        if personal and row['group']=='people_memory' and row['source'].get('subject') == speaker['id']:
+            cutoff=.55
         return row['score']>=cutoff or (row['group']=='role_material' and 2<=len(literal)<=30 and literal in query)
     selected=[]
     def add(row):
@@ -211,6 +219,8 @@ def render_dialogue(request):
     records=request['chat_records'];lines=[]
     for row in records:
         name=NAMES.get(row['author']['kind'],row['author']['name'])
+        if request.get('group') and row['author']['kind'] == 'contact':
+            name += '（' + row['author'].get('id', '') + '）'
         line=f"[{row.get('message_id', '')}] {name}：{row['text']}"
         if row.get('created_at') is not None:
             stamp=datetime.fromtimestamp(row['created_at']/1000,ZoneInfo('Asia/Shanghai'))
@@ -221,6 +231,8 @@ def render_dialogue(request):
         if row.get('quoted_message'):line+=' 引用内容：'+json.dumps(row['quoted_message'],ensure_ascii=False)
         lines.append(line)
     blocks=['最近对话：\n'+'\n'.join(lines)]
+    if request.get('group'):
+        blocks.insert(0, '当前群聊：' + request['group']['name'] + '（' + request['group']['id'] + '）')
     target=request.get('reply_to')
     pending = pending_contacts(records)
     if pending:
@@ -247,6 +259,11 @@ async def compose_qq_context(chat, records, key):
         days=sorted({r['day'] for r in trajectory if r['day']<=context['current_time'][:10]},reverse=True)[:2]
         context.setdefault('life_entries',[]).extend(r for r in trajectory if r['day'] in days)
     context['_previous_contact_texts']=contacts[:-len(pending)] if pending else contacts
+    if key[1].startswith('group-'):
+        context['friend_relationships'] = []
+        context['_contact_subjects'] = [r['author']['id'] for r in records if r['author']['kind'] == 'contact']
+        if pending:
+            context['_group_speaker'] = {'id': pending[-1]['author']['id'], 'text': pending[-1]['text']}
     core,selected,ranked=await select(chat.memory.reranker,query,context)
     result = render(context,core,selected)
     if context.get('owner_feedback'):

@@ -16,19 +16,58 @@ class NativeQq(OneBot):
         self.capabilities = {}
 
     async def call(self, action, payload, *, sending=False):
-        allowed = {'get_login_info', 'get_friend_list', 'get_msg', 'set_qq_avatar', 'fetch_sys_faces'}
-        if action not in allowed | ({'send_private_msg'} if sending else set()):
+        allowed = {'get_login_info', 'get_friend_list', 'get_group_list', 'get_msg', 'set_qq_avatar', 'fetch_sys_faces'}
+        if action not in allowed | ({'send_private_msg', 'send_group_msg'} if sending else set()):
             raise SendError('此操作不在 Miko 的 QQ 功能范围内')
         try:
             info = await self.driver.rpc('get_login_info')
             if str(info.get('user_id')) != self.config.account:
                 raise ValueError('account changed')
             self.capabilities = info.get('capabilities', {})
+            self.driver.self_uid = info.get('uid', '')
             return info if action == 'get_login_info' else await self.driver.call(action, payload)
         except Exception:
             if sending:
                 raise SendUncertain('发送结果未知，请到 QQ 核对；不会自动重发') from None
             raise SendError('QQ 尚未连接，请检查 QQ 登录状态，或到设置中重新连接') from None
+
+    async def target(self, account, friend):
+        if not friend.startswith('group-'):
+            return await super().target(account, friend)
+        if await self.login() != account:
+            raise SendError('QQ 登录账号发生变化，未发送')
+        groups = await self.call('get_group_list', {})
+        match = next((r for r in groups if str(r['group_id']) == friend[6:]), None)
+        if not match:
+            raise SendError('当前账号未加入这个群')
+        return match['group_name']
+
+    async def message(self, account, friend, mid, *, known_own=False):
+        if not friend.startswith('group-'):
+            return await super().message(account, friend, mid, known_own=known_own)
+        value = await self.call('get_msg', {'message_id': mid})
+        if (value.get('message_type') != 'group' or str(value.get('group_id')) != friend[6:]
+                or str(value.get('self_id')) != account or value.get('message_id') != mid or value.get('recalled')):
+            raise SendError('无法核对消息属于当前群聊，或消息已撤回')
+        return value
+
+    async def quote(self, account, friend, event):
+        if not friend.startswith('group-'):
+            return await super().quote(account, friend, event)
+        value = await self.message(account, friend, event['message_id'])
+        sender = json.loads(event['payload']).get('sender_id', account)
+        if str(value['sender']['user_id']) != str(sender) or value.get('time') != int(event['timestamp']):
+            raise SendError('引用消息的发送者或时间发生变化，未发送')
+
+    async def send(self, account, friend, text, guard):
+        if not friend.startswith('group-'):
+            return await super().send(account, friend, text, guard)
+        await self.target(account, friend)
+        guard()
+        value = await self.call('send_group_msg', {'group_id': int(friend[6:]), 'message': text}, sending=True)
+        if not isinstance(value, dict) or type(value.get('message_id')) is not int:
+            raise SendUncertain('未取得可靠消息编号，请到 QQ 核对；不会自动重发')
+        return {'message_id': value['message_id'], 'timestamp': time.time()}
 
     async def close(self):
         await self.driver.close()

@@ -16,7 +16,7 @@ class ChatStore:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 7:
+            if version > 8:
                 raise RuntimeError("聊天数据库版本较新，请使用对应版本的 Miko")
             if version == 0:
                 sql = (Path(__file__).parent / "migrations/001_chat.sql").read_text(encoding="utf-8")
@@ -39,6 +39,9 @@ class ChatStore:
             if version < 7:
                 sql = (Path(__file__).parent / 'migrations/007_owner_name.sql').read_text(encoding='utf-8')
                 db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=7;\nCOMMIT;')
+            if version < 8:
+                sql = (Path(__file__).parent / 'migrations/008_qq_groups.sql').read_text(encoding='utf-8')
+                db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nPRAGMA user_version=8;\nCOMMIT;')
 
     def character_name(self):
         return self.person_name('miko')

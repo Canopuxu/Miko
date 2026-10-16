@@ -165,7 +165,7 @@ class Memory:
         context['retrieval'] = {'engine': 'Tulpa FTS', 'error': self.error}
         if not self.index or self.error or not query.strip():
             return context
-        peers = ['', f'qq:{key[0]}:{key[1]}'] if key else ['']
+        peers = [peer] if key and key[1].startswith('group-') else ['', peer] if key else ['']
         async with self.lock:
             try:
                 hits = await self.index.progressive_retrieve(query, where={'peer__in': peers})
