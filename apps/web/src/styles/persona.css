@@ -75,7 +75,33 @@
 .retrieval-entry { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid #e7dfd3; border-radius: 8px; font-size: 14px; line-height: 1.7; background: #fffdf9; overflow-wrap: anywhere; }
 .retrieval-entry > svg { flex-shrink: 0; color: #6d8068; }
 .retrieval-entry small { margin-right: 8px; color: #777168; font-size: 12px; }
-.persona-name-heading { display:flex; align-items:center; gap:8px; min-width:0; }
-.persona-name-editor { display:flex; align-items:center; flex-wrap:wrap; gap:12px; min-width:0; }
+.persona-name-heading { display:flex; align-items:flex-start; gap:8px; min-width:0; }
+.persona-name-heading > .text-button { flex-shrink:0; margin-top:8px; }
+.persona-name-editor { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; min-width:0; width:100%; }
 .persona-name-editor h1 { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
 .persona-name-editor input { max-width:100%; min-width:0; box-sizing:border-box; padding:2px 4px; border:0; border-bottom:1px solid var(--sage); border-radius:0; color:var(--ink); background:transparent; font:inherit; }
+.profile-tools-dialog { width:min(720px,calc(100vw - 32px)); }
+.profile-tools-dialog > p { margin:12px 0; }
+.profile-tools-dialog h3 { font-size:15px; margin:0 0 10px; }
+.profile-tools-tabs { display:flex; gap:4px; padding:4px; margin:20px 0 16px; border-radius:10px; background:#eeeee5; }
+.profile-tools-tabs button { display:flex; align-items:center; justify-content:center; gap:8px; flex:1; border:0; border-radius:7px; padding:9px 14px; background:transparent; color:var(--muted); }
+.profile-tools-tabs svg { flex-shrink:0; }
+.profile-expression-heading { display:flex; align-items:center; gap:8px; }
+.profile-tools-tabs button[aria-selected='true'] { background:var(--surface); color:var(--sage); box-shadow:0 1px 4px #403b3510; }
+.profile-tools-note { font-size:12px; line-height:1.8; color:#807b70; }
+.profile-tools-editor { display:grid; gap:8px; font-size:13px; }
+.profile-tools-editor textarea { box-sizing:border-box; width:100%; padding:14px; min-height:220px; border:1px solid var(--line); border-radius:10px; background:var(--page); color:var(--ink); resize:vertical; line-height:1.8; }
+.profile-tools-row { display:flex; gap:10px; flex-wrap:wrap; }
+.profile-tools-preview { margin-top:18px; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--page); }
+.profile-tools-preview pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:13px; line-height:1.8; margin:0; }
+.profile-tools-preview details { margin:16px 0; font-size:13px; }
+.profile-tools-preview > p { font-size:13px; line-height:1.8; }
+.profile-tools-notice { color:var(--sage) !important; font-size:13px; }
+.profile-tools-transfer { padding:20px 0; border-top:1px solid var(--line); }
+.profile-tools-file { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
+.profile-tools-file input { width:100%; margin-top:8px; color:var(--muted); }
+.profile-file-entries { max-height:300px; overflow:auto; padding-right:6px; }
+.profile-file-entries article { padding:10px 0; border-top:1px solid var(--line); }
+.profile-file-entries small { color:var(--muted); }
+.profile-file-entries p { margin:5px 0; white-space:pre-wrap; }
+.persona-tools-actions { gap:8px; }

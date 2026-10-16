@@ -112,3 +112,18 @@
 .friend-manager-dialog footer { display:flex; align-items:center; gap:8px; padding-top:16px; border-top:1px solid var(--line); }
 .friend-manager-dialog footer > span { margin-right:auto; font-size:13px; color:#746f64; }
 .friend-manager-dialog button.friend-manager-add { background:var(--sage); color:white; border-color:var(--sage); }
+.data-backups > .settings-actions { margin-top:18px; }
+.backup-file-picker { position:relative; display:inline-flex; align-items:center; gap:8px; padding:9px 16px; border:1px solid var(--line); border-radius:8px; background:var(--surface); font-size:14px; cursor:pointer; }
+.backup-file-picker input { position:absolute; inset:0; opacity:0; width:100%; cursor:pointer; }
+.backup-file-picker.disabled { opacity:.55; cursor:default; }
+.backup-file-picker:focus-within { outline:2px solid var(--sage); outline-offset:2px; }
+.backup-list { margin-top:20px; font-size:14px; }
+.backup-list > summary { color:#746f64; cursor:pointer; padding:8px 0; }
+.backup-list > div { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 0; border-bottom:1px solid var(--line); }
+.backup-list > div > span { display:grid; gap:6px; }
+.backup-list strong { font-weight:500; }
+.backup-list small { color:#746f64; font-size:12px; }
+.backup-list a { display:inline-flex; align-items:center; gap:6px; color:var(--sage); text-decoration:none; }
+.backup-preview { margin-top:18px; padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+.backup-preview h3 { margin:0 0 12px; font-size:16px; }
+.backup-confirm-dialog { width:min(480px,calc(100vw - 32px)); }

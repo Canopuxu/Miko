@@ -225,7 +225,7 @@ textarea::placeholder { color: #b7ac9e; }
   .secondary-sidebar .conversation-item { margin-bottom: 4px; padding: 11px 12px; }
   .secondary-sidebar .sidebar-footer, .secondary-sidebar .new-chat-label { display: block; }
   .secondary-sidebar .new-chat { display: flex; align-items: center; gap: 8px; padding: 8px; }
-  .workspace-frame .page-header { padding: 22px 18px 18px; flex-wrap: wrap; }
+  .workspace-frame .page-header { padding: 22px 18px 18px; }
   .workspace-frame .profile-workspace { padding: 24px 18px; }
   .workspace-frame .context-material { grid-template-columns: minmax(0, 1fr); }
 }

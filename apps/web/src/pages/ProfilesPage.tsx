@@ -3,7 +3,8 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowUpRight, Check, Pencil, Pin, Plus, Save, Search, Trash2 } from 'lucide-react';
+import { ArrowDownUp, ArrowUpRight, Check, Pencil, Pin, Plus, Save, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ExpressionSettingsDialog, ProfileTransferDialog } from './ProfileTools';
 import { useDiscardGuard, useNotice } from '../components/ui';
 import { useCharacterName, useOwnerName, useRuntime } from '../components/RuntimeStatus';
 
@@ -48,6 +49,7 @@ export function ProfilesPage() {
   const characterName = useCharacterName();
   const ownerName = useOwnerName();
   const [renaming,setRenaming]=useState(false);
+  const [tools, setTools] = useState<'expression' | 'transfer' | null>(null);
   const [nameDraft,setNameDraft]=useState('');
   const [subject, setSubject] = useState<Subject>('miko');
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -303,10 +305,14 @@ export function ProfilesPage() {
         <h1><input autoFocus aria-label={subject==='miko'?'角色名称':'我的名字'} maxLength={36} size={Math.max(4,Math.min(20,nameDraft.length*2))}
           value={nameDraft} onChange={event=>setNameDraft(event.target.value)}/><span>的资料</span></h1>
         <button type="submit" className="send-button" disabled={busy||!nameDraft.trim()||nameDraft.trim()===currentName}>保存</button>
-      </form> : <><h1>{currentName} 的资料</h1>
+      </form> : <><h1 title={`${currentName} 的资料`}>{currentName} 的资料</h1>
       <button className="text-button" disabled={busy} aria-label={subject==='miko'?'重命名角色':'修改我的名字'} title="修改名字"
         onClick={()=>guard.proceed(()=>{setNameDraft(currentName);setRenaming(true);})}><Pencil size={16}/></button></>}</div>
-      <button className="persona-memory-link" onClick={() => navigation.navigate('memory',{person:subject,relation:undefined})}>近况与经历<ArrowUpRight size={14}/></button></header>
+      <div className="header-actions persona-tools-actions">
+        {subject === 'miko' && <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('expression'); })}><SlidersHorizontal size={14}/>表达设置</button>}
+        <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('transfer'); })}><ArrowDownUp size={14}/>导入导出</button>
+        <button className="persona-memory-link" onClick={() => navigation.navigate('memory',{person:subject,relation:undefined})}>近况与经历<ArrowUpRight size={14}/></button>
+      </div></header>
       <div className="persona-content" ref={contentRef}>
         <div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>
         {root && <div className="persona-category-actions"><button disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({parent:root.id,name:''});})}><Plus size={14}/>小分类</button>
@@ -365,6 +371,10 @@ export function ProfilesPage() {
         </div>
       </AlertDialog.Content>
     </AlertDialog.Root>
+    {tools === 'expression' && <ExpressionSettingsDialog onClose={() => setTools(null)}/>}
+    {tools === 'transfer' && <ProfileTransferDialog subject={subject} name={currentName} onClose={() => setTools(null)} onApplied={() => {
+      setEdit(null); setCategoryEdit(null); setPreview(null); setRevision(value => value + 1); void runtime.refresh();
+    }}/>}
     {guard.dialog}</main>
   </AppShell>;
 }

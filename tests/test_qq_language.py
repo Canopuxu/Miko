@@ -135,17 +135,23 @@ class GroupLanguageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.language.status(self.key)['expression_count'], 0)
         self.assertEqual(self.language.status(self.key)['last_failure'], 'model_error')
 
-    async def test_only_chosen_expressions_are_passed_to_chat(self):
+    async def test_learned_style_stays_out_of_chat_while_matching_meanings_are_available(self):
         self.diverse = True
         await self.language.configure(self.key, True)
         for n in range(4):
             await self.batch(n)
         self.assertEqual(self.language.status(self.key)['usable_expressions'], 12)
+        before = len(self.calls)
         reference = await self.language.reference(self.key,
             [dict(author=dict(kind='contact'), text='不然你来？')], 'choose')
-        self.assertEqual(reference.count('\n- '), 2)
-        self.assertEqual(self.calls[-1][2]['provider'], 'chat-provider')
-        self.assertNotIn('material', self.calls[-1][1])
+        self.assertEqual(reference, '')
+        meaning = await self.language.reference(self.key,
+            [dict(author=dict(kind='contact'), text='天台还有饭吗')], 'meaning')
+        self.assertIn('学校食堂', meaning)
+        self.assertNotIn('本群表达参考', meaning)
+        self.assertNotIn('不然你来', meaning)
+        self.assertEqual(len(self.calls), before, 'Understanding references do not need an expression-selection model call')
+        self.assertEqual(self.language.status(self.key)['expression_count'], 12)
         await self.language.configure(self.key, False)
         self.assertEqual(await self.language.reference(self.key, [], 'stop-using'), '')
 

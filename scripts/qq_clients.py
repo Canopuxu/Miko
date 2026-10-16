@@ -50,7 +50,8 @@ def inspect_client(row, local_root, frida_path=None):
         if 'MIKO_NAPI_UNAVAILABLE' in str(error):
             return {**result, 'state': 'unsupported', 'stage': 'loader',
                     'note': '此客户端未提供所需的 QQ NT 加载接口，当前 Miko 版本无法连接'}
-        return {**result, 'state': 'unsupported', 'note': '无法读取此 QQ 的登录和消息接口，当前适配仅支持 QQ NT；请检查客户端版本'}
+        return {**result, 'state': 'error', 'stage': 'inspection',
+                'note': '暂时无法读取 QQ 接口，请等待 QQ 启动完成或打开主界面后重新检测'}
 
 
 def discover(local_root, frida_path=None, executable=None, active=None, pid=None):

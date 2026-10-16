@@ -1,10 +1,11 @@
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { ArrowUp, NotebookPen, Plus, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, NotebookPen, Plus, Search, Square, Trash2, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { useCharacterName, useRuntime } from '../components/RuntimeStatus';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
+import { ChatSearch } from '../components/ChatSearch';
 
 const note = { cancelled: '已停止', error: '生成失败', interrupted: '回复中断' };
 const dateTime = (stamp: number) => new Date(stamp).toLocaleString('zh-CN');
@@ -26,6 +27,7 @@ export function ChatPage() {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<Conversation | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [finding, setFinding] = useState(false);
   const conversation = useRef<string | null>(null);
   const turn = useRef<string | null>(null);
   const cancelRequested = useRef(false);
@@ -207,8 +209,8 @@ export function ChatPage() {
         {connected ? '已连接' : '连接中'}</div>
     </>}>
     <main className="main-panel">
-      <header className="page-header"><h1>{title ?? '和 Miko 聊聊'}</h1>
-        <div className="header-actions"><button className="ui-button" onClick={()=>navigation.navigate('review',
+      <header className="page-header"><h1 title={title ?? '和 Miko 聊聊'}>{title ?? '和 Miko 聊聊'}</h1>
+        <div className="header-actions"><button className="ui-button" onClick={()=>setFinding(true)}><Search size={15}/>查找记录</button><button className="ui-button" onClick={()=>navigation.navigate('review',
           {day:new Date().toLocaleDateString('sv-SE'),peer:selected ?? '',reply:undefined})}><NotebookPen size={16}/>回顾与批注</button>
           <span className="model-label">{status?.chat.model ?? '等待模型配置'}</span></div></header>
       <section className="conversation" aria-label="聊天记录" aria-live="polite" aria-busy={loading}>
@@ -244,6 +246,8 @@ export function ChatPage() {
         </form>
         {generating && <p className="composer-caption" role="status">{characterName} 正在回复你</p>}
       </footer>
+    {finding && <ChatSearch source="web" conversationId={selected} onClose={()=>setFinding(false)} navigationDisabled={generating || loading}
+      onOpen={item=>guard.proceed(()=>{setFinding(false);navigation.navigate('chat',{conversation:item.conversation_id,message:item.id,new:undefined});})}/>}
     {guard.dialog}
     <AlertDialog.Root open={!!deleting} onOpenChange={open => { if (!open && !removing) setDeleting(null); }}>
       <AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay"/>

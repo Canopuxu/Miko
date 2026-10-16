@@ -17,7 +17,7 @@ import httpx
 
 from miko.adapters.dsh.runtime import DshRuntime
 from miko.adapters.qq.messages import FACES, OUTPUT_SCHEMA
-from miko.settings import REPO_ROOT, Settings, ProviderConfig
+from miko.settings import REPO_ROOT, Settings, ProviderConfig, chat_prompts
 from miko.storage.chat import ChatStore
 from miko.storage.profiles import ProfileStore
 from miko.domain.conversation.context_selection import compose_qq_context, render_dialogue
@@ -96,7 +96,7 @@ class ChatService:
         self.settings = settings
         self.provider = settings.load_provider()
         self.qq_provider = settings.load_qq_provider()
-        self.system_prompt = (REPO_ROOT / "config/defaults/system-prompt.txt").read_text(encoding="utf-8").strip()
+        self.system_prompt = chat_prompts(settings.local_root)[0]['web']
         self.bridge_token = secrets.token_urlsafe(32)
         self.store = store or ChatStore(settings.database_path)
         self.profiles = ProfileStore(self.store)
@@ -173,10 +173,8 @@ class ChatService:
                 turn.system_prompt = '\n\n'.join([
                     (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
                     for name in ('qq-system-prompt.txt', 'qq-group-context.txt' if group else 'qq-role-context.txt')
-                ] + [background] + [
-                    (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
-                    for name in ('qq-expression.txt', 'qq-output-format.txt')
-                ])
+                ] + [background, chat_prompts(self.settings.local_root)[0]['qq'],
+                     (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()])
                 if group:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-group-output.txt').read_text(encoding='utf-8').strip()
             elif self.memory and turn.memory_query is not None:

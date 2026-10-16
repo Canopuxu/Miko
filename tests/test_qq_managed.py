@@ -138,6 +138,18 @@ class ClientDiscoveryTests(unittest.TestCase):
             {'pid': 1, 'state': 'unsupported', 'account': '12345'},
             {'pid': 2, 'state': 'login', 'account': ''}], '12345'))
 
+    def test_failed_inspection_does_not_claim_version_is_unsupported(self):
+        row = {'pid': 42, 'started_at': 10.0, 'executable': 'D:/QQ/QQ.exe'}
+        process = SimpleNamespace(create_time=lambda: 10.0)
+        with TemporaryDirectory() as folder, patch.object(qq_clients.psutil, 'Process', return_value=process), \
+                patch.object(qq_clients, 'load_payload') as load:
+            load.side_effect = RuntimeError('QQ is still starting')
+            result = qq_clients.inspect_client(row, folder)
+            self.assertEqual(result['state'], 'error')
+            self.assertIn('重新检测', result['note'])
+            load.side_effect = RuntimeError('MIKO_NAPI_UNAVAILABLE')
+            self.assertEqual(qq_clients.inspect_client(row, folder)['state'], 'unsupported')
+
 
 class RunnerReconnectTests(unittest.IsolatedAsyncioTestCase):
     async def test_client_restart_reconnects_selected_account_with_new_pid(self):

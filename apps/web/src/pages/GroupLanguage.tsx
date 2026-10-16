@@ -58,13 +58,13 @@ export function GroupLanguage({ account, friend }: { account: string; friend: st
   }
   return <div className="group-language">
     <div className="language-heading"><label className="qq-idle-option"><button type="button" role="switch"
-      aria-label="学习和使用本群表达" aria-checked={!!data?.enabled} className="qq-idle-switch" disabled={busy || !data}
-      onClick={() => void change('', 'PUT', { enabled: !data?.enabled })}><span/></button>学习和使用本群表达</label>
+      aria-label="了解本群表达" aria-checked={!!data?.enabled} className="qq-idle-switch" disabled={busy || !data}
+      onClick={() => void change('', 'PUT', { enabled: !data?.enabled })}><span/></button>了解本群表达</label>
       <button className="text-button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '收起' : '查看表达与黑话'}</button></div>
     {error && <p role="alert">{error}</p>}
     {open && data && <div className="language-body">
-      <p className="language-caption">只学习开启后的群友原话，使用记忆整理模型批量处理。关闭后保留已有内容，并停止学习和使用。</p>
-      {data.enabled && <p className="language-caption">{data.library.expressions_in_use ? '表达参考已投入使用' : `已核验 ${data.library.checked_expressions} 条表达，积累到 ${data.library.expression_threshold} 条后开始选用`} · 待整理 {data.buffered_messages} 条消息</p>}
+      <p className="language-caption">观察开启后的群友原话，句式、用词和玩笑形式保存在这里供查看。聊天时补充当前发言涉及的群内词语释义，Miko 的说话方式沿用自身设定。关闭后保留记录，并停止观察和提供释义。</p>
+      {data.enabled && <p className="language-caption">已核验 {data.library.checked_expressions} 条表达 · 待整理 {data.buffered_messages} 条消息</p>}
       {!!data.last_failure && <p role="status">最近一次学习未完成，后续会按原模块规则重试；聊天仍可使用。</p>}
       <h3>表达 · {data.expression_count}</h3>
       {!data.expressions.length && <p className="language-caption">还没有学到可核验的表达，无需为这里单独准备消息。</p>}

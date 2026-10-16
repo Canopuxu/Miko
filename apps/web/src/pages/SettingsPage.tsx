@@ -7,6 +7,7 @@ import { useRuntime } from '../components/RuntimeStatus';
 import '../styles/settings.css';
 import { workbenchEnabled } from '../features';
 import { ModelFields, useModelCatalog, type Provider } from '../components/ModelFields';
+import { DataBackups } from './DataBackups';
 
 type Reranker = Provider;
 type Qq = {account:string};
@@ -30,7 +31,7 @@ export function SettingsPage(){
   const runtime=useRuntime();
   const [config,setConfig]=useState<Config|null>(null);
   const [application,setApplication]=useState<Application|null>(null);
-  const [section,setSection]=useState<'models'|'qq'|'data'>('models');
+  const [section,setSection]=useState<'models'|'qq'|'data'>(()=>new URLSearchParams(location.search).get('section')==='data'?'data':'models');
   const [busy,setBusy]=useState('');
   const [testResults,setTestResults]=useState<Record<string,TestResult>>({});
   const [error,setError]=useState('');
@@ -114,14 +115,14 @@ export function SettingsPage(){
       {error&&<p className="error-notice" role="alert">{error}</p>}{notice&&<p className="settings-notice" role="status"><Check size={16}/>{notice}</p>}
       {!config&&!error&&<p role="status">读取设置…</p>}{!config&&error&&<button onClick={()=>void load()}>重新加载</button>}
       {config&&<fieldset disabled={!!busy} className="settings-body">{section==='models'?<>
-        <section className="settings-basic"><h2>聊天与日常</h2><p>下面的 API 和模型用于聊天，QQ 回复、生活生成和记忆整理默认跟随它。</p>
+        <section className="settings-basic"><h2>聊天与日常</h2><p>下面的 API 和模型用于“聊天”，QQ 聊天、生活生成和记忆整理默认跟随它。</p>
           <ModelFields value={config.provider} change={provider=>edit({...config,provider})} catalog={catalog}/>
           <div className="settings-actions"><button onClick={()=>void action('test','/models/test',cleanProvider(config.provider))}><PlugZap size={16}/>测试聊天模型</button><TestFeedback result={testResults.test}/></div>
-          <details className="settings-task-overrides"><summary>QQ 回复、生活生成、记忆整理<ChevronDown size={16}/></summary>
+          <details className="settings-task-overrides"><summary>QQ 聊天、生活生成、记忆整理<ChevronDown size={16}/></summary>
             <div className="settings-task-list">
               {(['qq','life','memory'] as const).map(task=>{
                 const key=task==='qq'?'qq_provider':task==='life'?'life_provider':'memory_provider';
-                const label=task==='qq'?'QQ 回复':task==='life'?'生活生成':'记忆整理';
+                const label=task==='qq'?'QQ 聊天':task==='life'?'生活生成':'记忆整理';
                 const value=config[key];
                 return <div className="settings-task" key={task}><div className="settings-task-heading"><h3>{label}</h3>
                   <label className="settings-check"><input type="checkbox" checked={!!value} onChange={event=>edit({...config,[key]:event.target.checked?{...config.provider}:null})}/>单独设置</label></div>
@@ -178,6 +179,7 @@ export function SettingsPage(){
         </section>
       </>:<>
         <section><h2>资料与记忆</h2><div className="settings-actions"><button onClick={()=>navigation.navigate('profiles')}>修改称呼和资料<ArrowUpRight size={16}/></button><button onClick={()=>navigation.navigate('memory')}>管理记忆<ArrowUpRight size={16}/></button></div></section>
+        <DataBackups/>
         <section><h2>本地数据</h2><p>聊天、资料和记忆保存在本机的数据文件夹中。</p><p className="settings-path">{application?.data_folder}</p><button onClick={()=>void action('open-data','/open-folder',{folder:'data'})}><FolderOpen size={16}/>打开数据文件夹</button></section>
         <section><h2>运行日志</h2><p className="settings-path">{application?.logs_folder}</p><button onClick={()=>void action('open-logs','/open-folder',{folder:'logs'})}><FolderOpen size={16}/>打开日志文件夹</button></section>
         <p>版本 {application?.version??'—'}</p>

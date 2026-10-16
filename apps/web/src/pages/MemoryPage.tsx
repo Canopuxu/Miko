@@ -118,7 +118,7 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
   });
   const onReplyDirty = (id:string,dirty:boolean)=>setDrafts(previous=>previous[id]===dirty?previous:{...previous,[id]:dirty});
   function openReply(reply:Reply) {
-    const params = reply.source==='qq' ? {friend:reply.conversation_id.split(':')[2],message:reply.id}
+    const params = reply.source==='qq' ? {account:reply.conversation_id.split(':')[1],friend:reply.conversation_id.split(':')[2],message:reply.id}
       : {conversation:reply.conversation_id,message:reply.id};
     navigation.navigate(reply.source==='qq'?'qq':'chat',params);
   }

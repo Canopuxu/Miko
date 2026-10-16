@@ -3,6 +3,7 @@
 Uses Tulpa's bounded Chinese FTS matching, not owner speech imitation.
 """
 from datetime import datetime
+import json
 import uuid
 
 from miko.storage.profile_categories import ProfileCategories, paths
@@ -31,17 +32,41 @@ class ProfileStore:
                     raise ValueError('找不到这位好友')
         entry_id = entry_id or uuid.uuid4().hex
         stamp = now_ms()
+        with self.chat.connect() as db:
+            self._write(db, value, entry_id, stamp)
+        return self.get(entry_id)
+
+    def _write(self, db, value, entry_id, stamp):
         fields = ('subject', 'kind', 'category', 'title', 'content', 'keywords', 'account', 'friend', 'as_of', 'enabled')
         values = [value[name] for name in fields]
-        with self.chat.connect() as db:
-            db.execute(f"""INSERT INTO profile_entries(id,{','.join(fields)},created_at,updated_at)
+        db.execute(f"""INSERT INTO profile_entries(id,{','.join(fields)},created_at,updated_at)
                 VALUES ({','.join('?' for _ in range(len(fields)+3))}) ON CONFLICT(id) DO UPDATE SET
                 {','.join(name+'=excluded.'+name for name in fields)},updated_at=excluded.updated_at""",
                 (entry_id, *values, stamp, stamp))
-            db.execute('DELETE FROM profile_fts WHERE entry_id=?', (entry_id,))
-            indexed = ' '.join(sorted(terms(' '.join(value[name] for name in ('title', 'category', 'keywords', 'content')), limit=None)))
-            db.execute('INSERT INTO profile_fts(entry_id,tokens) VALUES (?,?)', (entry_id, indexed))
-        return self.get(entry_id)
+        db.execute('DELETE FROM profile_fts WHERE entry_id=?', (entry_id,))
+        indexed = ' '.join(sorted(terms(' '.join(value[name] for name in ('title', 'category', 'keywords', 'content')), limit=None)))
+        db.execute('INSERT INTO profile_fts(entry_id,tokens) VALUES (?,?)', (entry_id, indexed))
+
+    def portable_entries(self, subject):
+        with self.chat.connect() as db:
+            return [dict(r) for r in db.execute("""SELECT kind,category,title,content,keywords FROM profile_entries
+                WHERE subject=? AND kind IN ('fact','overview') AND account='' AND friend=''
+                ORDER BY created_at,rowid""", (subject,))]
+
+    def replace_portable(self, subject, name, categories, entries):
+        stamp = now_ms()
+        with self.chat.connect() as db:
+            db.execute("""DELETE FROM profile_fts WHERE entry_id IN (SELECT id FROM profile_entries
+                WHERE subject=? AND kind IN ('fact','overview') AND account='' AND friend='')""", (subject,))
+            db.execute("""DELETE FROM profile_entries WHERE subject=? AND kind IN ('fact','overview')
+                AND account='' AND friend=''""", (subject,))
+            for entry in entries:
+                self._write(db, dict(entry, subject=subject, account='', friend='', as_of=None, enabled=True),
+                            uuid.uuid4().hex, stamp)
+            db.execute('UPDATE people SET display_name=? WHERE id=?', (name, subject))
+            db.execute('''INSERT INTO profile_library(subject,categories) VALUES(?,?)
+                ON CONFLICT(subject) DO UPDATE SET categories=excluded.categories''',
+                       (subject, json.dumps(categories, ensure_ascii=False)))
 
     def delete(self, entry_id):
         with self.chat.connect() as db:

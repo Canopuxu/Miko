@@ -8,6 +8,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+CHAT_PROMPT_FILES = {'web': 'system-prompt.txt', 'qq': 'qq-expression.txt'}
+
+
+def chat_prompts(local_root):
+    path = Path(local_root) / 'config/expression.local.json'
+    saved = json.loads(path.read_text('utf-8-sig')) if path.exists() else {}
+    defaults = {key: (REPO_ROOT / 'config/defaults' / name).read_text('utf-8').strip()
+                for key, name in CHAT_PROMPT_FILES.items()}
+    return {key: saved.get(key, value) for key, value in defaults.items()}, defaults
+
+
+def save_chat_prompts(local_root, values):
+    _, defaults = chat_prompts(local_root)
+    root = Path(local_root) / 'config'
+    root.mkdir(parents=True, exist_ok=True)
+    write_json(root / 'expression.local.json',
+               {key: text for key, text in values.items() if text != defaults[key]})
 
 
 class ProviderConfig(BaseModel):

@@ -182,30 +182,14 @@ class GroupLanguage:
             await asyncio.sleep(1)
 
     async def reference(self, key, records, plan_id):
-        from miko.adapters.qq.tulpa_language.mcp_language_store import LearningError
         b = self.binding(key)
         if not self.store.status(b)['enabled']:
             return ''
         texts = [r['text'] for r in records[-8:] if r['author']['kind'] == 'contact']
-        choice = self.store.context(b, plan_id, texts, '\n'.join(texts))
-        if choice['selection_required']:
-            try:
-                prompt = (REPO_ROOT / 'config/defaults/qq-language-choice.txt').read_text(encoding='utf-8')
-                result = await self.ask(prompt, dict(messages=texts, candidates=choice['candidates']), selection=True)
-                choice = self.store.select(b, plan_id, result['ids'])
-            except (ValueError, KeyError, TypeError, TimeoutError):
-                # Expression references are optional; normal replies remain available.
-                try:
-                    choice = self.store.select(b, plan_id, [])
-                except LearningError:
-                    return ''
+        choice = self.store.context(b, plan_id, texts, '\n'.join(texts), include_expressions=False)
         if not self.store.status(b)['enabled']:
             return ''
         labels = (REPO_ROOT / 'config/defaults/qq-language-context.txt').read_text(encoding='utf-8').splitlines()
-        parts = []
-        if choice['selected']:
-            parts.append(labels[0] + '\n' + '\n'.join(
-                f"- {r['situation']}：{r['style']}（{r['surface_form']}）" for r in choice['selected']))
-        if choice['jargon']:
-            parts.append(labels[1] + '\n' + '\n'.join(f"- {r['term']}：{r['meaning']}" for r in choice['jargon']))
-        return '\n\n'.join(parts)
+        if not choice['jargon']:
+            return ''
+        return labels[1] + '\n' + '\n'.join(f"- {r['term']}：{r['meaning']}" for r in choice['jargon'])

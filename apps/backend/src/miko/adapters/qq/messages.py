@@ -6,12 +6,12 @@ import json
 import re
 
 
-FACES = []  # Native face sending is currently disabled; keep incoming name lookup.
+FACES = []  # Filled from the connected QQ client's own face directory.
 FACE_NAMES = {'14': '微笑', '76': '赞', '182': '笑哭'}
 
 
 def update_face_catalog(catalog):
-    """Refresh incoming face names without enabling outgoing candidates."""
+    """Use the same QQ directory for incoming names and outgoing candidates."""
     faces = {}
     for pack in catalog['packs']:
         for face in pack['emojis']:
@@ -25,6 +25,7 @@ def update_face_catalog(catalog):
         raise ValueError('QQ 表情目录为空')
     FACE_NAMES.clear()
     FACE_NAMES.update(faces)
+    FACES[:] = [{'face_id': face_id, 'name': name} for face_id, name in faces.items()]
 
 
 def parse_message(source):

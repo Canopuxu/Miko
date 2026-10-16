@@ -102,7 +102,8 @@ def stop(settings: Settings) -> None:
         request(f"http://127.0.0.1:{record['port']}/_runtime/stop", record["control_token"])
         process.wait(timeout=15)
     except (URLError, TimeoutError, ConnectionError, psutil.TimeoutExpired):
-        children = process.children(recursive=True)
+        # A restore worker may be a child of the backend it is stopping.
+        children = [child for child in process.children(recursive=True) if child.pid != os.getpid()]
         for child in reversed(children):
             try:
                 child.terminate()

@@ -1,12 +1,13 @@
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { BookOpen, ImagePlus, NotebookPen, X } from 'lucide-react';
+import { BookOpen, ImagePlus, NotebookPen, Search, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerImport, StickerLibrary } from './StickerLibrary';
 import { GroupLanguage } from './GroupLanguage';
 import { FriendManager } from '../components/FriendManager';
 import { FriendRelationships } from './FriendRelationships';
+import { ChatSearch } from '../components/ChatSearch';
 
 type Friend = { account: string; friend: string; name: string; enabled: number; blocked: number;
   auto_reply_idle:number; chat_type:number; natural_chat:number;
@@ -29,6 +30,8 @@ export function QqPage() {
   const navigation = useContext(NavigationContext)!;
   const [status, setStatus] = useState<QqStatus | null>(null);
   const [selected, setSelected] = useState(new URLSearchParams(location.search).get('friend'));
+  const [selectedAccount, setSelectedAccount] = useState(new URLSearchParams(location.search).get('account'));
+  const [finding, setFinding] = useState(false);
   const [groupMode,setGroupMode]=useState(selected?.startsWith('group-')??false);
   const [manager,setManager]=useState(false);
   const [notice,setNotice]=useState('');
@@ -36,9 +39,10 @@ export function QqPage() {
   const [collecting,setCollecting]=useState<{account:string;imageUrl:string;collectUrl:string}|null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const [changing, setChanging] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
-  const friend = status?.friends.find(item => item.friend === selected);
+  const friend = status?.friends.find(item => item.friend === selected && (!selectedAccount || item.account === selectedAccount));
   const latestRun = detail?.runs[0];
   const replyNotice = latestRun?.error === friend?.note ? latestRun?.error : null;
   const characterName = status?.character_name ?? 'Miko';
@@ -47,7 +51,8 @@ export function QqPage() {
   const guard = useDiscardGuard(relationshipDirty);
   useEffect(()=>{
     const id=navigation.search.get('friend');
-    if(navigation.active==='qq' && id && id!==selected) guard.proceed(()=>select(id,true));
+    const account=navigation.search.get('account');
+    if(navigation.active==='qq' && id && (id!==selected || account!==selectedAccount)) guard.proceed(()=>select(id,true,account));
   },[navigation.active,navigation.search]);
 
   useEffect(() => {
@@ -57,17 +62,22 @@ export function QqPage() {
         const value = await getJson<QqStatus>('/api/qq/status');
         if (!alive) return;
         setStatus(value);
-        const current = value.friends.find(item => item.friend === selected);
+        const current = value.friends.find(item => item.friend === selected && (!selectedAccount || item.account === selectedAccount));
         if (current) {
           const next = await getJson<Detail>(`/api/qq/friends/${current.account}/${current.friend}`);
           if (alive) setDetail(next);
         }
-      } catch (cause) { if (alive) setError(String(cause)); }
+        if (alive) setRefreshError('');
+      } catch (cause) {
+        if (alive) setRefreshError(cause instanceof TypeError
+          ? '暂时连不上 Miko 后台，正在重连…'
+          : cause instanceof Error ? cause.message : String(cause));
+      }
     }
     void refresh();
     const timer = setInterval(refresh, 2000);
     return () => { alive = false; clearInterval(timer); };
-  }, [selected]);
+  }, [selected,selectedAccount]);
 
   useEffect(() => {
     if(navigation.active!=='qq')return;
@@ -76,9 +86,9 @@ export function QqPage() {
     if(target)target.scrollIntoView({block:'center'});else bottom.current?.scrollIntoView({block:'end'});
   }, [selected, detail?.messages.length,navigation.active,navigation.search]);
 
-  function select(id: string,preserveFocus=false) {
-    setSelected(id); setGroupMode(id.startsWith('group-')); setDetail(null); setError('');
-    navigation.replace({friend:id,...(preserveFocus?{}:{message:undefined})});
+  function select(id: string,preserveFocus=false,account:string|null=null) {
+    setSelected(id); setSelectedAccount(account); setGroupMode(id.startsWith('group-')); setDetail(null); setError(''); setRefreshError('');
+    navigation.replace({friend:id,account:account??undefined,...(preserveFocus?{}:{message:undefined})});
   }
 
   async function toggle(enabled: boolean) {
@@ -110,21 +120,21 @@ export function QqPage() {
       <button className="new-chat" onClick={()=>setManager(true)}>＋ 添加{groupMode?'群聊':'好友'}</button>
       <nav className="conversation-list" aria-label={groupMode?'QQ 群聊':'QQ 私聊'}>
         {status?.friends.filter(item=>(item.chat_type===2)===groupMode).map(item => <button key={`${item.account}:${item.friend}`}
-          className={`conversation-item ${item.friend === selected ? 'active' : ''}`} onClick={() => {if(item.friend!==selected)guard.proceed(()=>select(item.friend));}}>
+          className={`conversation-item ${item.friend === selected && item.account === friend?.account ? 'active' : ''}`} onClick={() => {if(item.friend!==selected || item.account!==friend?.account)guard.proceed(()=>select(item.friend,false,item.account));}}>
           <span className="conversation-title">{item.name}</span>
           <span className="conversation-preview">{stateLabel(item.state)}</span>
         </button>)}
       </nav>
     </>}>
     <main className="main-panel">
-      <header className="page-header"><div><h1>{friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}</h1>
+      <header className="page-header"><div><h1 title={friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}>{friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}</h1>
         <p>{friend?.friend.replace('group-','') ?? (groupMode?'选择一个群聊查看接话状态':'选择一位好友查看接话状态')}</p></div>
-        <div className="header-actions">{friend && <><button className="ui-button" onClick={()=>navigation.navigate('review',
+        <div className="header-actions"><button className="ui-button" onClick={()=>setFinding(true)}><Search size={15}/>查找记录</button>{friend && <><button className="ui-button" onClick={()=>navigation.navigate('review',
           {day:new Date().toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:undefined})}><NotebookPen size={15}/>回顾</button>
           <button className="ui-button" onClick={()=>navigation.navigate('memory',
             {person:'miko',relation:`qq:${friend.account}:${friend.friend}`})}><BookOpen size={15}/>关系记忆</button></>}
           <span className="model-label">{status?.receiver.state==='connected'?'QQ 已连接':'QQ 未连接'}</span></div></header>
-      {error && <div role="alert" className="qq-error error-notice">{error}<button className="text-button" aria-label="关闭提示" onClick={()=>setError('')}><X size={15}/></button></div>}
+      {(error || refreshError) && <div role="alert" className="qq-error error-notice">{error || refreshError}<button className="text-button" aria-label="关闭提示" onClick={()=>{setError('');setRefreshError('');}}><X size={15}/></button></div>}
       {notice && <p className="qq-caption" role="status">{notice}</p>}
       {replyNotice && <div role="alert" className="qq-error error-notice"><span>{replyNotice}</span>
         <button className="text-button" onClick={()=>navigation.navigate('settings')}>模型设置</button></div>}
@@ -191,6 +201,8 @@ export function QqPage() {
       </> : <section className="conversation"><EmptyState title={groupMode?'选择或添加一个群聊':'选择一位好友'}/></section>}
       <FriendManager open={manager} kind={groupMode?'groups':'friends'} onClose={()=>setManager(false)} onAdded={message=>setNotice(message)}/>
       {guard.dialog}
+      {finding && <ChatSearch source="qq" conversationId={friend ? `qq:${friend.account}:${friend.friend}` : null} onClose={()=>setFinding(false)}
+        onOpen={item=>guard.proceed(()=>{setFinding(false);navigation.navigate('qq',{account:item.account??undefined,friend:item.friend??undefined,message:item.id});})}/>}
       {collecting && <StickerImport {...collecting} onClose={()=>setCollecting(null)} onSaved={()=>{setStickerVersion(value=>value+1);setNotice('已添加到本地表情库');}}/>}
     </main>
   </AppShell>;

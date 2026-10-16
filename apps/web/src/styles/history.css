@@ -1,0 +1,38 @@
+.history-dialog { display:flex; flex-direction:column; box-sizing:border-box; width:min(780px,calc(100vw - 32px)); max-height:calc(100dvh - 48px); overflow:hidden; }
+.history-dialog > header,.history-dialog > p,.history-search-form,.history-footer,.history-context-heading,.history-result-heading { flex-shrink:0; }
+.history-channel { display:inline-flex; align-items:center; gap:5px; margin:0 5px; vertical-align:middle; color:var(--sage); white-space:nowrap; }
+.history-search-form { margin:6px 0 18px; }
+.history-search-form fieldset { display:grid; grid-template-columns:minmax(0,1fr) 155px auto; gap:12px; margin:0; padding:0; border:0; min-width:0; align-items:end; }
+.history-search-form label { display:grid; gap:7px; min-width:0; font-size:12px; color:var(--muted); }
+.history-search-form input,.history-search-form select { box-sizing:border-box; width:100%; min-width:0; height:40px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--page); color:var(--ink); font:inherit; font-size:13px; }
+.history-search-form button { height:40px; }
+.history-search-form .history-scope { display:flex; align-items:center; gap:10px; }
+.history-scope select { width:auto; min-width:140px; }
+.history-search-form fieldset > p { grid-column:2/4; align-self:center; margin:0; font-size:11px; line-height:1.6; color:var(--muted); }
+.history-result-heading { display:flex; align-items:center; gap:8px; padding-bottom:10px; font-size:12px; color:var(--muted); }
+.history-results { min-height:140px; overflow-y:auto; max-height:500px; }
+.history-hit { display:block; width:100%; padding:16px 12px; border:0; border-bottom:1px solid var(--line); border-radius:8px; background:transparent; color:var(--ink); text-align:left; cursor:pointer; }
+.history-hit:hover { background:var(--page); }
+.history-hit-meta { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; font-size:12px; color:var(--muted); }
+.history-hit-meta strong { font-size:13px; font-weight:600; color:var(--sage); }
+.history-hit-meta > span { max-width:200px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; }
+.history-hit-meta time { margin-left:auto; font-size:11px; }
+.history-hit-text { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; margin-top:9px; font-size:14px; line-height:1.8; }
+.history-dialog mark { background:#e2e9d6; color:inherit; border-radius:2px; }
+.history-context-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:12px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
+.history-context-heading button { display:flex; align-items:center; gap:6px; }
+.history-context { overflow-y:auto; min-height:140px; padding:8px 0; }
+.history-message { padding:14px; margin:4px 0; border:1px solid transparent; border-radius:10px; }
+.history-message.selected { background:var(--page); border-color:#cbd6bd; }
+.history-message > div { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; font-size:12px; color:var(--muted); }
+.history-message strong { color:var(--sage); font-weight:600; }
+.history-message time { font-size:11px; }
+.history-message small { margin-left:auto; color:var(--sage); }
+.history-message p { margin:9px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.8; }
+.history-message .history-recalled { color:var(--muted); }
+.history-window { display:flex; justify-content:center; margin:10px auto; font-size:12px; }
+.history-footer { display:flex; justify-content:space-between; align-items:center; gap:16px; padding-top:16px; border-top:1px solid var(--line); }
+.history-footer > span { font-size:11px; color:var(--muted); }
+.history-dialog .history-error { margin:0 0 14px; }
+.history-empty { padding:24px 8px; color:var(--muted); font-size:13px; }
+@media(max-width:640px) { .history-dialog { padding:20px; } .history-search-form fieldset { grid-template-columns:minmax(0,1fr) auto; } .history-query { grid-column:1/-1; } .history-search-form fieldset > p { grid-column:1/-1; } .history-hit-meta time { margin-left:0; } .history-footer { flex-wrap:wrap; } }

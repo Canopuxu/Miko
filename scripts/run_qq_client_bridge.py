@@ -93,7 +93,7 @@ async def run(args):
                 continue
             row = select_client(rows, config['account'], selected_pid)
             if not row:
-                fault = next((row for row in rows if row['state'] in ('unsupported', 'permission', 'component')), None)
+                fault = next((row for row in rows if row['state'] in ('unsupported', 'permission', 'component', 'error')), None)
                 status(fault['state'] if fault else 'waiting', fault['note'] if fault else
                        f"请在 QQ 登录账号 {config['account']}，其他已登录账号不会自动接入", config)
                 await asyncio.sleep(3)
