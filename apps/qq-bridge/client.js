@@ -31,7 +31,7 @@
         if (compat.account(globalThis.authData) !== config.account || contents.isDestroyed()) throw new Error('QQ session changed');
         return {user_id: Number(config.account), nickname: globalThis.authData.nickName || '',
             pid: process.pid, version: require('electron').app.getVersion(),
-            uid: globalThis.authData.uid || '', capabilities: selected.capabilities, transport: connection.kind, adapter_hash: config.adapter_hash};
+            uid: globalThis.authData.uid || '', capabilities: {...selected.capabilities, message_reactions:true}, transport: connection.kind, adapter_hash: config.adapter_hash};
     };
     const publish = (name, payload) => {
         try { identity(); } catch { return; }
@@ -82,7 +82,16 @@
         } catch (error) {pending.delete(id); clearTimeout(timer); reject(error);}
     });
 
-    const rendererServices = `((${compat.renderer.toString()})()).services`;
+    const rendererServices = `(() => {
+        const services=((${compat.renderer.toString()})()).services;
+        const builder=services.find(v=>typeof v.getMsgElements==='function');
+        if(builder)globalThis.__mikoElementBuilder={account:${JSON.stringify(config.account)},builder};
+        else if(globalThis.__mikoElementBuilder && (!globalThis.__mikoElementBuilder.account || globalThis.__mikoElementBuilder.account===${JSON.stringify(config.account)})){
+            globalThis.__mikoElementBuilder.account=${JSON.stringify(config.account)};
+            services.push(globalThis.__mikoElementBuilder.builder);
+        }
+        return services;
+    })()`;
     const friends = async () => contents.executeJavaScript(`(() => {
         const store=(${rendererServices}).find(v=>!!v.buddyMap);
         if(!store) throw new Error('QQ friend store unavailable');
@@ -94,6 +103,7 @@
     const prepare = async item => JSON.parse(await contents.executeJavaScript(`(async () => {
         const services=${rendererServices};
         const service=services.find(v=>typeof v.getMsgElements==='function');
+        if(!service)throw new Error('QQ image/quote preparation unavailable; open the QQ chat pane');
         const elements=await service.getMsgElements({items:[${JSON.stringify(item)}]});
         return JSON.stringify(elements,(_,v)=>v instanceof Map?Object.fromEntries(v):v);
     })()`));
@@ -152,6 +162,18 @@
         if (action === 'prepare_reply') {
             const message=await dispatch('get_native_message',payload);
             return prepare({type:'reply',reply:message});
+        }
+        if (action === 'set_reaction') {
+            if (!payload.group_id || typeof payload.set!=='boolean' || !['128077','128170','10068','128557'].includes(String(payload.emoji_id))) throw new Error('Invalid message reaction');
+            const target=await peer(payload);
+            const message=await dispatch('get_native_message',payload);
+            const seq=String(message.msgSeq || '');
+            if(message.chatType!==2 || !/^[1-9]\d*$/.test(seq) || seq!==String(payload.message_seq)
+                || message.elements?.some(e=>e.grayTipElement?.revokeElement))throw new Error('Reaction target changed');
+            const result=await invoke('nodeIKernelMsgService/setMsgEmojiLikes',[
+                {peer:target,msgSeq:seq,emojiId:String(payload.emoji_id),emojiType:'2',setEmoji:payload.set}]);
+            if(result?.result!==0)throw new Error('QQ rejected message reaction: '+JSON.stringify(result));
+            return {accepted:true,message_seq:seq};
         }
         if (action === 'get_native_message' || action === 'read_image') {
             const target=await peer(payload);
@@ -239,7 +261,17 @@
             response.writeHead(502,{'Content-Type':'application/json'}).end(JSON.stringify({error:'QQ bridge request failed'}));
         }
     });
-    const heartbeat=setInterval(()=>publish('bridge/heartbeat',{online:String(globalThis.authData?.uin)===config.account}),15000);
+    let imageProbe=null;
+    const refreshImages=()=>{
+        if(closed || selected.capabilities.send_images || imageProbe)return;
+        imageProbe=contents.executeJavaScript(`(${rendererServices}).some(v=>typeof v.getMsgElements==='function')`)
+            .then(ready=>{if(!closed)selected.capabilities.send_images=ready;})
+            .catch(()=>{}).finally(()=>{imageProbe=null;});
+    };
+    const heartbeat=setInterval(()=>{
+        publish('bridge/heartbeat',{online:String(globalThis.authData?.uin)===config.account});
+        refreshImages();
+    },15000);
     const close = async () => {
         closed=true; clearInterval(heartbeat);
         if (!contents.isDestroyed() && contents.send === wrappedSend) contents.send=originalSend;

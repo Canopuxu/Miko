@@ -506,13 +506,14 @@ class QqRepliesTests(unittest.IsolatedAsyncioTestCase):
         Image.new('RGB', (8, 8), 'blue').save(picture, 'GIF')
         raw = picture.getvalue()
         digest = self.service.stickers.add('123', raw, '表示收到和赞同')
+        candidate = self.service.stickers.candidates('123', '收到')[0]['sticker_id']
         await self.receive(1, '原话')
         event = self.event(2)
         event['message'] = [{'type':'reply','data':{'id':'1'}},
             {'type':'text','data':{'text':'这件事呢'}}, {'type':'face','data':{'id':'76'}}]
         await self.service.receive(event)
         self.chat.bubbles = [{'kind':'text','text':'这件事我记得','quote_message_id':1},
-                             {'kind':'face','face_id':'76'}, {'kind':'sticker','sticker_id':digest}]
+                             {'kind':'face','face_id':'76'}, {'kind':'sticker','sticker_id':candidate}]
         async def no_delay(*args): pass
         with patch.object(self.service, 'pause_between', side_effect=no_delay), \
                 patch('miko.adapters.qq.messages.FACES', [{'face_id': '76', 'name': '赞'}]), \

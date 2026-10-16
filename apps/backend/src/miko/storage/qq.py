@@ -30,7 +30,7 @@ class QqStore:
                 AND NOT EXISTS (SELECT 1 FROM messages m
                     WHERE m.id='qq:' || r.account || ':' || r.friend || ':' || r.receipt_id)""")]
             pieces = [dict(r) for r in db.execute("""SELECT r.account,r.friend,b.* FROM qq_bubbles b
-                JOIN qq_runs r ON r.id=b.run_id WHERE b.state='sent' ORDER BY r.created_at,b.position""")]
+                JOIN qq_runs r ON r.id=b.run_id WHERE b.state='sent' AND b.receipt_id IS NOT NULL ORDER BY r.created_at,b.position""")]
         # A crash may occur after the receipt is saved but before its message is saved.
         for run in confirmed:
             key = (run['account'], run['friend'])

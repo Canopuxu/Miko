@@ -6,6 +6,8 @@ from pydantic import BaseModel, StrictBool, Field
 
 from miko.domain.conversation.qq import QqService
 from miko.api.local import local_request
+from miko.domain.conversation.stickers import message_image, describe
+from miko.adapters.qq.media import image_info
 
 
 class FriendSwitch(BaseModel):
@@ -19,14 +21,34 @@ class GroupSelection(BaseModel):
     group_ids: list[str] = Field(min_length=1)
 
 
+class StickerMeaning(BaseModel):
+    description: str = Field(default='', max_length=200)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    emotion: str = Field(default='', max_length=80)
+    usage: str = Field(default='', max_length=160)
+    avoid: str = Field(default='', max_length=160)
+    uncertainty: str = Field(default='', max_length=160)
+
+
 class StickerUpload(BaseModel):
     image_base64: str
     description: str
+    semantic: StickerMeaning | None = None
+
+
+class StickerDescription(BaseModel):
+    image_base64: str
+
+
+class StickerCollect(BaseModel):
+    description: str
+    semantic: StickerMeaning | None = None
 
 
 class StickerEdit(BaseModel):
     description: str
     enabled: StrictBool
+    semantic: StickerMeaning | None = None
 
 
 class LanguageEdit(BaseModel):
@@ -81,7 +103,8 @@ def qq_router(service: QqService):
         if not cfg:
             raise HTTPException(404, '找不到这位好友')
         return {'friend': cfg, 'messages': service.store.messages(key),
-                'runs': service.store.runs(key)}
+                'runs': service.store.runs(key),
+                'reactions': service.reactions.states(key) if hasattr(service, 'reactions') else []}
 
     @router.patch('/friends/{account}/{friend}/options')
     async def options(account: str, friend: str, body: ReplyOptions):
@@ -145,15 +168,54 @@ def qq_router(service: QqService):
             if len(body.image_base64) > 8 * 1024 * 1024:
                 raise ValueError('图片超过 6 MiB 上限')
             raw = base64.b64decode(body.image_base64, validate=True)
-            return {'sticker_id': service.stickers.add(account, raw, body.description)}
+            return {'sticker_id': service.stickers.add(account, raw, body.description, semantic=body.semantic.model_dump() if body.semantic else None)}
         except (ValueError, binascii.Error) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.post('/stickers/{account}/describe')
+    async def describe_sticker(account: str, body: StickerDescription):
+        known_account(account)
+        try:
+            if len(body.image_base64) > 8 * 1024 * 1024:
+                raise ValueError('图片超过 6 MiB 上限')
+            raw = base64.b64decode(body.image_base64, validate=True)
+            image_info(raw)
+            return StickerMeaning.model_validate(await describe(service, raw))
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.delete('/stickers/{account}/{digest}')
+    async def delete_sticker(account: str, digest: str):
+        known_account(account)
+        try:
+            service.stickers.delete(account, digest)
+            return {'deleted': True}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.get('/friends/{account}/{friend}/images/{mid}/{index}')
+    async def chat_image(account: str, friend: str, mid: int, index: int):
+        try:
+            raw = await message_image(service, (account, friend), mid, index)
+            info = image_info(raw)
+            mime = {'PNG': 'image/png', 'JPEG': 'image/jpeg', 'GIF': 'image/gif', 'WEBP': 'image/webp'}[info['format']]
+            return Response(raw, media_type=mime, headers={'Cache-Control': 'private, no-cache'})
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @router.post('/friends/{account}/{friend}/images/{mid}/{index}/collect')
+    async def collect_image(account: str, friend: str, mid: int, index: int, body: StickerCollect):
+        try:
+            raw = await message_image(service, (account, friend), mid, index)
+            return {'sticker_id': service.stickers.add(account, raw, body.description, semantic=body.semantic.model_dump() if body.semantic else None)}
+        except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
 
     @router.put('/stickers/{account}/{digest}')
     async def edit(account: str, digest: str, body: StickerEdit):
         known_account(account)
         try:
-            service.stickers.edit(account, digest, body.description, body.enabled)
+            service.stickers.edit(account, digest, body.description, body.enabled, semantic=body.semantic.model_dump() if body.semantic else None)
             return {'saved': True}
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None

@@ -18,6 +18,7 @@ from miko.adapters.qq.messages import FACES, parse_message, parse_bubbles, bubbl
 from miko.adapters.qq.media import StickerLibrary
 from miko.domain.conversation.context_selection import pending_contacts
 from miko.domain.conversation.language import GroupLanguage
+from miko.domain.conversation.reactions import GroupReactions
 
 
 class StaleReply(ValueError):
@@ -33,6 +34,7 @@ class Worker:
     phase: str = 'generating'
     position: int | None = None
     previous_mode: str = 'owner'
+    action_kind: str | None = None
 
 
 class QqService:
@@ -51,6 +53,7 @@ class QqService:
         self.avatar = (ReplyAvatar(self.client, config.miko_avatar_file, config.owner_avatar_file)
                        if config and config.miko_avatar_file and config.owner_avatar_file else None)
         self.receiver = create_receiver(self.client, self.receive, self.source_changed) if self.client else None
+        self.stickers.bind(self)
         if config:
             for friend in config.friends:
                 self.store.add_friend(config.account, friend['id'], friend.get('name') or friend['id'])
@@ -62,6 +65,8 @@ class QqService:
         self.halted = False
         self.language = GroupLanguage(self, Path(local_root), clock=clock)
         self.chat.qq_language = self.language
+        self.reactions = GroupReactions(self)
+        self.chat.qq_reactions = self.reactions
 
     def start(self):
         self.halted = False
@@ -134,6 +139,7 @@ class QqService:
 
     async def source_changed(self, state):
         await self.language.reset()
+        self.reactions.reset()
         if state == 'connected':
             self.epoch = self.clock()
             if isinstance(self.client, OneBot):
@@ -202,7 +208,7 @@ class QqService:
             payload.update(sender_id=uid, sender_name=name, sender_uid=sender.get('uid', ''))
             self.store.member(uid, sender.get('nickname') or uid)
         known = is_self and self.store.receipt(key, mid)
-        sending = key in self.workers and self.workers[key].phase == 'sending'
+        sending = key in self.workers and self.workers[key].phase == 'sending' and self.workers[key].action_kind != 'reaction'
         origin = 'miko' if known else 'pending' if is_self and sending else 'unknown' if is_self and cfg['blocked'] else 'manual' if is_self else 'friend'
         if not self.store.event(key, mid, text, stamp, origin, payload):
             return
@@ -220,6 +226,7 @@ class QqService:
             return
         if group:
             self.language.observe(key, mid, stamp, payload['segments'])
+            self.reactions.observe(key, mid)
         now = self.clock()
         first = cfg['pending_since'] if cfg['pending_since'] is not None else now
         batch_due = min(now + self.quiet_seconds, first + self.collect_seconds)
@@ -330,6 +337,9 @@ class QqService:
             await asyncio.sleep(min(.1, max(0, until - asyncio.get_running_loop().time())))
 
     def bubble_text(self, bubble, candidates):
+        if bubble['kind'] == 'reaction':
+            name = next(c['name'] for c in self.reactions.core.policy()['candidates'] if c['id'] == bubble['reaction_id'])
+            return '[消息表情回应：' + ('添加' if bubble['operation'] == 'add' else '撤销') + ' ' + name + ']'
         if bubble['kind'] == 'text':
             return bubble['text']
         if bubble['kind'] == 'face':
@@ -375,6 +385,7 @@ class QqService:
             candidates = self.stickers.candidates(key[0], '\n'.join(r['text'] for r in records[-8:]))
             if isinstance(self.client, NativeQq) and not self.client.capabilities.get('send_images', True):
                 candidates = []
+            reactions, reaction_targets = self.reactions.catalog(key, records)
             for attempt in range(4):
                 self.check(key, worker)
                 worker.turn = self.chat.begin_qq(cfg['conversation_id'], records, candidates)
@@ -383,7 +394,8 @@ class QqService:
                 if worker.turn.status != 'completed':
                     raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
                 try:
-                    bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars, group=cfg['chat_type'] == 2)
+                    bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars,
+                        group=cfg['chat_type'] == 2, reactions=reactions, reaction_targets=reaction_targets)
                     break
                 except ValueError:
                     if attempt == 3:
@@ -398,16 +410,32 @@ class QqService:
             texts = [self.bubble_text(b, candidates) for b in bubbles]
             self.store.plan(worker.run_id, bubbles, texts)
             self.store.update_run(worker.run_id, state='sending')
+            receipt_id = None
             for i, bubble in enumerate(bubbles):
+                worker.action_kind = bubble['kind']
                 worker.position, worker.phase = i, 'between_bubbles'
                 if i:
                     await self.pause_between(key, worker, bubbles[i-1])
                 self.check(key, worker)
                 self.store.update_bubble(worker.run_id, i, state='preparing')
-                segments = await self.segments(key, worker, bubble)
                 if i == 0 and self.avatar:
                     await self.avatar.acquire(worker.run_id)
                     self.check(key, worker)
+                if bubble['kind'] == 'reaction':
+                    def reaction_guard():
+                        self.check(key, worker)
+                        self.store.update_bubble(worker.run_id, i, state='sending')
+                        worker.phase = 'sending'
+                    result = await self.reactions.apply(key, bubble, worker.run_id + ':' + str(i), reaction_guard)
+                    if result['state'] == 'UNKNOWN':
+                        raise SendUncertain('消息表情回应结果未知，请到 QQ 核对；不会重试')
+                    if result['state'] not in ('SUCCEEDED', 'NOOP'):
+                        worker.phase = 'between_bubbles'
+                        raise ValueError(result.get('result', result).get('note', '消息表情回应未完成'))
+                    self.store.update_bubble(worker.run_id, i, state='sent', timestamp=self.clock())
+                    worker.phase = 'between_bubbles'
+                    continue
+                segments = await self.segments(key, worker, bubble)
                 payload = parse_message(segments)
                 if bubble['kind'] == 'sticker':
                     payload['segments'][-1]['sticker_id'] = bubble['sticker_id']
@@ -418,8 +446,11 @@ class QqService:
                     self.store.update_bubble(worker.run_id, i, state='sending',
                                              segments=json.dumps(payload['segments'], ensure_ascii=False))
                     worker.phase = 'sending'
+                    if bubble['kind'] == 'sticker':
+                        self.stickers.attempt(key[0], bubble['sticker_id'], worker.run_id + ':' + str(i))
 
                 receipt = await self.client.send(*key, segments, guard)
+                receipt_id = receipt['message_id']
                 # Each receipt is durable before echo classification or dispatch of the next bubble.
                 self.store.update_bubble(worker.run_id, i, state='sent', receipt_id=receipt['message_id'],
                                          timestamp=receipt['timestamp'])
@@ -428,8 +459,8 @@ class QqService:
                 worker.phase = 'between_bubbles'
                 await self.settle_echoes(key)
                 if bubble['kind'] == 'sticker':
-                    self.stickers.used(key[0], bubble['sticker_id'])
-            self.store.update_run(worker.run_id, state='sent', receipt_id=receipt['message_id'], error=warning)
+                    self.stickers.used(key[0], bubble['sticker_id'], worker.run_id + ':' + str(i))
+            self.store.update_run(worker.run_id, state='sent', receipt_id=receipt_id, error=warning)
             if self.versions.get(key, 0) == worker.version and not (cfg['chat_type'] == 2 and self.store.friend(key)['pending_since'] is not None):
                 self.store.update_friend(key, mode='miko', note=warning or 'Miko 正在接话',
                     pending_since=None, pending_last=None, due_at=None)
@@ -465,15 +496,23 @@ class QqService:
         try:
             if worker.position is not None:
                 with self.store.chat.connect() as db:
+                    current = db.execute('SELECT expression FROM qq_bubbles WHERE run_id=? AND position=?',
+                                         (worker.run_id, worker.position)).fetchone()
                     db.execute("""UPDATE qq_bubbles SET state=?,error=? WHERE run_id=? AND position=?
                         AND state IN ('pending','preparing','sending')""",
                         ('unknown' if state == 'unknown' else 'cancelled' if state == 'stale' else 'error',
                          error, worker.run_id, worker.position))
+                expression = json.loads(current['expression']) if current else {}
+                if expression.get('kind') == 'sticker' and worker.phase == 'sending':
+                    self.stickers.outcome(key[0], expression['sticker_id'], worker.run_id + ':' + str(worker.position),
+                                          'UNKNOWN' if state == 'unknown' else 'FAILED')
             self.store.update_run(worker.run_id, state=state, error=error)
-            if state == 'unknown':
+            if state == 'unknown' and worker.action_kind != 'reaction':
                 self.store.update_friend(key, blocked=1, note=error, due_at=None,
                     pending_since=None, pending_last=None)
-            elif state == 'error' and self.versions.get(key, 0) == worker.version:
+            elif state in ('error', 'unknown') and self.versions.get(key, 0) == worker.version:
+                if self.store.friend(key)['chat_type'] == 2 and self.store.friend(key)['pending_since'] is not None:
+                    return
                 self.store.update_friend(key, mode=worker.previous_mode, note=error,
                     pending_since=None, pending_last=None, due_at=None)
         except sqlite3.Error:

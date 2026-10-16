@@ -1,9 +1,9 @@
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { BookOpen, NotebookPen, X } from 'lucide-react';
+import { BookOpen, ImagePlus, NotebookPen, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
-import { StickerLibrary } from './StickerLibrary';
+import { StickerImport, StickerLibrary } from './StickerLibrary';
 import { GroupLanguage } from './GroupLanguage';
 import { FriendManager } from '../components/FriendManager';
 import { FriendRelationships } from './FriendRelationships';
@@ -18,7 +18,7 @@ type QqMessage = Message & { message_id: number; recalled: boolean;
   segments: { type: string; message_id?: number; sticker_id?: string }[];
   quoted_message?: { text?: string; message_id: number } };
 type QqStatus = { character_name:string; receiver: { state: string; account: string; note: string }; friends: Friend[] };
-type Detail = { messages: QqMessage[]; runs: Run[] };
+type Detail = { messages: QqMessage[]; runs: Run[]; reactions?: {message_id:number;name:string;reaction_id:string}[] };
 const states: Record<string, string> = { disabled: '已关闭', blocked: '等待核对', waiting: '等待接话',
   generating: '正在生成', sending: '正在发送', chatting: 'Miko 接话中', listening: '等待新消息',
   sent: '已发送', skipped: '无需回复', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断',
@@ -32,6 +32,8 @@ export function QqPage() {
   const [groupMode,setGroupMode]=useState(selected?.startsWith('group-')??false);
   const [manager,setManager]=useState(false);
   const [notice,setNotice]=useState('');
+  const [stickerVersion,setStickerVersion]=useState(0);
+  const [collecting,setCollecting]=useState<{account:string;imageUrl:string;collectUrl:string}|null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState('');
   const [changing, setChanging] = useState(false);
@@ -157,8 +159,16 @@ export function QqPage() {
                     {detail.messages.find(m => m.message_id === s.message_id)?.text ?? message.quoted_message?.text ?? '引用消息'}
                   </blockquote>)}
                   <div className="message-text">{message.recalled ? '这条消息已撤回' : message.text}</div>
+                  {!message.recalled && detail.reactions?.filter(r=>r.message_id===message.message_id).map(r=><span className="qq-reaction" key={r.reaction_id} title={`${characterName} 对这条消息的表情回应`}>{r.name} · {characterName}</span>)}
                   {!message.recalled && message.segments.filter(s => s.sticker_id).map((s, i) => <img key={i} className="chat-sticker"
                     src={`/api/qq/stickers/${friend.account}/${s.sticker_id}/image`} alt={message.text} />)}
+                  {!message.recalled && message.segments.filter(s=>s.type==='image').map((s,i)=>!s.sticker_id && <div className="qq-message-image" key={i}>
+                    <img loading="lazy" src={`/api/qq/friends/${friend.account}/${friend.friend}/images/${message.message_id}/${i}`}
+                      alt="聊天图片" onError={event=>{event.currentTarget.hidden=true;}}/>
+                    <button className="text-button" onClick={()=>setCollecting({account:friend.account,
+                      imageUrl:`/api/qq/friends/${friend.account}/${friend.friend}/images/${message.message_id}/${i}`,
+                      collectUrl:`/api/qq/friends/${friend.account}/${friend.friend}/images/${message.message_id}/${i}/collect`})}><ImagePlus size={13}/>存为表情</button>
+                  </div>)}
                   {message.author.kind==='miko' && message.status==='completed' && <button className="text-button message-review-link"
                     onClick={()=>navigation.navigate('review',{day:new Date(message.created_at).toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:message.id})}>
                     <NotebookPen size={13}/>批注</button>}
@@ -171,7 +181,7 @@ export function QqPage() {
                     {b.error && <span className="message-note">{b.error}</span>}</p>) : run.text && <p>{run.text}</p>}
                   {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
-              <StickerLibrary key={friend.account} account={friend.account} />
+              <StickerLibrary key={friend.account} account={friend.account} refreshKey={stickerVersion}/>
               {friend.chat_type===2 && <GroupLanguage key={`${friend.account}:${friend.friend}`} account={friend.account} friend={friend.friend}/>}
               {friend.chat_type!==2 && <FriendRelationships key={`${friend.account}:${friend.friend}`} friend={friend} onDirty={setRelationshipDirty}/>}
               <div ref={bottom} />
@@ -181,6 +191,7 @@ export function QqPage() {
       </> : <section className="conversation"><EmptyState title={groupMode?'选择或添加一个群聊':'选择一位好友'}/></section>}
       <FriendManager open={manager} kind={groupMode?'groups':'friends'} onClose={()=>setManager(false)} onAdded={message=>setNotice(message)}/>
       {guard.dialog}
+      {collecting && <StickerImport {...collecting} onClose={()=>setCollecting(null)} onSaved={()=>{setStickerVersion(value=>value+1);setNotice('已添加到本地表情库');}}/>}
     </main>
   </AppShell>;
 }

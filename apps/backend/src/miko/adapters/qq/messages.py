@@ -76,7 +76,7 @@ def model_message(payload):
     return [{k: v for k, v in item.items() if k != 'ref'} for item in payload.get('segments', [])]
 
 
-def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
+def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False, reactions=(), reaction_targets=()):
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {'bubbles'}:
         raise ValueError('回复需要 bubbles JSON 对象')
@@ -102,6 +102,13 @@ def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False):
         if not isinstance(bubble, dict):
             raise ValueError('气泡格式无效')
         kind = bubble.get('kind')
+        if kind == 'reaction':
+            if (not group or set(bubble) != {'kind', 'message_id', 'reaction_id', 'operation'}
+                    or type(bubble['message_id']) is not int or bubble['message_id'] not in reaction_targets
+                    or bubble['reaction_id'] not in {r['reaction_id'] for r in reactions}
+                    or bubble['operation'] not in ('add', 'remove')):
+                raise ValueError('消息回应需要当前群消息编号、候选表情和 add/remove 操作')
+            continue
         field = {'text': 'text', 'face': 'face_id', 'sticker': 'sticker_id'}.get(kind)
         allowed = {'kind', field, 'quote_message_id', 'introduces_miko'}
         if group and kind == 'text':

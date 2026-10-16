@@ -17,7 +17,7 @@ class NativeQq(OneBot):
 
     async def call(self, action, payload, *, sending=False):
         allowed = {'get_login_info', 'get_friend_list', 'get_group_list', 'get_msg', 'set_qq_avatar', 'fetch_sys_faces'}
-        if action not in allowed | ({'send_private_msg', 'send_group_msg'} if sending else set()):
+        if action not in allowed | ({'send_private_msg', 'send_group_msg', 'set_msg_emoji_like'} if sending else set()):
             raise SendError('此操作不在 Miko 的 QQ 功能范围内')
         try:
             info = await self.driver.rpc('get_login_info')
@@ -74,6 +74,13 @@ class NativeQq(OneBot):
 
 
 class NativeReceiver(EventReceiver):
+    def status(self):
+        result = super().status()
+        if result['state'] == 'connected':
+            result['note'] = ('QQ 已连接' if self.client.capabilities.get('send_images', True)
+                              else 'QQ 已连接；请在 QQ 打开聊天窗口以启用图片发送')
+        return result
+
     async def run(self):
         driver = self.client.driver
         delay = 1

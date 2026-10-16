@@ -40,6 +40,20 @@ class NativeDriverTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.driver.remember(record()), mid)
         self.assertEqual(self.driver.lookup(mid)[0], '7696526253391844439')
 
+    async def test_group_reaction_uses_verified_native_id_and_sequence(self):
+        incoming = record()
+        incoming.update(chatType=2, peerUin='900', msgSeq='174')
+        event = await self.driver.event(incoming)
+        self.assertEqual(event['message_seq'],174)
+        self.driver.rpc = AsyncMock(return_value={'accepted':True})
+        await self.driver.call('set_msg_emoji_like', {'message_id':event['message_id'], 'emoji_id':'128077', 'set':True})
+        self.driver.rpc.assert_awaited_once_with('set_reaction',dict(group_id='900',native_id=incoming['msgId'],message_seq='174',emoji_id='128077',set=True))
+        private = self.driver.remember(record())
+        self.driver.rpc.reset_mock()
+        with self.assertRaises(ValueError):
+            await self.driver.call('set_msg_emoji_like', {'message_id':private,'emoji_id':'128077','set':True})
+        self.driver.rpc.assert_not_awaited()
+
     async def test_send_receipt_and_duplicate_owner_events(self):
         received = []
         events = [record('12345', 1), record('12345'), record('12345')]

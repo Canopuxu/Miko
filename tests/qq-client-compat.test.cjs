@@ -13,15 +13,16 @@ async function fixture(t, kind) {
     const number=kind==='legacy3'?3:2, legacy=kind!=='renderer';
     const channel=legacy?`IPC_UP_${number}`:'RM_IPCFROM_RENDERER8';
     const calls=[],writes=[],forwarded=[],records=new Map(),files=new Map();
-    const provider={groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
+    const provider={builder:{getMsgElements:()=>[{replyElement:{fixture:true}}]},groups:{groupList:[{groupCode:'900',groupName:'朋友群'}]},friends:{buddyMap:new Map([
         ['u_friend',{coreInfo:{uin:'67890',uid:'u_friend',nick:'新版好友',remark:'备注'}}],
         ['u_older',{uin:'67891',uid:'u_older',nick:'旧版好友',remark:'旧备注'}]])}};
     const document={querySelector:()=>({__vue_app__:{
         config:{globalProperties:{$route:{path:'/main/message'}}},_context:{provides:provider}}}),
         querySelectorAll:()=>[]};
+    const rendererContext=vm.createContext({document,Map,Set,Object,Reflect});
     const contents={id:8,mainFrame:{},isDestroyed:()=>false,
         send:(...args)=>forwarded.push(args),
-        executeJavaScript:code=>Promise.resolve(vm.runInNewContext(code,{document,Map,Set,Object,Reflect}))};
+        executeJavaScript:code=>Promise.resolve(vm.runInContext(code,rendererContext))};
     const notify=batch=>contents.send(legacy?`IPC_DOWN_${number}`:'RM_IPCTO_RENDERER8',
         {type:'request'},legacy?batch:batch[0]);
     const ipcMain={listenerCount:name=>name===channel?1:0,emit:(name,event,meta,body)=>{
@@ -44,6 +45,8 @@ async function fixture(t, kind) {
                 notify([{cmdName:'nodeIKernelMsgListener/onAddSendMsg',payload:{msgList:[{...record,sendStatus:1}]}}]);
                 notify([{cmdName:'nodeIKernelMsgListener/onMsgInfoListUpdate',payload:{msgList:[{...record,sendStatus:2}]}}]);
             });
+        } else if(cmd==='nodeIKernelMsgService/setMsgEmojiLikes') {
+            contents.send('reply',{callbackId:meta.callbackId,...(!legacy?{type:'response',promiseStatue:'full'}:{})},{result:0});
         } else throw new Error('unexpected command '+cmd);
         return true;
     }};
@@ -73,7 +76,7 @@ async function fixture(t, kind) {
     }
     await handler({method:'GET',url:'/events?after=0',headers:{authorization:'Bearer fixture-key'},on(){}},
         {writeHead(){return this;},flushHeaders(){},write(line){writes.push(JSON.parse(line));return true;},end(){}});
-    return {rpc,notify,calls,writes,forwarded,records,files};
+    return {rpc,notify,calls,writes,forwarded,records,files,provider};
 }
 
 test('market face image reads QQ cached resource without accepting a caller file path',async t=>{
@@ -83,6 +86,14 @@ test('market face image reads QQ cached resource without accepting a caller file
     bridge.files.set('QQ/cache/face.gif',Buffer.from('fixture-image-bytes'));
     const result=await bridge.rpc('read_image',{group_id:'900',native_id:'face',element_id:'11'});
     assert.equal(Buffer.from(result.base64,'base64').toString(),'fixture-image-bytes');
+});
+
+test('QQ image/quote builder survives its chat pane unmounting',async t=>{
+    const bridge=await fixture(t,'renderer');
+    delete bridge.provider.builder;
+    bridge.records.set('quote',{msgId:'quote',chatType:2,elements:[]});
+    const result=await bridge.rpc('prepare_reply',{group_id:'900',native_id:'quote'});
+    assert.equal(result[0].replyElement.fixture,true);
 });
 
 for(const kind of ['renderer','legacy2','legacy3']) {
@@ -114,5 +125,16 @@ for(const kind of ['renderer','legacy2','legacy3']) {
             {textElement:{content:'@测试成员 ',atType:2,atUid:'67890',atNtUid:'u_friend'}},
             {textElement:{content:'晚饭还没想好'}}]});
         assert.equal(mentioned.sendStatus,2,'QQ may normalize mention display text before returning its receipt');
+        bridge.records.set('reaction-source',{msgId:'reaction-source',chatType:2,msgSeq:'101',elements:[]});
+        const reaction=await bridge.rpc('set_reaction',{group_id:'900',native_id:'reaction-source',message_seq:'101',emoji_id:'128077',set:true});
+        assert.equal(reaction.accepted,true);
+        const command=bridge.calls.find(value=>value.cmd.endsWith('/setMsgEmojiLikes'));
+        assert.equal(command.args[0].peer.chatType,2);assert.equal(command.args[0].peer.peerUid,'900');
+        assert.deepEqual(JSON.parse(JSON.stringify(command.args)),[{peer:{chatType:2,peerUid:'900',guildId:''},msgSeq:'101',emojiId:'128077',emojiType:'2',setEmoji:true}]);
+        await bridge.rpc('set_reaction',{group_id:'900',native_id:'reaction-source',message_seq:'101',emoji_id:'128077',set:false});
+        assert.equal(bridge.calls.filter(value=>value.cmd.endsWith('/setMsgEmojiLikes')).at(-1).args[0].setEmoji,false);
+        bridge.records.get('reaction-source').msgSeq='102';
+        await assert.rejects(()=>bridge.rpc('set_reaction',{group_id:'900',native_id:'reaction-source',message_seq:'101',emoji_id:'128077',set:true}));
+        assert.equal(bridge.calls.filter(value=>value.cmd.endsWith('/setMsgEmojiLikes')).length,2,'stale sequence must not be dispatched');
     });
 }

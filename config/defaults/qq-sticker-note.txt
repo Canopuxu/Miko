@@ -1,0 +1,1 @@
+查看这张表情图片，简短记录画面内容、表达的情绪和适用场景。只返回 JSON 对象，包含 description（画面与含义）、tags（标签数组）、emotion（情绪）、usage（适用场景）、avoid（不适合的场景）、uncertainty（看不清或无法确定的内容）。清楚的部分直接描述，不确定的部分写入 uncertainty。

@@ -145,6 +145,8 @@
             try {
                 const result = await contents.executeJavaScript(`(() => {
                     const environment = (${renderer.toString()})();
+                    const builder=environment.services.find(value=>typeof value.getMsgElements==='function');
+                    if(builder)globalThis.__mikoElementBuilder={builder};
                     return {route: environment.route, capabilities: (${capabilities.toString()})(environment)};
                 })()`);
                 if (result.route || result.capabilities.send_images || result.capabilities.faces) serviceWindows++;

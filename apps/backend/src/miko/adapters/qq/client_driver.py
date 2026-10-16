@@ -164,10 +164,12 @@ class NativeClientDriver:
             'user_id': int(sender if group else peer), 'target_id': int(peer), 'message_id': mid,
             'time': int(record['msgTime']), 'recalled': recalled(record), 'sender': {'user_id': int(sender),
                 'nickname': record.get('sendNickName', ''), 'card': record.get('sendMemberName', ''),
-                'uid': record.get('senderUid', '')}, 'message': segments}
+                'uid': record.get('senderUid', '')}, 'message': segments,
+            **({'message_seq':int(record['msgSeq']), 'sequence_authoritative':True}
+               if str(record.get('msgSeq','')).isdigit() and int(record['msgSeq'])>0 else {})}
 
     async def call(self, action, payload):
-        if self.receiving is False and action in ('send_private_msg', 'send_group_msg'):
+        if self.receiving is False and action in ('send_private_msg', 'send_group_msg', 'set_msg_emoji_like'):
             raise ConnectionError('QQ event connection unavailable')
         if action in ('get_login_info', 'get_friend_list', 'get_group_list', 'fetch_sys_faces'):
             return await self.rpc(action)
@@ -188,6 +190,15 @@ class NativeClientDriver:
                 return await self.event(stored)
             record = await self.rpc('get_native_message', {('group_id' if stored['chatType'] == 2 else 'user_id'): peer, 'native_id': native_id})
             return await self.event(record, images=True)
+        if action == 'set_msg_emoji_like':
+            native_id, peer, stored = self.lookup(payload['message_id'])
+            if stored['chatType'] != 2 or recalled(stored) or stored.get('quote_snapshot'):
+                raise ValueError('Message reaction needs a real group message')
+            result = await self.rpc('set_reaction', dict(group_id=peer, native_id=native_id,
+                message_seq=str(stored.get('msgSeq', '')), emoji_id=str(payload['emoji_id']), set=payload['set']))
+            if result.get('accepted') is not True:
+                raise ValueError('Message reaction was not confirmed')
+            return None
         if action in ('send_private_msg', 'send_group_msg'):
             group = action == 'send_group_msg'
             target_field = 'group_id' if group else 'user_id'

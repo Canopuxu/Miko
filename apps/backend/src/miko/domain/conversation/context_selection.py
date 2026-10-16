@@ -242,6 +242,9 @@ def render_dialogue(request):
     if request['available_faces']:
         blocks.append('可选 QQ 表情：'+'；'.join(r['face_id']+' '+r['name'] for r in request['available_faces']))
     if request.get('available_stickers'):blocks.append('可选表情包：'+json.dumps(request['available_stickers'],ensure_ascii=False))
+    if request.get('available_reactions'):
+        blocks.append('可选消息表情回应：'+json.dumps(request['available_reactions'],ensure_ascii=False)
+                      +'\n可回应的消息编号：'+json.dumps(request['reaction_targets']))
     # Existing approved output contract stays structured; conversational input does not.
     blocks.append('输出格式：'+json.dumps(request['output_format'],ensure_ascii=False))
     return '\n\n'.join(blocks)

@@ -140,6 +140,18 @@ textarea::placeholder { color: #b7ac9e; }
 .sticker-card img { width: 100%; height: 100px; object-fit: contain; }
 .sticker-card textarea { margin: 10px 0; min-height: 48px; }
 .sticker-card label { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+.sticker-library-heading,.sticker-card-actions { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:12px 0; }
+.sticker-library-heading > .ui-button { flex-shrink:0; white-space:nowrap; }
+.sticker-card > input { box-sizing:border-box; width:100%; border:1px solid var(--line); border-radius:8px; padding:8px; background:var(--surface); }
+.sticker-card-actions small { margin-left:auto; }
+.sticker-import-dialog { position:fixed; z-index:101; top:50%; left:50%; transform:translate(-50%,-50%); width:min(460px,calc(100vw - 40px)); max-height:85vh; overflow:auto; box-sizing:border-box; padding:24px; background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:0 16px 48px #403b3526; }
+.sticker-import-dialog header,.sticker-import-dialog footer { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.sticker-import-dialog h2 { margin:0; font-size:19px; }.sticker-import-dialog p { font-size:12px; line-height:1.7; color:var(--muted); }
+.sticker-import-dialog label { display:block; margin:14px 0; font-size:13px; }
+.sticker-import-dialog label input,.sticker-import-dialog textarea { display:block; box-sizing:border-box; width:100%; margin-top:7px; padding:10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); font:inherit; }
+.sticker-import-dialog textarea { min-height:70px; resize:vertical; }.sticker-import-dialog input[type=file] { max-width:100%; }
+.sticker-import-preview { display:block; max-width:100%; height:180px; object-fit:contain; margin:18px auto; }
+.qq-message-image { margin-top:10px; }.qq-message-image img { display:block; max-width:220px; max-height:180px; object-fit:contain; border-radius:8px; margin-bottom:6px; }
 .group-language { margin-top: 24px; padding: 16px 0; border-top: 1px solid var(--line); }
 .language-heading, .language-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .language-heading .qq-idle-option { margin: 0; }
@@ -226,3 +238,4 @@ textarea::placeholder { color: #b7ac9e; }
 .review-card { border-bottom: 1px solid #e8e3db; padding: 20px 0; }
 .profile-editor details { margin: 14px 0; }
 .profile-editor details summary { cursor: pointer; color: #827767; }
+.qq-reaction { display: inline-flex; align-items: center; margin: 5px 6px 0 0; padding: 3px 9px; border: 1px solid #d8dece; border-radius: 12px; color: #6b7f66; font-size: 12px; }

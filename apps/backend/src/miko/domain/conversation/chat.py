@@ -269,6 +269,14 @@ class ChatService:
                 if bubble['kind'] == 'text':
                     bubble.update(reply_to_message_id='optional integer',
                         mention_user_ids='optional array; available author ids: ' + json.dumps(mention_ids, ensure_ascii=False))
+            reactions = getattr(self, 'qq_reactions', None)
+            available, targets = reactions.catalog((account, friend), records) if reactions else ([], [])
+            if available:
+                turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-reactions.txt').read_text(encoding='utf-8').strip()
+                turn.qq_input['available_reactions'] = available
+                turn.qq_input['reaction_targets'] = targets
+                turn.qq_input['output_format']['bubbles'].append(dict(kind='reaction', message_id='current group message integer',
+                    reaction_id='candidate string', operation='add or remove'))
         turn.message = render_dialogue(turn.qq_input)
         image_parts = [part for r in records for part in r.get('_image_inputs', [])]
         content = [{'type': 'text', 'text': turn.message}, *image_parts] if image_parts else turn.message
@@ -294,9 +302,10 @@ class ChatService:
                 await self.cancel(turn)
                 await turn.task
 
-    async def complete_memory(self, system, message, model=None, json_output=False, provider=None):
+    async def complete_memory(self, system, message, model=None, json_output=False, provider=None, image_inputs=None):
+        content = [{'type': 'text', 'text': message}, *image_inputs] if image_inputs else message
         turn = Turn(uuid.uuid4().hex, 'memory', message,
-                    context=[{'role': 'user', 'content': message}], system_prompt=system, model=model,
+                    context=[{'role': 'user', 'content': content}], system_prompt=system, model=model,
                     json_output=json_output, provider_override=provider)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
