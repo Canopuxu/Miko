@@ -1,7 +1,8 @@
-"""Selected MIT Tulpa retrieval functions; function bodies are unchanged.
+"""Selected MIT Tulpa retrieval functions.
 
 Source: chatlocal/retrieval.py and chatlocal/reply_history.py, 7b603d3.
 Miko supplies a persistent messages/FTS projection of its own material.
+text_matches additionally accepts FTS column weights/match expressions; defaults are unchanged.
 """
 import json
 import re
@@ -41,12 +42,13 @@ def words(text):
     return list(dict.fromkeys(w for w in tokens(text).split()
                              if len(w) >= 2 and re.search(r'\w', w)))[:24]
 
-def text_matches(db, where, params, text, extra='', args=(), limit=40):
+def text_matches(db, where, params, text, extra='', args=(), limit=40, weights=(), match=None):
     """Use the archive's existing FTS index for both turns and owner snippets."""
     terms = words(text)
-    if not terms:
+    if not terms and not match:
         return []
-    match = ' OR '.join('"' + w.replace('"', '""') + '"' for w in terms)
-    return [dict(r) for r in db.execute(f'''SELECT m.* FROM message_fts JOIN messages m ON m.id=message_fts.rowid
-      WHERE message_fts MATCH ? AND {where} {extra} ORDER BY bm25(message_fts) LIMIT ?''',
+    match = match or ' OR '.join('"' + w.replace('"', '""') + '"' for w in terms)
+    weighting = ''.join(',' + str(float(w)) for w in weights)
+    return [dict(r) for r in db.execute(f'''SELECT m.*,bm25(message_fts{weighting}) AS relevance FROM message_fts JOIN messages m ON m.id=message_fts.rowid
+      WHERE message_fts MATCH ? AND {where} {extra} ORDER BY relevance LIMIT ?''',
       [match, *params, *args, limit])]

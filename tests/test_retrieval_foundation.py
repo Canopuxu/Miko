@@ -25,7 +25,7 @@ class RetrievalFoundationTests(unittest.IsolatedAsyncioTestCase):
             _,rows,_=await select(None,'你还在练电吉他吗',copy.deepcopy(context))
             self.assertEqual([r['source']['id'] for r in rows],['right'])
             _,rows,_=await select(None,'路由器断网怎么解决的',copy.deepcopy(context))
-            self.assertEqual(rows[0]['source']['id'],'old')
+            self.assertEqual([r['source']['id'] for r in rows],['old'])
             self.assertFalse((await select(None,'哈哈哈哈',copy.deepcopy(context)))[1])
 
     async def test_followup_and_new_topic_do_not_share_old_topic(self):
@@ -35,6 +35,33 @@ class RetrievalFoundationTests(unittest.IsolatedAsyncioTestCase):
                  '_previous_contact_texts':['你喜欢什么蛋糕']}
         _,rows,_=await select(None,'对了，你还打网球吗',context)
         self.assertEqual([r['source']['id'] for r in rows],['sport'])
+
+    async def test_natural_profile_topics_do_not_pull_generic_words_or_old_episodes(self):
+        context={'role_material':[profile('music','ヨルシカ',category='喜好与厌恶/音乐与作品'),
+                    profile('book','文学',category='兴趣与能力/阅读'),
+                    profile('job','自由画师',category='兴趣与能力/学习与工作'),
+                    profile('cake','红丝绒蛋糕',category='喜好与厌恶/喜欢的食物')],
+                 'people_memory':[dict(id='noise',subject='miko',category='工具',topic='电脑',content='大量工作在电脑完成')],
+                 'life_entries':[dict(day='2026-10-14',text='戴耳机听歌，吃了蛋糕')],
+                 '_previous_contact_texts':['你还练电吉他吗']}
+        for query,expected in [('你耳机里平时放谁啊','music'),('睡前想找本书看看，你一般看啥','book'),
+                               ('你不用每天去公司打卡吗','job'),('我想买块蛋糕，你喜欢哪种','cake')]:
+            _,rows,_=await select(None,query,copy.deepcopy(context))
+            self.assertEqual([r['source']['id'] for r in rows],[expected])
+        self.assertFalse((await select(None,'哈哈哈哈',copy.deepcopy(context)))[1])
+        self.assertFalse((await select(None,'晚安啦',copy.deepcopy(context)))[1])
+        self.assertFalse((await select(None,'那我先撤啦',copy.deepcopy(context)))[1])
+        from miko.adapters.memory.retrieval import query_categories
+        self.assertFalse(query_categories('这事你记住了吗，别吃亏'))
+
+    async def test_user_defined_topic_and_semantic_scope_stay_separate_per_question(self):
+        context={'role_material':[profile('camera','富士相机',category='摄影器材'),
+                                 profile('film','胶片模拟',category='摄影器材'),
+                                 profile('game','三角洲','owner','游戏')],
+                 'retrieval':{'hits':[{'name':'profile:film','score':.8}],
+                              'by_topic':{'橙汁玩三角洲吗':[{'name':'profile:game','score':.8}]}}}
+        _,rows,_=await select(None,'你的富士相机还用吗？橙汁玩三角洲吗',context)
+        self.assertEqual({r['source']['id'] for r in rows},{'camera','game','film'})
 
     async def test_topics_dates_and_failed_reranking_keep_base(self):
         context={'current_time':'2026-10-17T12:00:00+08:00',
@@ -67,6 +94,49 @@ class RetrievalFoundationTests(unittest.IsolatedAsyncioTestCase):
         from miko.domain.conversation.context_selection import topic_scopes
         _,scopes=topic_scopes('你最近忙什么',{'_contact_names':{'qq:1':'忙'}})
         self.assertEqual(scopes,[{'miko'}])
+
+    async def test_rerank_is_an_additional_ranking_and_empty_or_failed_result_keeps_hybrid(self):
+        config=RerankConfig(api_base='https://example.test/rerank',api_key='test',model='test',format='standard')
+        context={'role_material':[profile('literature','文学',category='阅读'),profile('fantasy','奇幻故事',category='阅读')]}
+        with patch('miko.domain.conversation.context_selection.rank',return_value=[{'index':1,'relevance_score':.02},{'index':0,'relevance_score':.001}]):
+            _,rows,_=await select(config,'睡前找本书，你平时看啥',context)
+        self.assertEqual({r['source']['id'] for r in rows},{'literature','fantasy'})
+        semantic={'role_material':[profile('job','绘本插画师',category='职业')],
+                  'retrieval':{'hits':[{'name':'profile:job','score':.8}]}}
+        base=(await select(None,'那些稿子是你的主业吗',copy.deepcopy(semantic)))[1]
+        self.assertTrue(base)
+        for response in ([],httpx.ConnectError('offline')):
+            options={'side_effect':response} if isinstance(response,Exception) else {'return_value':response}
+            with patch('miko.domain.conversation.context_selection.rank',**options):
+                rows=(await select(config,'那些稿子是你的主业吗',copy.deepcopy(semantic)))[1]
+            self.assertEqual(rows,base)
+
+    async def test_semantic_recall_can_add_a_fact_from_a_different_category(self):
+        context={'role_material':[profile('singer','陈绮贞',category='音乐')],
+                 'people_memory':[dict(id='memo',subject='miko',content='喜欢听ヨルシカ',category='个人情况')],
+                 'retrieval':{'hits':[{'name':'item:memo','score':.9}]}}
+        _,rows,_=await select(None,'你耳机里一般放谁',context)
+        self.assertEqual({r['source']['id'] for r in rows},{'singer','memo'})
+
+    async def test_semantic_topic_evidence_reduces_unrelated_short_fact(self):
+        context={'people_memory':[dict(id='guitar',subject='miko',content='会练琴',category='兴趣爱好',topic='乐器')],
+                 'retrieval':{'hits':[{'name':'item:guitar','score':.47}],
+                              'category_hits':{'对了你养过仓鼠吗':[{'category':'宠物','score':.7,'members':[]},{'category':'兴趣爱好/乐器','score':.30,'members':['item:guitar']}]}}}
+        self.assertFalse((await select(None,'对了你养过仓鼠吗',context))[1])
+        # A useful specific topic can support a short fact with a weaker individual vector.
+        context['retrieval']['category_hits']={'你还玩乐器吗':[{'category':'兴趣爱好/乐器','score':.7,'members':['item:guitar']}]}
+        self.assertEqual([r['source']['id'] for r in (await select(None,'你还玩乐器吗',context))[1]],['guitar'])
+
+    async def test_local_character_recall_and_soft_category_recover_useful_facts(self):
+        context={'people_memory':[dict(id='practice',subject='miko',category='学习记录',topic='练习',
+                                      content='刚学吉他时按弦会痛，后来习惯了'),
+                                  dict(id='camera',subject='miko',category='摄影器材',topic='器材',
+                                      content='一直用富士相机拍照')],
+                 'role_material':[profile('job','自由画师',category='工作')]}
+        _,rows,_=await select(None,'你之前按弦会手疼吗',copy.deepcopy(context))
+        self.assertIn('practice',[r['source']['id'] for r in rows])
+        _,rows,_=await select(None,'你还在公司用富士相机吗',copy.deepcopy(context))
+        self.assertIn('camera',[r['source']['id'] for r in rows])
 
     def test_no_implicit_reranker_on_chat_only_setup(self):
         with tempfile.TemporaryDirectory() as folder:

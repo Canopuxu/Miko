@@ -105,6 +105,25 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.memory.configure_index()
         self.assertTrue(self.memory.index.database.recall_file_repo.list_recall_files())
 
+    async def test_semantic_category_recalls_short_facts_without_crossing_person_scope(self):
+        class CategoryEmbeddings:
+            async def embed(self, texts):
+                return [[1.,0.] if '耳机' == text or ('音乐' in text and not any(name in text for name in ('陈绮贞','ヨルシカ','许嵩'))) else [0.,1.]
+                        for text in texts], {}
+        self.memory.index._embedding_pool._cache['embedding']=CategoryEmbeddings()
+        a=self.chat.profiles.save(ProfileInput(subject='miko',kind='fact',category='音乐',title='陈绮贞',content='陈绮贞').record())
+        b=self.chat.profiles.save(ProfileInput(subject='miko',kind='fact',category='音乐',title='ヨルシカ',content='ヨルシカ').record())
+        self.chat.profiles.save(ProfileInput(subject='owner',kind='fact',category='音乐',title='许嵩',content='许嵩').record())
+        result=await self.memory.context('耳机',('123','456'),raw=True)
+        hits={name for rows in result['retrieval']['category_hits'].values() for row in rows if row['score']>.9 for name in row['members']}
+        self.assertEqual(hits,{'profile:'+a['id'],'profile:'+b['id']})
+        from miko.domain.conversation.context_selection import select
+        _,chosen,_=await select(None,'耳机',result,local=self.memory.local)
+        self.assertEqual({row['source']['id'] for row in chosen},{a['id'],b['id']})
+        self.chat.profiles.delete(b['id'])
+        result=await self.memory.context('耳机',('123','456'),raw=True)
+        self.assertNotIn('profile:'+b['id'],{row['name'] for row in result['retrieval']['hits']})
+
 
 if __name__ == '__main__':
     unittest.main()

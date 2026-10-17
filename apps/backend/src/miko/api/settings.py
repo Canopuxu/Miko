@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from miko.api.local import local_request
 from miko import __version__
-from miko.settings import ProviderConfig, RerankConfig, legacy_rerank, write_json
+from miko.settings import ProviderConfig, RerankConfig, write_json
 from miko.adapters.memory.rerank import rank, infer_format
 from miko.adapters.qq.onebot import QqConfig, OneBot, EventReceiver, SendError
 from miko.adapters.qq.avatar import ReplyAvatar
@@ -83,9 +83,11 @@ def settings_router(chat, qq):
         value = body.model_dump(exclude={'format'})
         if not value['api_key'].strip():
             old = read(name)
-            if not old.get('api_key') and fallback and fallback.api_base == value['api_base'].rstrip('/'):
+            normalize = model_list_base if name == 'rerank.local.json' else lambda url: url.rstrip('/')
+            if (fallback and normalize(fallback.api_base) == normalize(value['api_base'])
+                    and (not old.get('api_key') or normalize(old.get('api_base', '')) != normalize(value['api_base']))):
                 old = {'api_base': fallback.api_base, 'api_key': fallback.api_key.get_secret_value()}
-            if old.get('api_base', '').rstrip('/') != value['api_base'].rstrip('/'):
+            if normalize(old.get('api_base', '')) != normalize(value['api_base']):
                 raise HTTPException(400, '更换 API 地址时请重新填写密钥')
             value['api_key'] = old.get('api_key', '')
         try:
@@ -101,9 +103,9 @@ def settings_router(chat, qq):
         if body.format:
             return body.format
         previous = read('rerank.local.json')
-        if previous.get('api_base', '').rstrip('/') == body.api_base.rstrip('/') and previous.get('format'):
+        if model_list_base(previous.get('api_base', '')) == model_list_base(body.api_base) and previous.get('format'):
             return previous['format']
-        return infer_format(body.api_base)
+        return infer_format(rerank_endpoint(body.api_base))
 
     @router.get('')
     async def get_settings():
@@ -117,7 +119,7 @@ def settings_router(chat, qq):
                 'embedding_model': read('embedding.local.json').get('model', ''),
                 'embedding_provider': public_provider('embedding.local.json') if read('embedding.local.json').get('api_base') else None,
                 'rerank_provider': public_rerank(),
-                'rerank_enabled': read('rerank.local.json').get('enabled', bool(chat.provider)),
+                'rerank_enabled': read('rerank.local.json').get('enabled', bool(read('rerank.local.json').get('model'))),
                 'rerank_shared': read('rerank.local.json').get('shared', not bool(read('rerank.local.json').get('api_base'))),
                 'qq': {'account': config.get('account', '') if config.get('enabled', True) else ''},
                 'configured': bool(chat.provider)}
@@ -125,9 +127,9 @@ def settings_router(chat, qq):
     def public_rerank():
         value = read('rerank.local.json')
         if value.get('api_base'):
-            return {**public_provider('rerank.local.json'), 'format': value.get('format', 'dashscope')}
-        config = legacy_rerank(chat.provider)
-        return {**config.model_dump(exclude={'api_key'}), 'api_key': '', 'has_key': True} if config else None
+            return {**public_provider('rerank.local.json'), 'api_base': model_list_base(value['api_base']),
+                    'format': value.get('format', 'standard')}
+        return {'api_base':'', 'api_key':'', 'model':value['model'], 'has_key':False} if value.get('model') else None
 
     @router.get('/application')
     async def application():
@@ -149,9 +151,8 @@ def settings_router(chat, qq):
         name = {'provider': 'provider.local.json', 'qq': 'qq-provider.local.json',
                 'life': 'life-provider.local.json', 'memory': 'memory-provider.local.json',
                 'embedding': 'embedding.local.json', 'rerank': 'rerank.local.json'}[target]
-        fallback = legacy_rerank(chat.provider) if target == 'rerank' else chat.provider
-        config = provider(body, 'provider.local.json' if shared else name, chat.provider if shared else fallback)
-        if target == 'rerank' and shared:
+        config = provider(body, 'provider.local.json' if shared else name, chat.provider)
+        if target == 'rerank':
             config = config.model_copy(update={'api_base': rerank_endpoint(config.api_base)})
         try:
             async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
@@ -184,8 +185,7 @@ def settings_router(chat, qq):
         name = 'provider.local.json' if target == 'provider' else f'{target}-provider.local.json'
         if target in ('embedding', 'rerank'):
             name = f'{target}.local.json'
-        config = provider(body.model_copy(update={'model': 'catalog'}), name,
-            legacy_rerank(chat.provider) if target == 'rerank' else chat.provider)
+        config = provider(body.model_copy(update={'model': 'catalog'}), name, chat.provider)
         try:
             async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
                 response = await client.get(model_list_base(config.api_base) + '/models',
@@ -223,7 +223,7 @@ def settings_router(chat, qq):
         old_base = embedding.get('api_base') or read('provider.local.json').get('api_base', '')
         if 'embedding_provider' in body.model_fields_set:
             if body.embedding_provider:
-                config = provider(body.embedding_provider, 'embedding.local.json', primary)
+                config = provider(body.embedding_provider.model_copy(update={'model':body.embedding_provider.model.strip() or 'catalog'}), 'embedding.local.json', primary)
                 embedding.update(**config.model_dump(exclude={'api_key'}), api_key=config.api_key.get_secret_value())
             else:
                 embedding.pop('api_base', None)
@@ -236,6 +236,7 @@ def settings_router(chat, qq):
             embedding['index_file'] = 'memu-' + hashlib.sha256(identity.encode()).hexdigest()[:12] + '.sqlite3'
         embedding['model'] = embedding_model
         reranker = None
+        inactive_reranker = None
         if body.rerank_enabled:
             if not body.rerank_provider:
                 raise HTTPException(400, '请填写记忆筛选服务的地址、密钥和模型')
@@ -245,8 +246,17 @@ def settings_router(chat, qq):
                     raise HTTPException(400, '请填写重排模型名称')
                 reranker = RerankConfig(**config.model_dump(), format=infer_format(config.api_base))
             else:
-                config = provider(body.rerank_provider, 'rerank.local.json', legacy_rerank(chat.provider or primary))
+                config = provider(body.rerank_provider, 'rerank.local.json', primary)
+                config = config.model_copy(update={'api_base':rerank_endpoint(config.api_base)})
                 reranker = RerankConfig(**config.model_dump(), format=rerank_format(body.rerank_provider))
+        elif body.rerank_provider and not body.rerank_provider.model.strip():
+            if body.rerank_shared:
+                inactive_reranker = {'model':''}
+            elif body.rerank_provider.api_base.strip():
+                connection = provider(body.rerank_provider.model_copy(update={'model':'catalog'}), 'rerank.local.json', primary)
+                endpoint = rerank_endpoint(connection.api_base)
+                inactive_reranker = {'api_base':endpoint, 'api_key':connection.api_key.get_secret_value(),
+                                     'model':'', 'format':infer_format(endpoint)}
         async with chat.memory.lock:
             idle()
             root.mkdir(parents=True, exist_ok=True)
@@ -261,6 +271,8 @@ def settings_router(chat, qq):
             write_json(root / 'embedding.local.json', embedding)
             if body.rerank_enabled is not None:
                 value = {**reranker.model_dump(exclude={'api_key'}), 'api_key': reranker.api_key.get_secret_value()} if reranker else read('rerank.local.json')
+                if inactive_reranker is not None:
+                    value = inactive_reranker
                 write_json(root / 'rerank.local.json', {**value, 'enabled': body.rerank_enabled, 'shared': body.rerank_shared})
             chat.provider, chat.qq_provider = primary, secondary
             chat.memory.social.configured = primary is not None

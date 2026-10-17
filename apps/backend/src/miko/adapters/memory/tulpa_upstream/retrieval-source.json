@@ -17,6 +17,7 @@
     },
     "text_matches": {
       "source": "chatlocal/reply_history.py",
+      "adaptation": "Optional FTS column weights/match expression and returned BM25 score; original defaults retained",
       "sha256": "2f77b3a654f771c6be53a84093b25d9541c1978dc89d0d5e9dce3a4234aceb1d"
     }
   }

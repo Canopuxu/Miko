@@ -39,6 +39,8 @@ def model_list_base(api_base):
 
 def rerank_endpoint(api_base):
     parts = urlsplit(api_base.rstrip('/'))
+    if '/services/rerank/' in parts.path or parts.path.endswith(('/rerank', '/reranking')):
+        return api_base.rstrip('/')
     if parts.path.endswith('/compatible-mode/v1'):
         path = '/api/v1/services/rerank/text-rerank/text-rerank'
     else:

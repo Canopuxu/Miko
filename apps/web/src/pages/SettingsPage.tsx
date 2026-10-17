@@ -8,6 +8,8 @@ import '../styles/settings.css';
 import { workbenchEnabled } from '../features';
 import { ModelFields, useModelCatalog, type Provider } from '../components/ModelFields';
 import { DataBackups } from './DataBackups';
+import { SearchIndexSettings } from '../components/SearchIndexSettings';
+import { ProviderLinks } from '../components/ProviderLinks';
 
 type Reranker = Provider;
 type Qq = {account:string};
@@ -25,6 +27,12 @@ function TestFeedback({result}:{result?:TestResult}){
   return <span className={`settings-test-feedback ${result.state}`} role={result.state==='error'?'alert':'status'} aria-live="polite">
     {result.state==='running'?<LoaderCircle size={16} className="spinning"/>:result.state==='success'?<Check size={16}/>:null}{result.message}
   </span>;
+}
+function ModelTest({label,ready,result,test}:{label:string;ready:boolean;result?:TestResult;test:()=>void}){
+  return <div className="settings-actions settings-model-test"><button disabled={!ready||result?.state==='running'}
+    aria-label={`测试${label}连接`} onClick={test}>
+    {result?.state==='running'?<LoaderCircle size={16} className="spinning"/>:<PlugZap size={16}/>}
+    {result?.state==='running'?'正在测试…':'测试连接'}</button><TestFeedback result={result}/></div>;
 }
 export function SettingsPage(){
   const navigation=useContext(NavigationContext)!;
@@ -49,6 +57,7 @@ export function SettingsPage(){
     const [value,app]=await Promise.all([getJson<Config>('/api/settings'),getJson<Application>('/api/settings/application')]);
     if(!value.life_provider&&value.life_model&&value.life_model!==value.provider.model)value.life_provider={...value.provider,model:value.life_model};
     if(!value.memory_provider&&value.memory_model&&value.memory_model!==value.provider.model)value.memory_provider={...value.provider,model:value.memory_model};
+    if(!value.rerank_enabled&&value.rerank_provider)value.rerank_provider={...value.rerank_provider,model:''};
     setConfig(value);setApplication(app);setError('');
   }catch(e){setError(String(e));}}
   useEffect(()=>{void load();},[]);
@@ -95,7 +104,7 @@ export function SettingsPage(){
     memory_provider:config.memory_provider?cleanProvider(config.memory_provider):null,
     memory_model:config.memory_provider?.model??'',life_model:config.life_provider?.model??'',embedding_model:config.embedding_model,
     embedding_provider:config.embedding_provider?cleanProvider(config.embedding_provider):null,
-    rerank_shared:config.rerank_shared,rerank_enabled:config.rerank_enabled,rerank_provider:config.rerank_provider?cleanProvider(config.rerank_provider):null,
+    rerank_shared:config.rerank_shared,rerank_enabled:!!config.rerank_provider?.model.trim(),rerank_provider:config.rerank_provider?cleanProvider(config.rerank_provider):null,
     use_shared_model:!(config.qq_provider||config.life_provider||config.memory_provider)}:null;
   const selectedClient=qqClients.find(row=>String(row.pid)===selectedPid&&row.state==='ready');
   const qq=config?{account:selectedClient?.account??config.qq.account.trim(),
@@ -105,6 +114,15 @@ export function SettingsPage(){
   const embedding=config?.embedding_provider??(config?{...config.provider,model:config.embedding_model}:emptyProvider());
   const catalog=useModelCatalog(config?.provider??null,'provider');
   const reranker=config?.rerank_shared?{...config.provider,model:config.rerank_provider?.model??''}:config?.rerank_provider??emptyProvider();
+  const ready=(value:Provider)=>!!(value.api_base.trim()&&value.model.trim()&&(value.api_key.trim()||value.has_key));
+  function changeSearch(kind:'embedding'|'rerank',value:Provider){
+    if(!config)return;
+    const current=kind==='embedding'?embedding:reranker;
+    const connectionChanged=value.api_base!==current.api_base||value.api_key!==current.api_key;
+    if(kind==='embedding')edit({...config,embedding_model:value.model,
+      embedding_provider:connectionChanged||config.embedding_provider?value:null});
+    else edit({...config,rerank_provider:value,rerank_shared:connectionChanged?false:config.rerank_shared});
+  }
   function chooseSection(next:typeof section){setSection(next);setNotice('');setError('');}
   return <AppShell view="settings" sidebar={<nav className="settings-navigation" aria-label="设置分类">
     <button className={section==='models'?'selected':''} onClick={()=>chooseSection('models')}>模型与 API</button>
@@ -115,42 +133,53 @@ export function SettingsPage(){
       {error&&<p className="error-notice" role="alert">{error}</p>}{notice&&<p className="settings-notice" role="status"><Check size={16}/>{notice}</p>}
       {!config&&!error&&<p role="status">读取设置…</p>}{!config&&error&&<button onClick={()=>void load()}>重新加载</button>}
       {config&&<fieldset disabled={!!busy} className="settings-body">{section==='models'?<>
-        <section className="settings-basic"><h2>聊天与日常</h2><p>下面的 API 和模型用于“聊天”，QQ 聊天、生活生成和记忆整理默认跟随它。</p>
+        <section className="settings-model-section"><h2>聊天与日常</h2>
+          <p className="settings-section-description">设置聊天使用的 API 和模型。下面各项功能默认共用这套设置，也可以分别指定。</p>
           <ModelFields value={config.provider} change={provider=>edit({...config,provider})} catalog={catalog}/>
-          <div className="settings-actions"><button onClick={()=>void action('test','/models/test',cleanProvider(config.provider))}><PlugZap size={16}/>测试聊天模型</button><TestFeedback result={testResults.test}/></div>
-          <details className="settings-task-overrides"><summary>QQ 聊天、生活生成、记忆整理<ChevronDown size={16}/></summary>
-            <div className="settings-task-list">
-              {(['qq','life','memory'] as const).map(task=>{
-                const key=task==='qq'?'qq_provider':task==='life'?'life_provider':'memory_provider';
-                const label=task==='qq'?'QQ 聊天':task==='life'?'生活生成':'记忆整理';
-                const value=config[key];
-                return <div className="settings-task" key={task}><div className="settings-task-heading"><h3>{label}</h3>
-                  <label className="settings-check"><input type="checkbox" checked={!!value} onChange={event=>edit({...config,[key]:event.target.checked?{...config.provider}:null})}/>单独设置</label></div>
-                  {value?<><ModelFields value={value} target={task} change={next=>edit({...config,[key]:next})}/>
-                    <div className="settings-actions"><button onClick={()=>void action('test-'+task,'/models/test?target='+task,cleanProvider(value))}><PlugZap size={16}/>测试{label}模型</button><TestFeedback result={testResults['test-'+task]}/></div>
-                  </>:<p>跟随聊天 · {config.provider.model||'尚未选择模型'}</p>}
-                </div>;
-              })}
+          <ModelTest label="聊天" ready={ready(config.provider)} result={testResults.test}
+            test={()=>void action('test','/models/test',cleanProvider(config.provider))}/>
+          <ProviderLinks/>
+          <div className="settings-task-list" aria-label="各项功能的模型设置">
+            {(['qq','life','memory'] as const).map(task=>{
+              const key=task==='qq'?'qq_provider':task==='life'?'life_provider':'memory_provider';
+              const label=task==='qq'?'QQ 聊天':task==='life'?'生活生成':'记忆整理';
+              const description=task==='qq'?'用于回复 QQ 好友和群聊。':task==='life'?'用于生成角色的日常经历和目标进度。':'整理聊天中值得记住的资料，并补充便于查找的日常问法。';
+              const value=config[key];
+              return <div className="settings-task" key={task}><div className="settings-task-heading"><h3>{label}</h3>
+                <label className="settings-check"><input type="checkbox" checked={!!value} onChange={event=>edit({...config,[key]:event.target.checked?{...config.provider}:null})}/>单独设置</label></div>
+                <p className="settings-task-description">{description}</p>
+                {value?<><ModelFields value={value} target={task} change={next=>edit({...config,[key]:next})}/>
+                  <ModelTest label={label} ready={ready(value)} result={testResults['test-'+task]}
+                    test={()=>void action('test-'+task,'/models/test?target='+task,cleanProvider(value))}/>
+                </>:<p className="settings-inherited">共用聊天与日常 · {config.provider.model||'尚未选择模型'}</p>}
+                {task==='memory'&&<SearchIndexSettings/>}
+              </div>;
+            })}
+          </div>
+        </section>
+        <section className="settings-model-section"><h2>记忆检索</h2>
+          <p className="settings-section-description">用向量模型按意思查找资料和记忆。模型留空时，继续使用本地检索。</p>
+          <div className="settings-connection-note"><span>{config.embedding_provider?'已单独填写连接':'地址和密钥共用“聊天与日常”，可直接修改'}</span>
+            {config.embedding_provider&&<button type="button" onClick={()=>edit({...config,embedding_provider:null})}>恢复共用连接</button>}</div>
+          <ModelFields kind="embedding" target="embedding" value={embedding} inherited={!config.embedding_provider} catalog={config.embedding_provider?undefined:catalog}
+            change={value=>changeSearch('embedding',value)}/>
+          <ModelTest label="记忆检索" ready={ready(embedding)} result={testResults['test-embedding']}
+            test={()=>void action('test-embedding','/models/test?target=embedding'+(config.embedding_provider?'':'&shared=true'),cleanProvider(embedding))}/>
+          <p className="settings-footnote">填写模型后启用语义检索。更换模型会重建向量索引，原始记忆保留。</p>
+          <ProviderLinks kind="embedding"/>
+          <details className="settings-optional"><summary><span><strong>相关性筛选</strong><span className="settings-optional-tag">可选</span>
+            <small>进一步筛选检索结果，优先选取贴近当前话题的资料。</small></span><ChevronDown size={17}/></summary>
+            <div className="settings-optional-content">
+              <p>填写重排模型后，自动对找到的资料进行相关性排序；模型留空时使用已有排序，仍可正常聊天。</p>
+              <div className="settings-connection-note"><span>{config.rerank_shared?'地址和密钥共用“聊天与日常”，可直接修改':'已单独填写连接'}</span>
+                {!config.rerank_shared&&<button type="button" onClick={()=>edit({...config,rerank_shared:true})}>恢复共用连接</button>}</div>
+              <ModelFields kind="rerank" target="rerank" value={reranker} inherited={config.rerank_shared} catalog={config.rerank_shared?catalog:undefined}
+                change={value=>changeSearch('rerank',value)}/>
+              <ModelTest label="相关性筛选" ready={ready(reranker)} result={testResults['test-rerank']}
+                test={()=>void action('test-rerank','/models/test?target=rerank'+(config.rerank_shared?'&shared=true':''),cleanProvider(reranker))}/>
+              <ProviderLinks kind="rerank"/>
             </div>
           </details>
-        </section>
-        <section className="settings-search-section"><h2>记忆检索</h2><p>向量模型用于按意思查找资料和记忆。留空时使用关键词检索。</p>
-          <label className="settings-check"><input type="checkbox" checked={!!config.embedding_provider} onChange={event=>edit({...config,embedding_provider:event.target.checked?{...config.provider,model:config.embedding_model}:null})}/>使用其他 API</label>
-          <ModelFields kind="embedding" target="embedding" value={embedding} connection={!!config.embedding_provider} catalog={config.embedding_provider?undefined:catalog}
-            change={value=>edit({...config,embedding_model:value.model,embedding_provider:config.embedding_provider?value:null})}/>
-          {!config.embedding_provider&&<p className="settings-footnote">共用聊天 API 的地址和密钥，需要支持 OpenAI 兼容的 Embeddings 接口。</p>}
-          <div className="settings-actions"><button disabled={!embedding.model.trim()} onClick={()=>void action('test-embedding','/models/test?target=embedding'+(config.embedding_provider?'':'&shared=true'),cleanProvider(embedding))}><PlugZap size={16}/>测试记忆检索</button><TestFeedback result={testResults['test-embedding']}/></div>
-          <p className="settings-footnote">更换向量模型或 API 后会重建索引，原始记忆保留。</p>
-        </section>
-        <section className="settings-search-section"><div className="settings-task-heading"><h2>相关性筛选</h2>
-          <label className="settings-check"><input type="checkbox" checked={config.rerank_enabled} onChange={event=>edit({...config,rerank_enabled:event.target.checked,rerank_provider:config.rerank_provider??emptyProvider()})}/>启用</label></div>
-          <p>用重排模型进一步筛选检索结果。关闭后仍可正常聊天和读取记忆。</p>
-          {config.rerank_enabled&&<><label className="settings-check"><input type="checkbox" checked={!config.rerank_shared} onChange={event=>edit({...config,rerank_shared:!event.target.checked})}/>使用其他 API</label>
-            <ModelFields kind="rerank" target="rerank" value={reranker} connection={!config.rerank_shared} catalog={config.rerank_shared?catalog:undefined}
-              change={value=>edit({...config,rerank_provider:config.rerank_shared?{...config.rerank_provider??emptyProvider(),model:value.model}:value})}/>
-            {config.rerank_shared&&<p className="settings-footnote">共用聊天 API 的地址和密钥，自动连接对应的重排接口。</p>}
-            <div className="settings-actions"><button onClick={()=>void action('test-rerank','/models/test?target=rerank'+(config.rerank_shared?'&shared=true':''),cleanProvider(reranker))}><PlugZap size={16}/>测试相关性筛选</button><TestFeedback result={testResults['test-rerank']}/></div>
-          </>}
         </section>
         {workbenchEnabled&&<p className="settings-footnote">DSH 工作台的模型在其原生设置中管理。</p>}
       </>:section==='qq'?<>

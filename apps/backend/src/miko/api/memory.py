@@ -39,8 +39,32 @@ class OrganizationApply(Organization):
     revisions: dict[str,int]
 
 
+class SearchRebuild(BaseModel):
+    rebuild_all: StrictBool = False
+
+
 def memory_router(memory):
     router = APIRouter(prefix='/api/memory', dependencies=[Depends(local_request)])
+
+    @router.get('/search-index')
+    async def search_index():
+        return {'status':memory.expansion.status(),'items':[
+            {'id':r['source_id'],'state':r['state'],'expressions':r['expressions'],
+             'subject':r['row']['source'].get('subject','miko'),
+             'text':r['row']['source'].get('content',r['row']['source'].get('text',
+                    r['row']['source'].get('manual_corrections','')))}
+            for r in memory.local.expansion_items()]}
+
+    @router.post('/search-index/control')
+    async def search_control(body: Control):
+        memory.expansion.control(body.enabled)
+        return memory.expansion.status()
+
+    @router.post('/search-index/rebuild')
+    async def search_rebuild(body: SearchRebuild):
+        await memory.sync()
+        memory.expansion.retry(body.rebuild_all)
+        return memory.expansion.status()
 
     @router.get('')
     async def listing(q: str = ''):

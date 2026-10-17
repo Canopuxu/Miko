@@ -5,6 +5,7 @@ import { getJson } from '../api/chat';
 
 type Status = {version: string; dsh: {ready: boolean}; chat: {configured: boolean; model: string | null; active_turns: number};
   memory: {configured: boolean; embedding_model: string | null; error: string | null; memory_engine: string;
+    search_expansion?:{enabled:boolean; configured:boolean; running:boolean; total:number; ready:number; pending:number; failed:number; model:string|null; error:string|null};
     automatic: {enabled: number}}; life: {enabled: boolean; generating: boolean; error: string | null; today_recorded: boolean}};
 type Qq = {character_name:string; owner_name:string; receiver: {state: string; note: string}; friends: {name: string; friend: string; enabled: number; blocked: number}[]};
 const RuntimeContext = createContext<{status: Status | null; qq: Qq | null; error: string; qqError:string; refresh: () => Promise<void>} | null>(null);
@@ -32,7 +33,7 @@ export function RuntimeStatus({navigate}: {navigate: (view: 'qq' | 'life' | 'mem
   const [open, setOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const enabled = qq?.friends.filter(f => f.enabled).length ?? 0;
-  const problem = !!error || !!qqError || !!status?.memory.error || !!status?.life.error;
+  const problem = !!error || !!qqError || !!status?.memory.error || !!status?.memory.search_expansion?.error || !!status?.life.error;
   async function update() {setRefreshing(true); await refresh(); setRefreshing(false);}
   function visit(view: 'qq' | 'life' | 'memory') {setOpen(false); navigate(view);}
   return <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -53,7 +54,8 @@ export function RuntimeStatus({navigate}: {navigate: (view: 'qq' | 'life' | 'mem
           <p>{qqError || qq?.receiver.note || '读取连接状态…'}</p><small>{enabled} 位好友已开启 · {qq?.friends.filter(f => f.blocked).length ?? 0} 位等待核对</small></article>
         <article><div className="runtime-card-title"><h3>记忆整理</h3><button className="text-button" onClick={() => visit('memory')}>
           记忆<ArrowUpRight size={14}/></button></div><strong>{status?.memory.automatic.enabled ? '自动整理已开启' : '自动整理已暂停'}</strong>
-          <p>{status?.memory.error ?? (status?.memory.configured ? '语义检索已就绪' : '使用关键词检索')}</p></article>
+          <p>{status?.memory.error ?? (status?.memory.configured ? '语义检索已就绪' : '使用关键词检索')}</p>
+          {status?.memory.search_expansion&&<small>{status.memory.search_expansion.error??`口语检索表达 ${status.memory.search_expansion.ready} / ${status.memory.search_expansion.total}`}</small>}</article>
         <article><div className="runtime-card-title"><h3>自主生活</h3><button className="text-button" onClick={() => visit('life')}>
           生活<ArrowUpRight size={14}/></button></div><strong>{status?.life.generating ? '正在推进生活' : status?.life.enabled ? '自动记录已开启' : '自动记录已暂停'}</strong>
           <p>{status?.life.error ?? (status?.life.today_recorded ? '今天的小事已经保存' : '今天尚未记录')}</p></article>

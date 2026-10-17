@@ -97,7 +97,8 @@ def near_duplicate(a,b):
     if re.findall(r'\d+',x)!=re.findall(r'\d+',y):return False
     if [w for w in ('不','没','未','否') if w in x]!=[w for w in ('不','没','未','否') if w in y]:return False
     if min(len(x),len(y))>=2 and max(len(x),len(y))<=40 and (x in y or y in x):
-        labels=lambda r:set(w for w in keywords(r['source'].get('category','')+' '+r['source'].get('topic','')) if len(w)>=2)
+        from miko.adapters.memory.retrieval import category_words
+        labels=lambda r:set(keywords(r['source'].get('category','')+' '+r['source'].get('topic','')+' '+category_words(r['source'].get('category',''))))
         if labels(a)&labels(b):return True
     grams=lambda t:{t[i:i+3] for i in range(len(t)-2)}
     gx,gy=grams(x),grams(y)
@@ -106,23 +107,17 @@ def near_duplicate(a,b):
 
 def scoring_query(topic):
     # Ownership has already been resolved; do not reward repeated speaker names.
-    return re.sub(r'^(?:那)?(?:橙汁|Miko|你|他|她)[，,、 ]*', '', topic, flags=re.I) or topic
+    topic=re.sub(r'橙汁|Miko','',topic,flags=re.I)
+    return re.sub(r'^(?:那)?(?:你|他|她)[，,、 ]*', '', topic) or topic
 
 
 def scoring_document(row):
-    source=row['source']
-    if row['group']=='people_memory':
-        return source.get('category', '')+' · '+source.get('topic', '')+'：'+source.get('content', '')
-    if row['group']!='role_material':return row['text']
-    content=source.get('content','')
-    name=NAMES.get(source.get('subject'))
-    if name:content=re.sub(re.escape(name), '', content, flags=re.I)
-    category=source.get('category','')
-    parts=category.split('/')
-    if len(parts)>1 and parts[0]=='喜好与厌恶':
-        category=parts[-1]+'；喜好'
-    else:category=category.replace('/',' · ')
-    return category+'：'+content
+    # Rerank actual facts, not the synonym hints used to broaden recall.
+    from miko.adapters.memory.retrieval import fields
+    body,title,category,_ = fields(row)
+    label=' · '.join(filter(None,[category.split('/')[-1],title]))
+    day=row['source'].get('day',row['source'].get('as_of','')) or ''
+    return ' '.join(filter(None,[day,label+'：'+body if label else body]))
 
 
 def scoring_documents(rows):
@@ -131,7 +126,7 @@ def scoring_documents(rows):
 
 def retrieval_query(query, previous=()):
     # Nearby speech resolves short follow-ups; full new topics use their own words.
-    if previous and (len(keywords(scoring_query(query))) < 2 or re.match(r'^(那|这|它|他|她|后来|然后)',query)):
+    if previous and re.search(r'^(?:那(?:个|件|次|你呢|他呢|她呢)|这|它|他|她|后来|然后)|(?:多久|多长时间|多少年|怎么解决|怎么样了)|你呢[？?]?$',query):
         return query+'\n'+'\n'.join(previous[-2:])
     return query
 
@@ -180,7 +175,17 @@ def time_matches(row, topic, context):
     return True
 
 
-async def select(provider,query,context,threshold=.5,limit=5,*,local):
+def fuse_rankings(*orders):
+    """Reciprocal-rank fusion: each retrieval source contributes one ranking."""
+    scores={}
+    for order in orders:
+        for position,name in enumerate(dict.fromkeys(order),1):
+            scores[name]=scores.get(name,0)+1/(60+position)
+    return sorted(scores,key=scores.get,reverse=True)
+
+
+async def select(provider,query,context,limit=5,*,local):
+    from miko.adapters.memory.retrieval import query_words
     core,rows=candidates(context)
     topics,scopes=topic_scopes(query,context)
     context['_subjects']=set().union(*scopes)
@@ -191,27 +196,48 @@ async def select(provider,query,context,threshold=.5,limit=5,*,local):
             allowed={source_key(row):dict(row,candidate_index=i) for i,row in enumerate(rows)
                      if scoped_row(row,subjects) and time_matches(row,topic,context)}
             search=retrieval_query(topic,context.get('_previous_contact_texts',[]))
-            words=keywords(scoring_query(search))
+            words=query_words(scoring_query(search))
             if not allowed:continue
-            lexical=local.search(' '.join(words),allowed) if words else []
+            evidence=local.search(scoring_query(search),allowed,explain=True) if words else []
+            lexical=[hit['name'] for hit in evidence]
             # A date/recency request can retrieve dated experiences directly.
-            if not lexical and re.search(r'今天|今晚|今早|昨天|昨晚|最近|\d{4}-\d{2}-\d{2}',topic):
+            if not lexical and not words and re.search(r'今天|今晚|今早|昨天|昨晚|最近|\d{4}-\d{2}-\d{2}',topic):
                 dated=[name for name,row in allowed.items() if row['source'].get('day')]
                 lexical=local.recent(dated,limit=40)
-            semantic=[hit['name'] for hit in hits if hit['name'] in allowed and (provider or hit['score']>=.45)]
-            # Interleave ranked sources, without comparing unlike BM25/vector scores.
-            names=list(dict.fromkeys(name for pair in zip_longest(lexical,semantic) for name in pair if name))
+            topic_hits=context.get('retrieval',{}).get('by_topic',{}).get(topic,hits)
+            categories=context.get('retrieval',{}).get('category_hits',{}).get(topic,[])
+            category_scores={name:hit['score'] for hit in categories for name in hit['members']}
+            # Topic confidence is relative to this query's best topic. A low absolute
+            # category score must not suppress every fact for an indirect question.
+            best_category=max((hit['score'] for hit in categories),default=0)
+            unseen_category=min((hit['score'] for hit in categories),default=0)
+            semantic_scores=[dict(hit,score=hit['score']+category_scores.get(hit['name'],unseen_category)-best_category
+                                  if category_scores and allowed[hit['name']]['source'].get('category') else hit['score'])
+                             for hit in topic_hits if hit['name'] in allowed] if words else []
+            semantic=[hit['name'] for hit in sorted(semantic_scores,key=lambda h:h['score'],reverse=True) if hit['score']>=.45]
+            # A category is a topic hint; expanding several broad categories adds unrelated
+            # facts. Use the best topic only when lexical recall found no concrete material.
+            category_members=[name for hit in categories[:1] if hit['score']>=.45
+                              for name in hit['members'] if name in allowed] if words and not lexical else []
+            semantic=fuse_rankings(semantic,category_members)
+            names=fuse_rankings(lexical,semantic)
+            trace={'local':evidence,'semantic_scores':semantic_scores,'semantic':semantic,'category_fallback':category_members,'base_order':list(names)}
             if provider:
                 pool=names[:64]
                 if not pool:continue
                 try:
-                    ranked=await rank(client,provider,scoring_query(search),scoring_documents([allowed[name] for name in pool]),len(pool))
+                    category=context.get('retrieval',{}).get('topic_categories',{}).get(topic)
+                    rank_query=(category+'：' if category else '')+scoring_query(search)
+                    ranked=await rank(client,provider,rank_query,scoring_documents([allowed[name] for name in pool]),len(pool))
                     ranked=sorted(ranked,key=lambda r:r['relevance_score'],reverse=True)
-                    names=[pool[r['index']] for r in ranked if r['relevance_score']>=threshold]
-                    if not names:names=lexical
+                    reranked=[pool[r['index']] for r in ranked]
+                    names=fuse_rankings(lexical,semantic,reranked)
+                    trace['rerank']=[{'name':pool[r['index']],'score':r['relevance_score']} for r in ranked]
                 except (httpx.HTTPError,KeyError,ValueError,TypeError) as exc:
-                    context.setdefault('retrieval',{})['rerank_error']='相关性筛选暂不可用，已使用本地排序'
-                    logging.getLogger(__name__).warning('Reranking failed; keeping local retrieval: %s',type(exc).__name__)
+                    context.setdefault('retrieval',{})['rerank_error']='相关性筛选暂不可用，已保留本地与语义排序'
+                    logging.getLogger(__name__).warning('Reranking failed; keeping fused retrieval: %s',type(exc).__name__)
+            trace['order']=list(names)
+            context.setdefault('retrieval',{}).setdefault('rankings',{})[topic]=trace
             rankings.append([allowed[name] for name in names])
     remaining=20000
     # A round-robin gives each topic space before another topic fills the budget.

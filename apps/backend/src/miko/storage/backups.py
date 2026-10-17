@@ -17,7 +17,7 @@ from miko.settings import chat_prompts, write_json
 DATA_DIRS = ('attachments', 'database', 'life', 'qq')
 CONFIG_FILES = ('provider.local.json', 'qq-provider.local.json', 'life-provider.local.json',
                 'memory-provider.local.json', 'embedding.local.json', 'rerank.local.json',
-                'life.local.json', 'memory.local.json', 'expression.local.json', 'qq.local.json')
+                'life.local.json', 'memory.local.json', 'retrieval.local.json', 'expression.local.json', 'qq.local.json')
 
 
 def managed_path(root, relative):

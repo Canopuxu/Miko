@@ -33,7 +33,11 @@ class SettingsTests(unittest.TestCase):
             'memory_model':'memory-model','life_model':'life-model','embedding_model':'embed-model'}
 
     def test_fresh_setup_save_and_secrets_never_returned(self):
-        self.assertFalse(self.client.get('/api/settings').json()['configured'])
+        fresh=self.client.get('/api/settings').json()
+        self.assertFalse(fresh['configured'])
+        self.assertTrue(fresh['rerank_shared'])
+        self.assertFalse(fresh['rerank_enabled'])
+        self.assertIsNone(fresh['rerank_provider'])
         self.assertEqual(self.client.put('/api/settings/models', json=self.payload()).status_code, 200)
         value = self.client.get('/api/settings')
         self.assertNotIn('private-test-key', value.text)
@@ -275,6 +279,47 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(requests[1].url.path,'/v1/rerank')
         self.assertEqual(json.loads(requests[1].content)['model'],'rank-test')
         self.assertFalse((self.root/'config/embedding.local.json').exists())
+
+    def test_optional_search_connections_can_be_saved_without_a_model_and_enabled_later(self):
+        from miko.settings import Settings
+        data=self.payload()
+        data.update(embedding_provider={'api_base':'https://vectors.example/v1','api_key':'vector-key','model':''},
+            rerank_provider={'api_base':'https://ranks.example/v1','api_key':'rank-key','model':''},
+            rerank_enabled=False,rerank_shared=False)
+        result=self.client.put('/api/settings/models',json=data)
+        self.assertEqual(result.status_code,200,result.text)
+        public=self.client.get('/api/settings').json()
+        self.assertEqual(public['embedding_provider']['model'],'')
+        self.assertEqual(public['rerank_provider']['api_base'],'https://ranks.example/v1')
+        self.assertTrue(public['rerank_provider']['has_key'])
+        self.assertIsNone(Settings(self.root,7870).load_rerank())
+        data.update(embedding_provider={**public['embedding_provider'],'model':'vectors'},
+            rerank_provider={**public['rerank_provider'],'model':'ranker'},rerank_enabled=True)
+        for field in ('embedding_provider','rerank_provider'):
+            data[field].pop('has_key',None)
+        result=self.client.put('/api/settings/models',json=data)
+        self.assertEqual(result.status_code,200,result.text)
+        config=Settings(self.root,7870).load_rerank()
+        self.assertEqual(config.api_base,'https://ranks.example/v1/rerank')
+        self.assertEqual(config.api_key.get_secret_value(),'rank-key')
+        self.assertEqual(json.loads((self.root/'config/embedding.local.json').read_text())['api_key'],'vector-key')
+
+    def test_rerank_base_address_uses_shared_key_for_catalog_and_test(self):
+        import httpx
+        self.client.put('/api/settings/models',json=self.payload())
+        requests=[]
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200,json={'data':[{'id':'bge-reranker-v2-m3'}]} if request.method=='GET'
+                else {'results':[{'index':0,'relevance_score':.9}]})
+        original=httpx.AsyncClient
+        body={'api_base':'https://models.example/v1','api_key':'','model':'bge-reranker-v2-m3'}
+        with patch('miko.api.settings.httpx.AsyncClient',side_effect=lambda **kwargs:original(**kwargs,transport=httpx.MockTransport(respond))):
+            for endpoint in ('list','test'):
+                response=self.client.post('/api/settings/models/'+endpoint+'?target=rerank',json=body)
+                self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual([request.url.path for request in requests],['/v1/models','/v1/rerank'])
+        self.assertTrue(all(request.headers['Authorization']=='Bearer private-test-key' for request in requests))
 
     def test_bailian_format_is_inferred_without_a_service_type(self):
         import httpx

@@ -61,15 +61,15 @@ function ModelPicker({value,change,kind,catalog}:{value:string;change:(value:str
   </div>;
 }
 
-export function ModelFields({value,change,target='provider',kind='chat',catalog,connection=true}:{
-  value:Provider;change:(value:Provider)=>void;target?:Target;kind?:Kind;catalog?:Catalog;connection?:boolean;
+export function ModelFields({value,change,target='provider',kind='chat',catalog,connection=true,inherited=false}:{
+  value:Provider;change:(value:Provider)=>void;target?:Target;kind?:Kind;catalog?:Catalog;connection?:boolean;inherited?:boolean;
 }){
   const ownCatalog=useModelCatalog(value,target,!catalog&&connection);
   const source=catalog??ownCatalog;
   return <div className={'settings-fields settings-provider-fields'+(connection?'':' settings-shared-fields')}>
-    {connection&&<><label className="settings-address">API 地址<input value={value.api_base} placeholder={kind==='rerank'?'https://…/v1/rerank':'https://…/v1'} onChange={event=>change({...value,api_base:event.target.value})}/>
-      <small>{kind==='rerank'?'填写服务商的完整重排接口地址，支持百炼及常见的 /rerank 接口。':'填写 OpenAI 兼容的 API 基础地址，例如 https://服务商域名/v1。'}</small></label>
-      <label>API 密钥<input type="password" autoComplete="new-password" value={value.api_key} placeholder={value.has_key?'已保存，留空保留':'填写密钥'} onChange={event=>change({...value,api_key:event.target.value})}/></label></>}
+    {connection&&<><label className="settings-address">API 地址<input value={value.api_base} placeholder="https://…/v1" onChange={event=>change({...value,api_base:event.target.value})}/>
+      <small>{kind==='rerank'?'填写 API 基础地址，程序自动连接对应的筛选接口。':'填写 OpenAI 兼容的 API 基础地址，例如 https://服务商域名/v1。'}</small></label>
+      <label>API 密钥<input type="password" autoComplete="new-password" value={value.api_key} placeholder={value.has_key?(inherited?'共用聊天密钥；填写可更换':'已保存，留空保留'):'填写密钥'} onChange={event=>change({...value,api_key:event.target.value})}/></label></>}
     <ModelPicker value={value.model} change={model=>change({...value,model})} kind={kind} catalog={source}/>
     {connection&&<div className="settings-catalog-status" aria-live="polite">
       <button type="button" disabled={source.state==='loading'||!value.api_base.trim()||(!value.api_key.trim()&&!value.has_key)} onClick={source.refresh}><RefreshCw size={14} className={source.state==='loading'?'spinning':''}/>刷新模型列表</button>

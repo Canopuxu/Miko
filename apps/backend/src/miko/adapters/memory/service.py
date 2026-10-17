@@ -12,8 +12,9 @@ from pydantic import BaseModel
 
 from miko.adapters.memory.tulpa import SocialMemory
 from miko.adapters.memory.structured import StructuredMemory
+from miko.adapters.memory.expansion import SearchExpansion
 from miko.settings import ProviderConfig
-from miko.adapters.memory.retrieval import LocalRecall
+from miko.adapters.memory.retrieval import LocalRecall, semantic_text, query_words, category_words
 from miko.domain.conversation.context_selection import (retrieval_query, scoring_query, topic_scopes, select, selected_context)
 
 
@@ -38,6 +39,9 @@ class Memory:
         self.error = None
         self.lock = asyncio.Lock()
         self.task = None
+        self.category_members = {}
+        self.category_labels = {}
+        self.expansion=SearchExpansion(self)
         self.configure_index()
 
     def configure_index(self):
@@ -50,6 +54,7 @@ class Memory:
         path = local / 'config/embedding.local.json'
         self.model = None
         self.reranker = chat.settings.load_rerank()
+        self.expansion.retry()
         if path.exists():
             config = json.loads(path.read_text(encoding='utf-8-sig'))
             self.model = config['model']
@@ -76,6 +81,7 @@ class Memory:
                 'error': self.error, 'automatic': self.social.control(), 'batch_size': 100,
                 'memory_engine': self.social.engine,
                 'memory_model': (self.social.pipeline.model or self.chat.provider.model) if self.social.pipeline and self.chat.provider else None,
+                'search_expansion':self.expansion.status(),
                 'idle_flush_seconds': 60}
 
     def documents(self):
@@ -131,24 +137,52 @@ class Memory:
                     'row': {'group':'social_memory','source':{'id':detail['id'],'subject':subject,'peer':peer,
                         'automatic':automatic,'manual_corrections':detail['manual']}}}
         for doc in result.values():
+            doc['description'] = semantic_text(doc['row'])
+            doc['content'] = doc['description']
             source=doc['row']['source']
             day=source.get('day',source.get('as_of'))
             doc['timestamp']=source.get('updated_at') or (int(datetime.fromisoformat(day).replace(tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()*1000) if day else 0)
+        return result
+
+    def embedding_documents(self, documents):
+        """Recall a category as a whole, then rank its actual entries individually."""
+        result = dict(documents)
+        groups = {}
+        for name, doc in documents.items():
+            row = doc['row']; source = row['source']
+            if row['group'] not in ('role_material', 'people_memory') or not source.get('category'):
+                continue
+            category = '/'.join(filter(None, [source['category'], source.get('topic') if row['group']=='people_memory' else '']))
+            scope = (doc['subject'], doc['peer'], category, source.get('as_of') or '')
+            groups.setdefault(scope, []).append((name, doc))
+        for scope, entries in groups.items():
+            name = 'category:' + hashlib.sha256(json.dumps(scope,ensure_ascii=False).encode()).hexdigest()[:20]
+            # A category represents its topic, not the unrelated values a broad category
+            # may contain. Members remain individually indexed and individually scored.
+            text = scope[2].split('/')[-1]+'；'+category_words(scope[2])
+            result[name] = {'name':name, 'track':'memory', 'description':text, 'content':text,
+                'subject':scope[0], 'peer':scope[1], 'entry_id':name,
+                'category':scope[2],
+                'members':[key for key, _ in entries]}
         return result
 
     async def sync(self):
         await asyncio.to_thread(self.social.store.sync)
         async with self.lock:
             desired = self.documents()
-            self.local.sync(desired)
+            self.local.sync(desired,self.expansion.version)
+            if self.local.expansion_status()['pending']:self.expansion.wake.set()
             if not self.index:
                 return
             try:
+                desired = self.embedding_documents(desired)
+                self.category_members = {name:doc['members'] for name,doc in desired.items() if 'members' in doc}
+                self.category_labels = {name:doc['category'] for name,doc in desired.items() if 'members' in doc}
                 files = self.index.database.recall_file_repo.list_recall_files()
                 existing = {r.name: r for r in files.values()}
                 for name, row in existing.items():
                     new = desired.get(name)
-                    if new is None or row.description != new['description']:
+                    if new is None or row.description != new['description'] or row.content != new['content']:
                         scope = {'entry_id': name}
                         self.index.database.recall_file_segment_repo.clear_segments(scope)
                         self.index.database.recall_file_repo.clear_recall_files(scope)
@@ -188,21 +222,38 @@ class Memory:
                 continue
             context.setdefault(row['group'],[]).append(source)
         context['owner_feedback']=await self.feedback(retrieval_query(query,previous),conversation_id or peer or 'web:owner')
-        if self.index and not self.error and query.strip():
+        if self.index and not self.error and query_words(retrieval_query(query,previous)):
             from miko.domain.conversation.context_selection import candidates, scoped_row, time_matches, source_key
             _,rows=candidates(context)
             try:
                 topics,scopes=topic_scopes(query,context)
-                all_hits={}
+                all_hits={}; by_topic={}; category_topics={}; by_category={}
                 async with self.lock:
                     for topic,subjects in zip(topics,scopes):
+                        # Person/conversation/time boundaries are shared. Category hints guide
+                        # local matching, but must not fence semantic recall into a guessed topic.
                         allowed=[source_key(row) for row in rows if scoped_row(row,subjects) and time_matches(row,topic,context)]
                         if not allowed:continue
-                        hits=await self.index.progressive_retrieve(scoring_query(retrieval_query(topic,previous)),where={'entry_id__in':allowed})
+                        category_ids=[name for name,members in self.category_members.items() if set(members)&set(allowed)]
+                        hits=await self.index.progressive_retrieve(scoring_query(retrieval_query(topic,previous)),where={'entry_id__in':[*allowed,*category_ids]})
+                        category_hits=sorted((h for h in hits['files'] if h['name'] in self.category_labels),key=lambda h:h['score'],reverse=True)
+                        if category_hits and category_hits[0]['score'] >= .45:
+                            category_topics[topic]=self.category_labels[category_hits[0]['name']].split('/')[-1]
+                        by_category[topic]=[{'category':self.category_labels[h['name']], 'score':h['score'],
+                            'members':[name for name in self.category_members[h['name']] if name in allowed]}
+                            for h in category_hits]
+                        topic_hits={}
                         for hit in hits['files']:
-                            if hit['name'] not in all_hits or hit['score']>all_hits[hit['name']]['score']:
-                                all_hits[hit['name']]=hit
+                            name=hit['name']
+                            if name not in allowed:continue
+                            topic_hits[name]={'name':name,'score':hit['score']}
+                            if name not in all_hits or hit['score']>all_hits[name]['score']:
+                                all_hits[name]={'name':name,'score':hit['score']}
+                        by_topic[topic]=sorted(topic_hits.values(),key=lambda h:h['score'],reverse=True)
                 context['retrieval']={'engine':'memU Embedding + Tulpa FTS','model':self.model,
+                    'by_topic':by_topic,
+                    'category_hits':by_category,
+                    'topic_categories':category_topics,
                     'hits':[{'name':h['name'],'score':h['score']} for h in sorted(all_hits.values(),key=lambda h:h['score'],reverse=True)]}
             except Exception as exc:
                 self.error='语义检索失败（'+type(exc).__name__+'），本次使用本地检索'
@@ -214,6 +265,7 @@ class Memory:
     def start(self):
         self.social.start()
         self.task = asyncio.create_task(self.background())
+        self.expansion.start()
 
     async def background(self):
         while True:
@@ -221,6 +273,7 @@ class Memory:
             await asyncio.sleep(15)
 
     async def close(self):
+        await self.expansion.close()
         self.social.stop()
         if self.social.worker.thread:
             await asyncio.to_thread(self.social.worker.thread.join,5)

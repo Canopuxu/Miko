@@ -46,6 +46,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
         finally:
             await qq.close()
             await chat.life.close()
+            await chat.memory.expansion.close()
             chat.memory.social.stop()
             await chat.close()
             await chat.memory.close()
