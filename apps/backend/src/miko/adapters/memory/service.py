@@ -136,7 +136,9 @@ class Memory:
                     'subject': subject, 'peer': peer, 'entry_id': name,
                     'row': {'group':'social_memory','source':{'id':detail['id'],'subject':subject,'peer':peer,
                         'automatic':automatic,'manual_corrections':detail['manual']}}}
+        names = self.chat.store.identity()
         for doc in result.values():
+            doc['row'] = names.material(doc['row'], canonical=True)
             doc['description'] = semantic_text(doc['row'])
             doc['content'] = doc['description']
             source=doc['row']['source']
@@ -260,7 +262,7 @@ class Memory:
                 context['retrieval']['error']=self.error
         if raw:return context
         _,chosen,_=await select(self.reranker,query,context,local=self.local)
-        return selected_context(context,chosen)
+        return self.chat.store.identity().material(selected_context(context,chosen))
 
     def start(self):
         self.social.start()

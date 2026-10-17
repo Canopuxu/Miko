@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from miko.adapters.life.store import ScheduleData, ScheduleDataManager
 from miko.domain.life_material import generation_material
-from miko.settings import REPO_ROOT
+from miko.settings import REPO_ROOT, life_generation_prompt
 from miko.storage.search import terms
 
 
@@ -86,8 +86,10 @@ class Life:
     def records(self, query=''):
         selected = terms(query) if query.strip() else set()
         result = []
+        names = self.chat.store.identity()
         for day, row in sorted(self.store.all().items(), reverse=True):
             for entry in row.entries:
+                entry = names.material(entry)
                 if not selected or selected & terms(entry['text']):
                     result.append({'day': day, **entry})
         return result
@@ -95,7 +97,7 @@ class Life:
     def goals_context(self, query=''):
         selected = terms(query) if query.strip() else set()
         associated = {r.get('goal_id') for r in self.context(query)}
-        return [g for g in self.store.goals.values()
+        return [g for g in self.chat.store.identity().material(list(self.store.goals.values()))
                 if selected & terms(g['text']) or g['id'] in associated][:3]
 
     def context(self, query=''):
@@ -111,11 +113,11 @@ class Life:
     def listing(self, day=None):
         day = day or date.today()
         value = self.store.get(day)
-        return {'status': self.status(), 'day': day.isoformat(),
+        return self.chat.store.identity().material({'status': self.status(), 'day': day.isoformat(),
                 'record': asdict(value) if value else {'date': day.isoformat(), 'entries': [], 'revision': 0, 'source': ''},
                 'dates': sorted(self.store.all(), reverse=True),
                 'goals': list(self.store.goals.values()), 'revision': self.store.revision,
-                'trajectory': self.records()}
+                'trajectory': self.records()})
 
     def validate_links(self, entries, goals):
         for entry in entries:
@@ -164,6 +166,8 @@ class Life:
         if not quotes:
             return []
         quotes.sort(key=lambda q: q.get('发言时间', ''))
+        names = self.chat.store.identity()
+        quotes = [{**quote, '原话': names.display(quote['原话'])} for quote in quotes]
         prompt = (REPO_ROOT / 'config/defaults/life-conversation.txt').read_text(encoding='utf-8').strip()
         message = json.dumps({'生活日期': day.isoformat(),
                               '原话': [{'id': i + 1, **q} for i, q in enumerate(quotes)]}, ensure_ascii=False)
@@ -211,7 +215,7 @@ class Life:
             # A manual addition to this day is already a fact to continue from.
             if current:
                 material['今天已有的记录'] = current.entries
-            prompt = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text(encoding='utf-8').strip()
+            prompt = life_generation_prompt(self.chat.settings.local_root)
             message = self.chat.named_prompt(json.dumps(material, ensure_ascii=False))
             value = await self.chat.complete_memory(self.chat.named_prompt(prompt), message, model=self.model or None,
                 json_output=True, **({'provider': self.provider} if self.provider else {}))

@@ -35,7 +35,7 @@ class QqConfig(BaseModel):
     @model_validator(mode='after')
     def local_endpoints(self):
         if bool(self.miko_avatar_file) != bool(self.owner_avatar_file):
-            raise ValueError('头像切换需要同时配置 Miko 和原头像')
+            raise ValueError('头像切换需要同时配置角色头像和原头像')
         if not self.account.isascii() or not self.account.isdigit() or int(self.account) <= 0:
             raise ValueError('需要有效的本人 QQ 号')
         for friend in self.friends:

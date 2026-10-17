@@ -12,6 +12,11 @@ const RuntimeContext = createContext<{status: Status | null; qq: Qq | null; erro
 export const useRuntime = () => useContext(RuntimeContext)!;
 export const useCharacterName = () => useRuntime().qq?.character_name ?? 'Miko';
 export const useOwnerName = () => useRuntime().qq?.owner_name ?? '橙汁';
+export function usePersonName() {
+  const characterName = useCharacterName();
+  const ownerName = useOwnerName();
+  return (id: string, fallback: string) => id === 'miko' ? characterName : id === 'owner' ? ownerName : fallback;
+}
 
 export function RuntimeProvider({children}: {children: ReactNode}) {
   const [status, setStatus] = useState<Status | null>(null);

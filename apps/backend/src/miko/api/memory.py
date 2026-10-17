@@ -45,15 +45,17 @@ class SearchRebuild(BaseModel):
 
 def memory_router(memory):
     router = APIRouter(prefix='/api/memory', dependencies=[Depends(local_request)])
+    def present(value):
+        return memory.chat.store.identity().material(value)
 
     @router.get('/search-index')
     async def search_index():
-        return {'status':memory.expansion.status(),'items':[
+        return present({'status':memory.expansion.status(),'items':[
             {'id':r['source_id'],'state':r['state'],'expressions':r['expressions'],
              'subject':r['row']['source'].get('subject','miko'),
              'text':r['row']['source'].get('content',r['row']['source'].get('text',
                     r['row']['source'].get('manual_corrections','')))}
-            for r in memory.local.expansion_items()]}
+            for r in memory.local.expansion_items()]})
 
     @router.post('/search-index/control')
     async def search_control(body: Control):
@@ -89,7 +91,7 @@ def memory_router(memory):
                 with memory.social.store.connect() as db:
                     ids.update(r[0] for r in db.execute('SELECT id FROM messages WHERE conversation_id=? ORDER BY timestamp DESC,id DESC LIMIT 20', (result['conversation_id'],)))
             result['source_messages'] = memory.social.sources(sid, ids)
-            return result
+            return present(result)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
 
@@ -104,7 +106,7 @@ def memory_router(memory):
                     db.execute(f'UPDATE qq_friends SET {subject}_relationship=? WHERE account=? AND friend=?',
                                (body.text.strip(), account, friend))
             await memory.sync()
-            return result
+            return present(result)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 
@@ -138,7 +140,7 @@ def memory_router(memory):
 
     @router.get('/items')
     async def items(q: str='', subject: str='', category: str='', peer: str | None=None):
-        return {'items': memory.structured.items(q,subject=subject,category=category,peer=peer)}
+        return present({'items': memory.structured.items(q,subject=subject,category=category,peer=peer)})
 
     @router.get('/objects')
     async def objects():
@@ -149,21 +151,21 @@ def memory_router(memory):
     async def organize(body: Organization):
         if not memory.social.pipeline:
             raise HTTPException(409,'新版记忆整理尚未配置')
-        return await memory.social.pipeline.organize_category(body.subject,body.peer,body.category)
+        return present(await memory.social.pipeline.organize_category(body.subject,body.peer,body.category))
 
     @router.post('/organize/apply')
     async def organize_apply(body: OrganizationApply):
         try:
             result=memory.structured.organize(body.subject,body.peer,body.category,body.items,body.revisions)
             await memory.sync()
-            return {'items':result}
+            return present({'items':result})
         except ValueError as exc:
             raise HTTPException(409,str(exc)) from None
 
     @router.get('/items/{item_id}')
     async def item(item_id: str):
         try:
-            return memory.structured.detail(item_id)
+            return present(memory.structured.detail(item_id))
         except ValueError as exc:
             raise HTTPException(404,str(exc)) from None
 
@@ -172,7 +174,7 @@ def memory_router(memory):
         try:
             result=memory.structured.edit(item_id,body.text,body.revision,body.enabled,body.category,body.topic)
             await memory.sync()
-            return result
+            return present(result)
         except ValueError as exc:
             raise HTTPException(409,str(exc)) from None
 
@@ -181,7 +183,7 @@ def memory_router(memory):
         try:
             result = memory.structured.delete(item_id)
             await memory.sync()
-            return result
+            return present(result)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
 
@@ -190,13 +192,13 @@ def memory_router(memory):
         try:
             result=memory.structured.restore(item_id,body.history_id,body.revision)
             await memory.sync()
-            return result
+            return present(result)
         except ValueError as exc:
             raise HTTPException(409,str(exc)) from None
 
     @router.get('/days')
     async def days(day: str='', subject: str=''):
-        return {'days': memory.structured.days(day,subject)}
+        return present({'days': memory.structured.days(day,subject)})
 
     @router.delete('/days/{event_id}')
     async def delete_day(event_id: str):

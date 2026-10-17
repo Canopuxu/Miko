@@ -63,6 +63,51 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.client.put('/api/settings/models',json=self.payload()).status_code,409)
         self.assertFalse((self.root/'config/provider.local.json').exists())
 
+    def test_autosave_preserves_incomplete_setup_and_applies_when_completed(self):
+        import httpx
+        data=self.payload();data['provider']['model']=''
+        response=self.client.put('/api/settings/models?draft=true',json=data)
+        self.assertEqual(response.json()['state'],'draft')
+        self.assertIsNone(self.chat.provider)
+        public=self.client.get('/api/settings')
+        self.assertNotIn('private-test-key',public.text)
+        value=public.json()
+        self.assertTrue(value['draft_pending'])
+        self.assertTrue(value['provider']['has_key'])
+        self.assertEqual(value['provider']['api_base'],'https://models.example/v1')
+        original=httpx.AsyncClient
+        requests=[]
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200,json={'data':[{'id':'chat-model'}]})
+        with patch('miko.api.settings.httpx.AsyncClient',side_effect=lambda **kwargs:original(**kwargs,transport=httpx.MockTransport(respond))):
+            response=self.client.post('/api/settings/models/list',json={'api_base':value['provider']['api_base'],'api_key':'','model':''})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(requests[0].headers['Authorization'],'Bearer private-test-key')
+        data['provider'].update(model='chat-model',api_key='')
+        response=self.client.put('/api/settings/models?draft=true',json=data)
+        self.assertEqual(response.json()['state'],'applied')
+        self.assertEqual(self.chat.provider.api_key.get_secret_value(),'private-test-key')
+        self.assertFalse((self.root/'config/models-draft.local.json').exists())
+        data['provider'].update(api_base='https://other.example/v1',model='')
+        response=self.client.put('/api/settings/models?draft=true',json=data)
+        self.assertEqual(response.json()['state'],'draft')
+        self.assertEqual(self.chat.provider.api_base,'https://models.example/v1')
+        self.assertFalse(self.client.get('/api/settings').json()['provider']['has_key'])
+
+    def test_autosave_waits_for_active_work_without_losing_edits(self):
+        self.qq.workers['friend']=object()
+        data=self.payload()
+        response=self.client.put('/api/settings/models?draft=true',json=data)
+        self.assertEqual(response.json()['state'],'waiting')
+        self.assertTrue(self.client.get('/api/settings').json()['draft_pending'])
+        self.assertIsNone(self.chat.provider)
+        self.qq.workers.clear()
+        data['provider']['api_key']=''
+        response=self.client.put('/api/settings/models?draft=true',json=data)
+        self.assertEqual(response.json()['state'],'applied')
+        self.assertEqual(self.chat.provider.model,'chat-model')
+
     def test_basic_model_save_shares_one_model_across_generation_tasks(self):
         data = self.payload()
         data['qq_provider'] = {'api_base':'https://qq.example/v1','api_key':'qq-test','model':'other'}
@@ -340,6 +385,19 @@ class SettingsTests(unittest.TestCase):
             open_file.assert_called_once_with(self.root/'logs')
             self.assertEqual(self.client.post('/api/settings/open-folder',json={'folder':'../config'}).status_code,422)
         self.assertEqual(self.client.get('/api/settings/application').status_code,200)
+
+    def test_provider_links_open_with_the_system_browser_and_report_failure(self):
+        with patch('miko.api.settings.os.startfile') as open_link:
+            result=self.client.post('/api/settings/open-link',json={'url':'https://bailian.console.aliyun.com/'})
+            self.assertEqual(result.status_code,200,result.text)
+            open_link.assert_called_once_with('https://bailian.console.aliyun.com/')
+            open_link.reset_mock()
+            self.assertEqual(self.client.post('/api/settings/open-link',json={'url':'file:///C:/Windows/notepad.exe'}).status_code,422)
+            open_link.assert_not_called()
+        with patch('miko.api.settings.os.startfile',side_effect=OSError):
+            result=self.client.post('/api/settings/open-link',json={'url':'https://bailian.console.aliyun.com/'})
+            self.assertEqual(result.status_code,400)
+            self.assertIn('默认浏览器',result.json()['detail'])
 
     def test_friend_manager_reads_without_importing_and_adds_only_selected(self):
         config=SimpleNamespace(account='12345')

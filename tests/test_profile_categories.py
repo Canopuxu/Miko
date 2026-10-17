@@ -46,6 +46,33 @@ class CategoryTests(unittest.TestCase):
 
 
 class PinnedCategoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_core_defaults_apply_to_existing_library_and_can_be_unpinned(self):
+        import json
+        from miko.storage.profile_categories import ProfileCategories
+        from retrieval_support import select
+        with tempfile.TemporaryDirectory() as folder:
+            profiles = ProfileStore(ChatStore(Path(folder) / 'profiles.sqlite3'))
+            library = ProfileCategories(profiles.chat)
+            for subject, gender in [('miko', '女生'), ('owner', '男生')]:
+                tree = library.get(subject)
+                self.assertTrue(tree[0]['pinned'])
+                profiles.save(ProfileInput(subject=subject, kind='overview', category=tree[0]['name'], title=gender, content=gender).record())
+                tree[0].pop('pinned')
+                with profiles.chat.connect() as db:
+                    db.execute('UPDATE profile_library SET categories=? WHERE subject=?', (json.dumps(tree), subject))
+                self.assertTrue(library.get(subject)[0]['pinned'])
+            context = profiles.context('今天吃了什么')
+            core, _, _ = await select(None, '今天吃了什么', context)
+            self.assertEqual(set(core), {'Miko：女生', '橙汁：男生'})
+            app = FastAPI()
+            app.include_router(profiles_router(SimpleNamespace(profiles=profiles), None))
+            with TestClient(app) as client:
+                tree = library.get('owner')
+                tree[0]['pinned'] = False
+                self.assertEqual(client.put('/api/profiles/categories', json={'subject':'owner','categories':tree}).status_code, 200)
+            self.assertFalse(library.get('owner')[0]['pinned'])
+            self.assertNotIn('owner', [r['subject'] for r in profiles.context('今天吃了什么')['role_material']])
+
     async def test_pin_is_persistent_background_and_unpin_restores_retrieval(self):
         from miko.storage.profile_categories import ProfileCategories
         from retrieval_support import select

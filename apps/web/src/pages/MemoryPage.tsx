@@ -145,14 +145,14 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
       getJson<{items:Item[]}>('/api/memory/items?q='+encodeURIComponent(q)+'&subject='+encodeURIComponent(subject)+(relation?'&peer='+encodeURIComponent(relation):''))])
       .then(([a,b,c])=>{if(alive){setListing(a);setPeople(b.people);setItems(c.items);}}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setItemsLoading(false);});
     return ()=>{alive=false;};
-  },[q,subject,refresh,relation]);
+  },[q,subject,refresh,relation,characterName,ownerName]);
   useEffect(()=>{
     let alive=true;
     setRecordsLoading(true);
     if(mode==='days')void getJson<{days:Day[]}>('/api/memory/days?day='+day+'&subject='+encodeURIComponent(subject)).then(r=>{if(alive)setDays(r.days);}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setRecordsLoading(false);});
     if(mode==='review')void getJson<{replies:Reply[]}>('/api/memory/review?day='+day).then(r=>{if(alive)setReplies(r.replies);}).catch(e=>{if(alive)setFailure(e);}).finally(()=>{if(alive)setRecordsLoading(false);});
     return ()=>{alive=false;};
-  },[mode,day,subject,refresh]);
+  },[mode,day,subject,refresh,characterName,ownerName]);
   useEffect(()=>{
     let alive=true;setDetail(null);
     if(selected && mode==='people')void getJson<Detail>('/api/memory/items/'+selected).then(r=>{if(alive){setDetail(r);setManual(r.content);setEditCategory(r.category);setEditTopic(r.topic);}}).catch(e=>{if(alive)setFailure(e);});
@@ -191,7 +191,7 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
     {relation && <div className="relation-filter"><span>当前好友：{name('qq:'+relation.split(':')[2])}</span>
       <button className="text-button" onClick={()=>guard.proceed(()=>{setRelation('');navigation.replace({relation:undefined});})}>查看全部</button></div>}
     {mode==='people' && <><div className="profile-filters"><input aria-label="搜索人物记忆" placeholder="搜索记忆" value={q} onChange={e=>setQ(e.target.value)}/>
-      <select aria-label="记忆人物" value={subject} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setSubject(value);setCategory('');setSelected('');setDetail(null);setManual('');});}}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>
+      <select aria-label="记忆人物" value={subject} onChange={e=>{const value=e.target.value;guard.proceed(()=>{setSubject(value);setCategory('');setSelected('');setDetail(null);setManual('');});}}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{name(p.id)}</option>)}</select>
       </div>
       <nav className="memory-category-list" aria-label="记忆分类">
         {[...new Set(items.map(r=>r.category))].map(c=><button key={c} className={category===c?'active':''}
@@ -205,7 +205,7 @@ export function MemoryPage({view='memory'}:{view?:'memory'|'review'}) {
         <option value="">全部对话</option>{peer && !replies.some(r=>r.conversation_id===peer) && <option value={peer}>当前对话</option>}
         {[...new Map(replies.map(r=>[r.conversation_id,r.title])).entries()].map(([id,title])=><option key={id} value={id}>{title}</option>)}</select></label>
         <div className="review-day-summary"><NotebookPen size={20}/><strong>{replies.filter(r=>!peer || r.conversation_id===peer).length}</strong><span>条回复</span></div></>}
-      {mode==='days' && <select aria-label="经历人物" value={subject} onChange={e=>setSubject(e.target.value)}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select>}
+      {mode==='days' && <select aria-label="经历人物" value={subject} onChange={e=>setSubject(e.target.value)}><option value="">全部人物</option>{people.map(p=><option key={p.id} value={p.id}>{name(p.id)}</option>)}</select>}
       </div>}
     {mode==='legacy' && listing?.scopes.map(s=><button key={s.id} className={'profile-card '+(legacy?.id===s.id?'active':'')} onClick={()=>guard.proceed(()=>void openScope(s.id))}><strong>{s.name}</strong><small>{s.conversation_id.startsWith('owner|')?'旧版关系记录':'待整理 '+(s.total-s.processed)+' 条 · '+(s.status==='updating'?'正在整理':s.status==='update_failed'?'整理失败':'收集中')}</small></button>)}
   </section>}><main className="main-panel memory-panel"><header className="page-header"><h1>{modes[mode]}</h1>

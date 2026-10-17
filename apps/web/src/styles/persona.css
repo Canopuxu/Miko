@@ -75,7 +75,10 @@
 .retrieval-entry { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid #e7dfd3; border-radius: 8px; font-size: 14px; line-height: 1.7; background: #fffdf9; overflow-wrap: anywhere; }
 .retrieval-entry > svg { flex-shrink: 0; color: #6d8068; }
 .retrieval-entry small { margin-right: 8px; color: #777168; font-size: 12px; }
-.persona-name-heading { display:flex; align-items:flex-start; gap:8px; min-width:0; }
+.persona-name-heading { position:relative; display:flex; align-items:flex-start; gap:8px; min-width:0; width:fit-content; max-width:100%; }
+.persona-name-heading.identity-highlight::after { content:''; position:absolute; inset:-7px -9px; pointer-events:none; border:1.5px solid #8da187; border-radius:12px; background:#8da1870a; animation:persona-identity-highlight 2200ms ease-out both; }
+@keyframes persona-identity-highlight { 0% { opacity:0; transform:scale(.97); } 12%,65% { opacity:1; transform:scale(1); } 100% { opacity:0; transform:scale(1.015); } }
+@media(prefers-reduced-motion:reduce){.persona-name-heading.identity-highlight::after{animation:none}}
 .persona-name-heading > .text-button { flex-shrink:0; margin-top:8px; }
 .persona-name-editor { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:12px; min-width:0; width:100%; }
 .persona-name-editor h1 { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
@@ -90,6 +93,8 @@
 .profile-tools-tabs button[aria-selected='true'] { background:var(--surface); color:var(--sage); box-shadow:0 1px 4px #403b3510; }
 .profile-tools-note { font-size:12px; line-height:1.8; color:#807b70; }
 .profile-tools-editor { display:grid; gap:8px; font-size:13px; }
+.profile-tools-editor + .profile-tools-editor { margin-top:18px; }
+.profile-tools-editor textarea.profile-tools-short { min-height:96px; }
 .profile-tools-editor textarea { box-sizing:border-box; width:100%; padding:14px; min-height:220px; border:1px solid var(--line); border-radius:10px; background:var(--page); color:var(--ink); resize:vertical; line-height:1.8; }
 .profile-tools-row { display:flex; gap:10px; flex-wrap:wrap; }
 .profile-tools-preview { margin-top:18px; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--page); }

@@ -61,7 +61,7 @@ export function StickerImport({ account, imageUrl, collectUrl, onClose, onSaved 
   return <Dialog.Root open onOpenChange={value => { if (!value && !busy) onClose(); }}><Dialog.Portal>
     <Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="sticker-import-dialog">
       <header><Dialog.Title>添加表情</Dialog.Title><Dialog.Close className="icon-button" disabled={!!busy} aria-label="关闭添加表情"><X size={17}/></Dialog.Close></header>
-      <Dialog.Description>保存在 Miko 本地表情库，这个 QQ 账号的会话共用。可以识别含义后修改，也可以直接填写。</Dialog.Description>
+      <Dialog.Description>保存在本地表情库，这个 QQ 账号的会话共用。可以识别含义后修改，也可以直接填写。</Dialog.Description>
       {!imageUrl && <input aria-label="选择表情图片" type="file" accept="image/png,image/jpeg,image/gif,image/webp"
         onChange={event => { setFile(event.target.files?.[0] ?? null); setMeaning({ description: '' }); }}/>}
       {preview && <img className="sticker-import-preview" src={preview} alt="待添加的表情"/>}

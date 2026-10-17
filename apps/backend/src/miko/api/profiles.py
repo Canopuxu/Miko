@@ -83,10 +83,12 @@ class ExpressionInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     web: str = Field(min_length=1, max_length=12000)
     qq: str = Field(min_length=1, max_length=12000)
+    qq_base: str | None = Field(default=None, min_length=1, max_length=12000)
+    life: str | None = Field(default=None, min_length=1, max_length=12000)
 
     @model_validator(mode='after')
     def nonempty(self):
-        if not self.web.strip() or not self.qq.strip():
+        if any(value is not None and not value.strip() for value in self.model_dump().values()):
             raise ValueError('表达设置不能为空')
         return self
 
@@ -125,13 +127,17 @@ def profiles_router(chat, qq):
     store = chat.profiles
     library = ProfileCategories(store.chat)
 
+    def present(value, labels=False):
+        from miko.storage.identity import TEXT_FIELDS
+        return store.chat.identity().material(value, fields=TEXT_FIELDS | {'name'} if labels else TEXT_FIELDS)
+
     def expression_value():
         values, defaults = chat_prompts(chat.settings.local_root)
-        return {'values': values, 'defaults': defaults,
+        return {'values': present(values), 'defaults': present(defaults),
                 'effective': {key: chat.named_prompt(text) for key, text in values.items()}}
 
     def idle():
-        if chat.turns or (qq and qq.workers):
+        if chat.turns or (qq and qq.workers) or getattr(getattr(chat, 'life', None), 'generating', False):
             raise HTTPException(409, '当前有回复正在进行，请结束后再应用角色设置')
 
     @router.get('/expression')
@@ -155,7 +161,7 @@ def profiles_router(chat, qq):
                      entries=store.portable_entries(subject))
         if subject == 'miko':
             value['expression'] = chat_prompts(chat.settings.local_root)[0]
-        return value
+        return present(value, labels=True)
 
     @router.get('/portable/export')
     async def export_character(subject: Literal['miko', 'owner'] = 'miko'):
@@ -207,32 +213,32 @@ def profiles_router(chat, qq):
 
     @router.get('/categories')
     async def categories(subject: Literal['miko', 'owner'] = 'miko'):
-        return {'categories': library.get(subject)}
+        return present({'categories': library.get(subject)}, labels=True)
 
     @router.put('/categories')
     async def update_categories(body: LibraryInput):
         tree = body.model_dump()['categories']
         for root in tree:
             for node in [root, *root['children']]:
-                if not node['pinned']:
+                if not node['pinned'] and node['id'] != body.subject + '-core':
                     node.pop('pinned')
-        return {'categories': library.save(body.subject, tree)}
+        return present({'categories': library.save(body.subject, tree)}, labels=True)
 
     @router.get('')
     async def listing(q: str = '', subject: str = '', kind: str = '', category: str = ''):
-        return {'entries': store.list(q, subject, kind, category)}
+        return present({'entries': store.list(q, subject, kind, category)})
 
     @router.post('')
     async def add(body: ProfileInput):
         try:
-            return store.save(body.record())
+            return present(store.save(body.record()))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
 
     @router.put('/entries/{entry_id}')
     async def edit(entry_id: str, body: ProfileInput):
         try:
-            return store.save(body.record(), entry_id)
+            return present(store.save(body.record(), entry_id))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
 
@@ -252,8 +258,8 @@ def profiles_router(chat, qq):
         if key and not qq.store.friend(key):
             raise HTTPException(404, '找不到这位好友')
         if getattr(chat, 'memory', None):
-            return await chat.memory.context(q, key)
-        return store.context(q, key)
+            return present(await chat.memory.context(q, key))
+        return present(store.context(q, key))
 
     @router.put('/relationships/{account}/{friend}')
     async def relationship(account: str, friend: str, body: RelationshipInput):
@@ -278,6 +284,6 @@ def profiles_router(chat, qq):
                 if scope['manual'] != text:
                     chat.memory.social.edit(scope['id'], text, scope['revision'])
             await chat.memory.sync()
-        return qq.store.friend(key)
+        return present(qq.store.friend(key))
 
     return router

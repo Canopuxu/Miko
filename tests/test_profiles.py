@@ -102,6 +102,10 @@ class ProfilesTests(unittest.TestCase):
             self.assertEqual(self.profiles.list('设计'), [])
 
     def test_character_rename_persists_without_changing_person_id(self):
+        from miko.adapters.memory.tulpa import Projection
+        self.chat.begin_turn('rename-check', 'rename-turn', 'Miko 在吗')
+        self.chat.finish('rename-turn', '在', 'completed', None)
+        projection = Projection(self.path.with_name('memory.sqlite3'), self.chat, structured=True)
         app = FastAPI()
         app.include_router(profiles_router(SimpleNamespace(profiles=self.profiles), SimpleNamespace(store=self.qq)))
         with TestClient(app) as client:
@@ -111,6 +115,10 @@ class ProfilesTests(unittest.TestCase):
             self.assertEqual(response.json()['name'], '小夏')
             self.assertEqual(client.put('/api/profiles/identity', json={'name':'  '}).status_code, 422)
         self.assertEqual(ChatStore(self.path).character_name(), '小夏')
+        projection.sync()
+        with projection.connect() as db:
+            self.assertEqual({r[0] for r in db.execute('SELECT conversation FROM messages')}, {'小夏 · 你'})
+        self.assertEqual(self.chat.messages('rename-check')[0]['text'], 'Miko 在吗')
         from miko.domain.conversation.chat import ChatService
         prompt = ChatService.named_prompt(SimpleNamespace(store=self.chat), '你是Miko。资料所属编号：miko；输出字段：introduces_miko')
         self.assertEqual(prompt, '你是小夏。资料所属编号：miko；输出字段：introduces_miko')

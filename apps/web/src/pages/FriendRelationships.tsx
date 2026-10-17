@@ -16,9 +16,16 @@ export function FriendRelationships({ friend,onDirty }: { friend: Relationship;o
   useEffect(()=>{onDirty?.(owner!==baseline.owner || miko!==baseline.miko ||
     (introduced!==undefined && introduced!==!!friend.miko_introduced));},[owner,miko,introduced,baseline,friend.miko_introduced]);
   useEffect(() => {
+    if(owner!==baseline.owner || miko!==baseline.miko || (introduced!==undefined && introduced!==!!friend.miko_introduced))return;
     setOwner(friend.owner_relationship); setMiko(friend.miko_relationship);
+    setBaseline({owner:friend.owner_relationship,miko:friend.miko_relationship});
     setIntroduced(undefined); setNotice('');
-  }, [friend.account, friend.friend]);
+  }, [friend.owner_relationship,friend.miko_relationship]);
+  useEffect(() => {
+    setOwner(friend.owner_relationship);setMiko(friend.miko_relationship);
+    setBaseline({owner:friend.owner_relationship,miko:friend.miko_relationship});
+    setIntroduced(undefined);setNotice('');
+  },[friend.account,friend.friend]);
 
   async function save() {
     setBusy(true); setNotice('');
@@ -28,12 +35,12 @@ export function FriendRelationships({ friend,onDirty }: { friend: Relationship;o
         body: JSON.stringify({ owner_relationship: owner, miko_relationship: miko, miko_introduced: introduced }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      setNotice('已保存，将用于后续聊天');
+      setNotice('已保存');
       setBaseline({owner,miko});setIntroduced(undefined);
     } catch (cause) { setNotice(String(cause)); } finally { setBusy(false); }
   }
   return <details className="relationship-panel"><summary>关系与介绍状态</summary>
-    <p>你与这位好友、Miko 与这位好友的关系分别保存；自动整理出的记忆可从页面上方进入查看。</p>
+    <p>你与这位好友、{characterName} 与这位好友的关系分别保存；自动整理出的记忆可从页面上方进入查看。</p>
     <fieldset disabled={busy} className="profile-fields">
       <label>你与好友的关系<textarea value={owner} maxLength={3000} rows={3}
         onChange={event => setOwner(event.target.value)} /></label>

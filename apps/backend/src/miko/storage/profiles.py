@@ -15,6 +15,15 @@ class ProfileStore:
     def __init__(self, chat):
         self.chat = chat
 
+    def reindex(self):
+        names = self.chat.identity()
+        with self.chat.connect() as db:
+            for row in db.execute('SELECT * FROM profile_entries').fetchall():
+                indexed = ' '.join(sorted(terms(names.canonical(' '.join(
+                    row[name] for name in ('title','category','keywords','content'))), limit=None)))
+                db.execute('DELETE FROM profile_fts WHERE entry_id=?', (row['id'],))
+                db.execute('INSERT INTO profile_fts(entry_id,tokens) VALUES(?,?)', (row['id'],indexed))
+
     def get(self, entry_id):
         with self.chat.connect() as db:
             row = db.execute('SELECT * FROM profile_entries WHERE id=?', (entry_id,)).fetchone()
@@ -44,7 +53,7 @@ class ProfileStore:
                 {','.join(name+'=excluded.'+name for name in fields)},updated_at=excluded.updated_at""",
                 (entry_id, *values, stamp, stamp))
         db.execute('DELETE FROM profile_fts WHERE entry_id=?', (entry_id,))
-        indexed = ' '.join(sorted(terms(' '.join(value[name] for name in ('title', 'category', 'keywords', 'content')), limit=None)))
+        indexed = ' '.join(sorted(terms(self.chat.identity().canonical(' '.join(value[name] for name in ('title', 'category', 'keywords', 'content'))), limit=None)))
         db.execute('INSERT INTO profile_fts(entry_id,tokens) VALUES (?,?)', (entry_id, indexed))
 
     def portable_entries(self, subject):
@@ -54,6 +63,7 @@ class ProfileStore:
                 ORDER BY created_at,rowid""", (subject,))]
 
     def replace_portable(self, subject, name, categories, entries):
+        from miko.storage.identity import rename_person
         stamp = now_ms()
         with self.chat.connect() as db:
             db.execute("""DELETE FROM profile_fts WHERE entry_id IN (SELECT id FROM profile_entries
@@ -63,10 +73,11 @@ class ProfileStore:
             for entry in entries:
                 self._write(db, dict(entry, subject=subject, account='', friend='', as_of=None, enabled=True),
                             uuid.uuid4().hex, stamp)
-            db.execute('UPDATE people SET display_name=? WHERE id=?', (name, subject))
+            rename_person(db, subject, name)
             db.execute('''INSERT INTO profile_library(subject,categories) VALUES(?,?)
                 ON CONFLICT(subject) DO UPDATE SET categories=excluded.categories''',
                        (subject, json.dumps(categories, ensure_ascii=False)))
+        self.reindex()
 
     def delete(self, entry_id):
         with self.chat.connect() as db:
@@ -76,15 +87,18 @@ class ProfileStore:
 
     def list(self, query='', subject='', kind='', category='', key=None, active=False, limit=200):
         where, args = [], []
-        for field, value in (('subject', subject), ('kind', kind), ('category', category)):
+        names = self.chat.identity()
+        for field, value in (('subject', subject), ('kind', kind)):
             if value:
                 where.append(f'p.{field}=?'); args.append(value)
+        if category:
+            where.append('canonical_name(p.category)=?'); args.append(names.canonical(category))
         if key:
             where.append("((p.account='' AND p.friend='') OR (p.account=? AND p.friend=?))")
             args.extend(key)
         if active:
             where.append('p.enabled=1')
-        match = fts_query(query)
+        match = fts_query(self.chat.identity().canonical(query))
         if query.strip() and not match:
             return []
         join, order = '', 'p.updated_at DESC, p.rowid DESC'
@@ -93,6 +107,7 @@ class ProfileStore:
             where.append('profile_fts MATCH ?'); args.append(match)
             order = 'bm25(profile_fts), p.updated_at DESC'
         with self.chat.connect() as db:
+            db.create_function('canonical_name', 1, names.canonical)
             rows = [dict(row) for row in db.execute('SELECT p.* FROM profile_entries p' + join
                 + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY ' + order
                 + (' LIMIT ?' if limit is not None else ''), args + ([limit] if limit is not None else []))]
@@ -101,8 +116,8 @@ class ProfileStore:
         for who in {r['subject'] for r in rows}:
             tree = library.get(who)
             labels = paths(tree)
-            pinned[who] = {labels[node['id']] for root in tree for node in [root, *root['children']] if node.get('pinned')}
-        return [{**r, 'pinned': r['kind'] in ('overview', 'fact') and r['category'] in pinned[r['subject']]} for r in rows]
+            pinned[who] = {names.canonical(labels[node['id']]) for root in tree for node in [root, *root['children']] if node.get('pinned')}
+        return [{**r, 'pinned': r['kind'] in ('overview', 'fact') and names.canonical(r['category']) in pinned[r['subject']]} for r in rows]
 
     def relationships(self, query, key):
         with self.chat.connect() as db:

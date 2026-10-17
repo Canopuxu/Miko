@@ -44,6 +44,7 @@ class Projection(ChatStore):
               WHERE m.status='completed' ORDER BY m.sequence''').fetchall()
             live = set()
             eligible_originals=set()
+            character_name = source.execute("SELECT display_name FROM people WHERE id='miko'").fetchone()[0]
             for r in rows:
                 if r['source'] == 'qq':
                     _, account, friend, native = r['id'].split(':')
@@ -60,7 +61,7 @@ class Projection(ChatStore):
                     cid = subject + '|' + (r['conversation_id'] if r['source'] == 'qq' else 'web:owner')
                     live.add((r['id'], cid))
                     is_self = int(r['kind'] == subject)
-                    name = ('Miko' if subject == 'miko' else '你') + ' · ' + (r['title'] if r['source'] == 'qq' else '你')
+                    name = (character_name if subject == 'miko' else '你') + ' · ' + (r['title'] if r['source'] == 'qq' else '你')
                     old = db.execute('SELECT * FROM messages WHERE original_id=? AND conversation_id=?',
                                      (r['id'], cid)).fetchone()
                     if old:

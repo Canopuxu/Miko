@@ -8,7 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-CHAT_PROMPT_FILES = {'web': 'system-prompt.txt', 'qq': 'qq-expression.txt'}
+CHAT_PROMPT_FILES = {'web': 'system-prompt.txt', 'qq': 'qq-expression.txt',
+                     'qq_base': 'qq-system-prompt.txt', 'life': 'life-generation.txt'}
 
 
 def chat_prompts(local_root):
@@ -16,15 +17,23 @@ def chat_prompts(local_root):
     saved = json.loads(path.read_text('utf-8-sig')) if path.exists() else {}
     defaults = {key: (REPO_ROOT / 'config/defaults' / name).read_text('utf-8').strip()
                 for key, name in CHAT_PROMPT_FILES.items()}
+    defaults['life'] = defaults['life'].split('\n只返回 JSON 对象：', 1)[0]
     return {key: saved.get(key, value) for key, value in defaults.items()}, defaults
 
 
 def save_chat_prompts(local_root, values):
-    _, defaults = chat_prompts(local_root)
+    current, defaults = chat_prompts(local_root)
+    values = {**current, **{key: value for key, value in values.items() if value is not None}}
     root = Path(local_root) / 'config'
     root.mkdir(parents=True, exist_ok=True)
     write_json(root / 'expression.local.json',
                {key: text for key, text in values.items() if text != defaults[key]})
+
+
+def life_generation_prompt(local_root):
+    preferences = chat_prompts(local_root)[0]['life']
+    output = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text('utf-8').strip().split('\n只返回 JSON 对象：', 1)[1]
+    return preferences + '\n只返回 JSON 对象：' + output
 
 
 class ProviderConfig(BaseModel):

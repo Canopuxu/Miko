@@ -23,6 +23,7 @@ export function Workbench() {
     <header className="workbench-header" aria-hidden="true" />
     {ready ? <iframe title="DSH 原生工作台" src="http://127.0.0.1:7871/_miko/start" allow="clipboard-read; clipboard-write" />
       : <div className="workbench-loading" role="status"><p>{error ? '工作台尚未连接' : '正在连接工作台…'}</p>
+        <p>模型在工作台设置中配置。</p>
         {error && <><p>运行 scripts/start_workbench.ps1 启动独立服务。</p><button onClick={() => setAttempt(x => x + 1)}><RefreshCw size={16}/>重新连接</button></>}</div>}
   </section>;
 }

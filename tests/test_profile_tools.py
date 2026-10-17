@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from miko.api.profiles import profiles_router, ProfileInput, CharacterFile
 from miko.domain.conversation.chat import ChatService
-from miko.settings import Settings, ProviderConfig, chat_prompts
+from miko.settings import Settings, ProviderConfig, chat_prompts, life_generation_prompt, REPO_ROOT
 from miko.storage.chat import ChatStore
 from miko.storage.qq import QqStore
 
@@ -47,25 +47,25 @@ class ProfileToolsTests(unittest.TestCase):
         self.assertEqual(preview.json()['effective']['qq'], '小米 用简短词句和小橙聊天')
         self.assertFalse((self.root / 'config/expression.local.json').exists())
         self.assertEqual(self.api.put('/api/profiles/expression', json=draft).status_code, 200)
-        self.assertEqual(chat_prompts(self.root)[0], draft)
+        self.assertEqual(chat_prompts(self.root)[0], {**initial['defaults'], **draft})
         self.assertEqual(self.chat.system_prompt, draft['web'])
         reopened = ChatService(self.settings, self.chat.store)
         self.assertEqual(reopened.system_prompt, draft['web'])
         self.chat.turns['active'] = object()
         self.assertEqual(self.api.put('/api/profiles/expression', json=initial['defaults']).status_code, 409)
-        self.assertEqual(chat_prompts(self.root)[0], draft)
+        self.assertEqual(chat_prompts(self.root)[0], {**initial['defaults'], **draft})
         self.chat.turns.clear()
         self.assertEqual(self.api.put('/api/profiles/expression', json=initial['defaults']).status_code, 200)
         self.assertEqual(chat_prompts(self.root)[0], initial['defaults'])
 
     def test_qq_generation_uses_saved_expression_and_replaced_names(self):
-        draft = dict(web='Miko 和橙汁聊天', qq='本轮表达验证：Miko 和橙汁')
+        draft = dict(web='Miko 和橙汁聊天', qq='本轮表达验证：Miko 和橙汁', qq_base='基础设定验证：Miko 是橙汁的室友')
         self.api.put('/api/profiles/expression', json=draft)
         self.chat.store.rename_character('小米')
         self.chat.store.rename_character('小橙', 'owner')
         self.chat.provider = ProviderConfig(api_base='https://example.test/v1', api_key='test', model='test')
-        self.chat.memory = SimpleNamespace(reranker=None,
-            context=AsyncMock(side_effect=lambda query, key: self.chat.profiles.context(query, key)))
+        self.chat.memory = SimpleNamespace(reranker=None,local=None,
+            context=AsyncMock(side_effect=lambda query, key, **kwargs: self.chat.profiles.context(query, key)))
         records = [dict(author=dict(kind='contact', id='qq:456', name='朋友'), message_id=1,
                         text='嗨', created_at=1000000, segments=[])]
         result = SimpleNamespace(finish_reason='completed', final_response='{"bubbles":[]}')
@@ -78,6 +78,19 @@ class ProfileToolsTests(unittest.TestCase):
             session.return_value.run.return_value = result
             asyncio.run(generate())
         self.assertIn('本轮表达验证：小米 和小橙', runtime.call_args.kwargs['system_prompt'])
+        self.assertIn('基础设定验证：小米 是小橙的室友', runtime.call_args.kwargs['system_prompt'])
+
+    def test_life_preferences_preserve_output_format_and_other_settings(self):
+        original = (REPO_ROOT / 'config/defaults/life-generation.txt').read_text('utf-8').strip()
+        self.assertEqual(life_generation_prompt(self.root), original)
+        defaults = self.api.get('/api/profiles/expression').json()['defaults']
+        self.assertNotIn('只返回 JSON 对象', defaults['life'])
+        self.assertEqual(self.api.put('/api/profiles/expression', json={
+            'web': defaults['web'], 'qq': defaults['qq'], 'life': '生活偏好验证：平日上班，周末休息'}).status_code, 200)
+        self.assertTrue(life_generation_prompt(self.root).startswith('生活偏好验证：平日上班，周末休息\n只返回 JSON 对象：'))
+        self.assertEqual(life_generation_prompt(self.root).split('只返回 JSON 对象：')[1], original.split('只返回 JSON 对象：')[1])
+        self.api.put('/api/profiles/expression', json={'web': defaults['web'], 'qq': '新的表达要求'})
+        self.assertEqual(chat_prompts(self.root)[0]['life'], '生活偏好验证：平日上班，周末休息')
 
     def test_export_import_and_backup_preserve_other_subjects_scopes_and_history(self):
         self.entry(category='兴趣与能力')

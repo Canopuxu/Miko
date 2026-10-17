@@ -1,6 +1,6 @@
 import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
-import { BookOpen, ImagePlus, NotebookPen, Search, X } from 'lucide-react';
+import { ImagePlus, NotebookPen, Search, SlidersHorizontal, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
 import { getJson, responseError, type Message } from '../api/chat';
 import { StickerImport, StickerLibrary } from './StickerLibrary';
@@ -8,6 +8,8 @@ import { GroupLanguage } from './GroupLanguage';
 import { FriendManager } from '../components/FriendManager';
 import { FriendRelationships } from './FriendRelationships';
 import { ChatSearch } from '../components/ChatSearch';
+import { useCharacterName, usePersonName } from '../components/RuntimeStatus';
+import { ExpressionSettingsDialog } from './ProfileTools';
 
 type Friend = { account: string; friend: string; name: string; enabled: number; blocked: number;
   auto_reply_idle:number; chat_type:number; natural_chat:number;
@@ -21,17 +23,20 @@ type QqMessage = Message & { message_id: number; recalled: boolean;
 type QqStatus = { character_name:string; receiver: { state: string; account: string; note: string }; friends: Friend[] };
 type Detail = { messages: QqMessage[]; runs: Run[]; reactions?: {message_id:number;name:string;reaction_id:string}[] };
 const states: Record<string, string> = { disabled: '已关闭', blocked: '等待核对', waiting: '等待接话',
-  generating: '正在生成', sending: '正在发送', chatting: 'Miko 接话中', listening: '等待新消息',
+  generating: '正在生成', sending: '正在发送', chatting: '接话中', listening: '等待新消息',
   sent: '已发送', skipped: '无需回复', stale: '旧回复已作废', error: '失败', unknown: '发送结果待核对', interrupted: '后台中断',
   pending: '待发送', preparing: '准备发送', cancelled: '已取消', between_bubbles: '接话中' };
 const timeLabel = (stamp: number) => new Date(stamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function QqPage() {
+  const characterName = useCharacterName();
+  const personName = usePersonName();
   const navigation = useContext(NavigationContext)!;
   const [status, setStatus] = useState<QqStatus | null>(null);
   const [selected, setSelected] = useState(new URLSearchParams(location.search).get('friend'));
   const [selectedAccount, setSelectedAccount] = useState(new URLSearchParams(location.search).get('account'));
   const [finding, setFinding] = useState(false);
+  const [expressionSettings, setExpressionSettings] = useState(false);
   const [groupMode,setGroupMode]=useState(selected?.startsWith('group-')??false);
   const [manager,setManager]=useState(false);
   const [notice,setNotice]=useState('');
@@ -45,7 +50,6 @@ export function QqPage() {
   const friend = status?.friends.find(item => item.friend === selected && (!selectedAccount || item.account === selectedAccount));
   const latestRun = detail?.runs[0];
   const replyNotice = latestRun?.error === friend?.note ? latestRun?.error : null;
-  const characterName = status?.character_name ?? 'Miko';
   const stateLabel = (state:string) => state==='chatting' ? `${characterName} 接话中` : states[state] ?? state;
   const [relationshipDirty,setRelationshipDirty]=useState(false);
   const guard = useDiscardGuard(relationshipDirty);
@@ -70,7 +74,7 @@ export function QqPage() {
         if (alive) setRefreshError('');
       } catch (cause) {
         if (alive) setRefreshError(cause instanceof TypeError
-          ? '暂时连不上 Miko 后台，正在重连…'
+          ? '暂时连不上后台，正在重连…'
           : cause instanceof Error ? cause.message : String(cause));
       }
     }
@@ -128,11 +132,9 @@ export function QqPage() {
     </>}>
     <main className="main-panel">
       <header className="page-header"><div><h1 title={friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}>{friend?.name ?? (groupMode?'QQ 群聊':'QQ 私聊')}</h1>
-        <p>{friend?.friend.replace('group-','') ?? (groupMode?'选择一个群聊查看接话状态':'选择一位好友查看接话状态')}</p></div>
-        <div className="header-actions"><button className="ui-button" onClick={()=>setFinding(true)}><Search size={15}/>查找记录</button>{friend && <><button className="ui-button" onClick={()=>navigation.navigate('review',
-          {day:new Date().toLocaleDateString('sv-SE'),peer:`qq:${friend.account}:${friend.friend}`,reply:undefined})}><NotebookPen size={15}/>回顾</button>
-          <button className="ui-button" onClick={()=>navigation.navigate('memory',
-            {person:'miko',relation:`qq:${friend.account}:${friend.friend}`})}><BookOpen size={15}/>关系记忆</button></>}
+        {friend && <p>{friend.friend.replace('group-','')}</p>}</div>
+        <div className="header-actions"><button className="ui-button" onClick={()=>setExpressionSettings(true)}><SlidersHorizontal size={15}/>表达要求</button>
+          <button className="ui-button" onClick={()=>setFinding(true)}><Search size={15}/>查找记录</button>
           <span className="model-label">{status?.receiver.state==='connected'?'QQ 已连接':'QQ 未连接'}</span></div></header>
       {(error || refreshError) && <div role="alert" className="qq-error error-notice">{error || refreshError}<button className="text-button" aria-label="关闭提示" onClick={()=>{setError('');setRefreshError('');}}><X size={15}/></button></div>}
       {notice && <p className="qq-caption" role="status">{notice}</p>}
@@ -143,9 +145,9 @@ export function QqPage() {
           <div><strong>{stateLabel(friend.state)}</strong>
             <p>{friend.chat_type===2?`被 @、叫到 ${characterName} 或引用她的消息时接话；各群独立运行。`:<>好友明确提到 {characterName}{friend.auto_reply_idle ? ' 或用户两分钟没回复好友消息' : ''}时会自动接话</>}</p>
             {!!friend.blocked && <p>{friend.note}</p>}
-            <label className="qq-idle-option"><button type="button" role="switch" aria-checked={!!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle)}
+            <label className="qq-idle-option" title={friend.chat_type===2?'未被叫到时也可参与聊天，按话题决定是否接话。':undefined}><button type="button" role="switch" aria-checked={!!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle)}
               aria-label={friend.chat_type===2?'自然参与群聊':'用户两分钟没回复自动接话'} className="qq-idle-switch" disabled={changing}
-              onClick={()=>void toggleIdle(!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle))}><span/></button>{friend.chat_type===2?'自然参与群聊（允许保持安静）':'用户两分钟没回复自动接话'}</label>
+              onClick={()=>void toggleIdle(!(friend.chat_type===2?friend.natural_chat:friend.auto_reply_idle))}><span/></button>{friend.chat_type===2?'自然参与群聊':'用户两分钟没回复自动接话'}</label>
             {friend.state === 'waiting' && friend.due_at && <small>约 {Math.max(0, Math.ceil(friend.due_at - Date.now()/1000))} 秒后接话</small>}
           </div>
           <div className="friend-actions">
@@ -162,8 +164,8 @@ export function QqPage() {
               {!detail.messages.length && <p className="no-history">这里会保存连接后的新消息。</p>}
               {detail.messages.map(message => <article key={message.id} id={'message-'+message.id}
                 className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'} ${navigation.search.get('message')===message.id?'message-highlight':''}`}>
-                <div className="message-avatar">{message.author.kind === 'miko' ? 'm' : message.author.name.slice(0, 1)}</div>
-                <div className="message-content"><div className="message-name">{message.author.name}
+                <div className="message-avatar">{personName(message.author.id, message.author.name).slice(0, 1)}</div>
+                <div className="message-content"><div className="message-name">{personName(message.author.id, message.author.name)}
                   <time>{timeLabel(message.created_at)}</time></div>
                   {message.segments.filter(s => s.type === 'reply').map((s, i) => <blockquote key={i} className="qq-quote">
                     {detail.messages.find(m => m.message_id === s.message_id)?.text ?? message.quoted_message?.text ?? '引用消息'}
@@ -185,9 +187,9 @@ export function QqPage() {
                 </div>
               </article>)}
               {!!detail.runs.length && <details className="reply-runs"><summary>接话记录 · {detail.runs.length}</summary>
-                {detail.runs.map(run => <div key={run.id} className="reply-run"><small>{timeLabel(run.created_at*1000)} · {states[run.state] ?? run.state}</small>
+                {detail.runs.map(run => <div key={run.id} className="reply-run"><small>{timeLabel(run.created_at*1000)} · {stateLabel(run.state)}</small>
                   {run.bubbles.length ? run.bubbles.map(b => <p key={b.position}>{b.text}
-                    <small className="bubble-state">{states[b.state] ?? b.state}{b.receipt_id !== null ? ` · ${b.receipt_id}` : ''}</small>
+                    <small className="bubble-state">{stateLabel(b.state)}{b.receipt_id !== null ? ` · ${b.receipt_id}` : ''}</small>
                     {b.error && <span className="message-note">{b.error}</span>}</p>) : run.text && <p>{run.text}</p>}
                   {run.error && <p className="message-note">{run.error}</p>}</div>)}
               </details>}
@@ -201,6 +203,7 @@ export function QqPage() {
       </> : <section className="conversation"><EmptyState title={groupMode?'选择或添加一个群聊':'选择一位好友'}/></section>}
       <FriendManager open={manager} kind={groupMode?'groups':'friends'} onClose={()=>setManager(false)} onAdded={message=>setNotice(message)}/>
       {guard.dialog}
+      {expressionSettings && <ExpressionSettingsDialog scope="qq" onClose={()=>setExpressionSettings(false)}/>}
       {finding && <ChatSearch source="qq" conversationId={friend ? `qq:${friend.account}:${friend.friend}` : null} onClose={()=>setFinding(false)}
         onOpen={item=>guard.proceed(()=>{setFinding(false);navigation.navigate('qq',{account:item.account??undefined,friend:item.friend??undefined,message:item.id});})}/>}
       {collecting && <StickerImport {...collecting} onClose={()=>setCollecting(null)} onSaved={()=>{setStickerVersion(value=>value+1);setNotice('已添加到本地表情库');}}/>}

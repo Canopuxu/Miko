@@ -3,7 +3,7 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowDownUp, ArrowUpRight, Check, Pencil, Pin, Plus, Save, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ArrowDownUp, Check, Pencil, Pin, Plus, Save, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { ExpressionSettingsDialog, ProfileTransferDialog } from './ProfileTools';
 import { useDiscardGuard, useNotice } from '../components/ui';
 import { useCharacterName, useOwnerName, useRuntime } from '../components/RuntimeStatus';
@@ -32,7 +32,7 @@ function RetrievalPreview({ value }: { value: Context }) {
     ...(value.dated_experiences ?? []).map(e => ({ id: 'event:' + e.id, person: person(e.subject), label: `经历 · ${e.day}`, text: e.text, pinned: false })),
   ].sort((a, b) => Number(b.pinned) - Number(a.pinned));
   return <div className="retrieval-preview-results">
-    <p className="retrieval-note">以下是检索候选；聊天时还会按话题筛选，不代表全部加入回复。</p>
+    <p className="retrieval-note">本次检索结果。</p>
     {value.retrieval?.error && <p role="alert">{value.retrieval.error}</p>}
     <div className="retrieval-entries">{rows.map(e => <span className="retrieval-entry" key={e.id}
       title={`${e.person} · ${e.label}${e.pinned ? ' · 常驻背景' : ''}`}>
@@ -49,6 +49,7 @@ export function ProfilesPage() {
   const characterName = useCharacterName();
   const ownerName = useOwnerName();
   const [renaming,setRenaming]=useState(false);
+  const [nameHighlighted,setNameHighlighted]=useState(false);
   const [tools, setTools] = useState<'expression' | 'transfer' | null>(null);
   const [nameDraft,setNameDraft]=useState('');
   const [subject, setSubject] = useState<Subject>('miko');
@@ -69,11 +70,19 @@ export function ProfilesPage() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [previewFriend, setPreviewFriend] = useState('');
   const [preview, setPreview] = useState<Context | null>(null);
-  const nameEditorRef = useRef<HTMLFormElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const nameFocus=navigation.search.get('focus');
+  useEffect(()=>{
+    if(navigation.active!=='profiles'||nameFocus!=='profile-name'){setNameHighlighted(false);return;}
+    setNameHighlighted(true);
+    const timer=window.setTimeout(()=>{setNameHighlighted(false);navigation.replace({focus:undefined});},2200);
+    return()=>window.clearTimeout(timer);
+  },[navigation.active,nameFocus]);
   useEffect(()=>{
     if(!renaming || busy)return;
     const dismiss=(event:PointerEvent)=>{
-      if(event.target instanceof Node && !nameEditorRef.current?.contains(event.target))setRenaming(false);
+      if(event.target instanceof Element&&event.target.closest('.persona-name-editor button[type="submit"]'))return;
+      if(event.target instanceof Node && !nameInputRef.current?.contains(event.target))setRenaming(false);
     };
     document.addEventListener('pointerdown',dismiss,true);
     return()=>document.removeEventListener('pointerdown',dismiss,true);
@@ -110,7 +119,7 @@ export function ProfilesPage() {
     }).catch(cause => { if (alive) setFailure(cause); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [subject, revision]);
+  }, [subject, revision, characterName, ownerName]);
   useEffect(() => { let alive = true;
     void getJson<{ friends: Friend[] }>('/api/qq/status').then(data => { if (alive) setFriends(data.friends); }).catch(() => {});
     return () => { alive = false; };
@@ -300,18 +309,18 @@ export function ProfilesPage() {
         <span>待归类</span><small>{unfiled.filter(matches).length}</small></button></nav>
     <button className="persona-add-category" disabled={busy} onClick={() => guard.proceed(()=>{setEdit(null);setCategoryEdit({name:''});})}><Plus size={14}/>新增大分类</button>
   </section>}>
-    <main className="main-panel persona-panel"><header className="page-header"><div className="persona-name-heading">
-      {renaming ? <form ref={nameEditorRef} className="persona-name-editor" onSubmit={event=>{event.preventDefault();void renameCharacter();}}>
-        <h1><input autoFocus aria-label={subject==='miko'?'角色名称':'我的名字'} maxLength={36} size={Math.max(4,Math.min(20,nameDraft.length*2))}
+    <main className="main-panel persona-panel"><header className="page-header"><div className={'persona-name-heading'+(nameHighlighted?' identity-highlight':'')}>
+      {renaming ? <form className="persona-name-editor" onSubmit={event=>{event.preventDefault();void renameCharacter();}}>
+        <h1><input ref={nameInputRef} autoFocus aria-label={subject==='miko'?'角色名称':'我的名字'} maxLength={36} size={Math.max(4,Math.min(20,nameDraft.length*2))}
+          onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setRenaming(false);}}}
           value={nameDraft} onChange={event=>setNameDraft(event.target.value)}/><span>的资料</span></h1>
         <button type="submit" className="send-button" disabled={busy||!nameDraft.trim()||nameDraft.trim()===currentName}>保存</button>
       </form> : <><h1 title={`${currentName} 的资料`}>{currentName} 的资料</h1>
       <button className="text-button" disabled={busy} aria-label={subject==='miko'?'重命名角色':'修改我的名字'} title="修改名字"
-        onClick={()=>guard.proceed(()=>{setNameDraft(currentName);setRenaming(true);})}><Pencil size={16}/></button></>}</div>
+        onClick={()=>guard.proceed(()=>{setNameHighlighted(false);setNameDraft(currentName);setRenaming(true);})}><Pencil size={16}/></button></>}</div>
       <div className="header-actions persona-tools-actions">
         {subject === 'miko' && <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('expression'); })}><SlidersHorizontal size={14}/>表达设置</button>}
         <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('transfer'); })}><ArrowDownUp size={14}/>导入导出</button>
-        <button className="persona-memory-link" onClick={() => navigation.navigate('memory',{person:subject,relation:undefined})}>近况与经历<ArrowUpRight size={14}/></button>
       </div></header>
       <div className="persona-content" ref={contentRef}>
         <div className="persona-category-heading"><div><small>当前分类</small><h2>{root?.name ?? '待归类'}</h2></div>

@@ -53,6 +53,10 @@ class StructuredMemory:
                     UPDATE memory_days SET valid=0 WHERE id IN
                       (SELECT item_id FROM memory_sources WHERE message_id=OLD.id);
                   END;''')
+            for row in db.execute('SELECT id,category,topic,automatic,manual FROM memory_items').fetchall():
+                self._index(db, row['id'], f'{row["category"]} {row["topic"]} {row["manual"] or row["automatic"]}')
+            for row in db.execute('SELECT id,text FROM memory_days').fetchall():
+                self._index(db, row['id'], row['text'])
 
     def _sources(self, db, item_id):
         return [dict(r) for r in db.execute('''SELECT m.id,m.original_id,m.author,m.sender_id,
@@ -61,7 +65,7 @@ class StructuredMemory:
 
     def _index(self, db, item_id, text):
         db.execute('DELETE FROM memory_fts WHERE item_id=?', (item_id,))
-        db.execute('INSERT INTO memory_fts VALUES(?,?)', (item_id, ' '.join(sorted(terms(text)))))
+        db.execute('INSERT INTO memory_fts VALUES(?,?)', (item_id, ' '.join(sorted(terms(self.projection.source.identity().canonical(text))))))
 
     def _audit(self, db, row, kind):
         value = dict(row)
@@ -70,15 +74,18 @@ class StructuredMemory:
                    (value['id'], kind, encode(value), time.time_ns() // 1_000_000))
 
     def items(self, query='', subject='', peer=None, category='', active=False, limit=300):
+        names = self.projection.source.identity()
         clauses, args = [], []
-        for column, value in (('subject', subject), ('category', category)):
+        for column, value in (('subject', subject),):
             if value:
                 clauses.append(f'i.{column}=?'); args.append(value)
+        if category:
+            clauses.append('canonical_name(i.category)=?'); args.append(names.canonical(category))
         if peer is not None:
             clauses.append('i.peer=?' if ':group-' in peer else "i.peer IN ('',?)"); args.append(peer)
         if active:
             clauses.append("i.enabled=1 AND (i.valid=1 OR i.manual!='')")
-        match = fts_query(query)
+        match = fts_query(names.canonical(query))
         join = ''
         if query.strip():
             if not match:
@@ -86,6 +93,7 @@ class StructuredMemory:
             join = ' JOIN memory_fts f ON f.item_id=i.id'
             clauses.append('memory_fts MATCH ?'); args.append(match)
         with self.projection.connect() as db:
+            db.create_function('canonical_name', 1, names.canonical)
             rows = [dict(r) for r in db.execute('SELECT i.* FROM memory_items i' + join +
                 (' WHERE ' + ' AND '.join(clauses) if clauses else '') +
                 (' ORDER BY bm25(memory_fts),i.updated_at DESC,i.id' if join else
@@ -156,10 +164,13 @@ class StructuredMemory:
 
     def commit(self, db, sid, result):
         """Invoked inside Tulpa's checked, optimistic batch commit transaction."""
+        names = self.projection.source.identity()
+        db.create_function('canonical_name', 1, names.canonical)
         stamp = time.time_ns() // 1_000_000
         for item in result.get('structured', []):
             key = tuple(item[k] for k in ('subject', 'peer', 'category', 'topic'))
-            old = db.execute('SELECT * FROM memory_items WHERE subject=? AND peer=? AND category=? AND topic=?', key).fetchone()
+            old = db.execute('SELECT * FROM memory_items WHERE subject=? AND peer=? AND canonical_name(category)=? AND canonical_name(topic)=?',
+                             (*key[:2],names.canonical(key[2]),names.canonical(key[3]))).fetchone()
             if (old['revision'] if old else 0) != item['expected_revision']:
                 raise ValueError('人物资料已更新，本批稍后重新整理')
             if old and old['valid']:
@@ -304,7 +315,7 @@ class StructuredMemory:
         with self.projection.source.connect() as source:
             message = source.execute("SELECT * FROM messages WHERE id=? AND author_id='miko' AND status='completed'", (message_id,)).fetchone()
         if not message:
-            raise ValueError('只能批注已完成的 Miko 回复')
+            raise ValueError('只能批注已完成的角色回复')
         peer = message['conversation_id']
         with self.projection.connect() as db:
             db.execute('BEGIN IMMEDIATE')

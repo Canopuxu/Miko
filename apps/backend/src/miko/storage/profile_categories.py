@@ -10,6 +10,7 @@ def defaults(subject):
     template = json.loads(Path(__file__).with_name('profile-categories.json').read_text('utf-8'))
     groups = [(group['name'], group['children']) for group in template[subject]]
     return [{'id': subject + '-core' if index == 0 else uuid.uuid4().hex, 'name': name,
+             **({'pinned': True} if index == 0 else {}),
              'children': [{'id': uuid.uuid4().hex, 'name': child} for child in children]}
             for index, (name, children) in enumerate(groups)]
 
@@ -33,7 +34,11 @@ class ProfileCategories:
         with self.chat.connect() as db:
             row = db.execute('SELECT categories FROM profile_library WHERE subject=?', (subject,)).fetchone()
             if row:
-                return json.loads(row[0])
+                categories = json.loads(row[0])
+                for root in categories:
+                    if root['id'] == subject + '-core':
+                        root.setdefault('pinned', True)
+                return categories
             categories = defaults(subject)
             known = set(paths(categories).values())
             # Keep the original categorization readable, without rewriting content.
@@ -54,18 +59,19 @@ class ProfileCategories:
     def save(self, subject, categories):
         before = paths(self.get(subject))
         after = paths(categories)
+        names = self.chat.identity()
         with self.chat.connect() as db:
             # Rename or remove a category without changing any setting's content,
             # author, kind, scope, or activation state. The FTS follows the label.
             for row in db.execute("SELECT * FROM profile_entries WHERE subject=? AND kind IN ('fact','overview')", (subject,)).fetchall():
-                old_id = next((key for key, path in before.items() if path == row['category']), None)
+                old_id = next((key for key, path in before.items() if names.canonical(path) == names.canonical(row['category'])), None)
                 if old_id is None:
                     continue
                 category = after.get(old_id, '')
                 if category == row['category']:
                     continue
                 db.execute('UPDATE profile_entries SET category=? WHERE id=?', (category, row['id']))
-                indexed = ' '.join(sorted(terms(' '.join((row['title'], category, row['keywords'], row['content'])), limit=None)))
+                indexed = ' '.join(sorted(terms(self.chat.identity().canonical(' '.join((row['title'], category, row['keywords'], row['content']))), limit=None)))
                 db.execute('DELETE FROM profile_fts WHERE entry_id=?', (row['id'],))
                 db.execute('INSERT INTO profile_fts VALUES(?,?)', (row['id'], indexed))
             db.execute('UPDATE profile_library SET categories=? WHERE subject=?',

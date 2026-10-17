@@ -81,7 +81,7 @@ class SearchExpansion:
                 if key not in {str(i) for i in range(len(batch))} or key in parsed:raise ValueError('unknown or repeated item id')
                 values=item['expressions']
                 if not isinstance(values,list) or any(not isinstance(text,str) for text in values):raise ValueError('expressions must be strings')
-                parsed[key]=list(dict.fromkeys(text.strip() for text in values if text.strip()))[:5]
+                parsed[key]=list(dict.fromkeys(self.chat.store.identity().canonical(text.strip()) for text in values if text.strip()))[:5]
             if len(parsed)!=len(batch):raise ValueError('missing items')
             async with self.memory.lock:
                 # An edit/delete made while the model was running supersedes that batch.

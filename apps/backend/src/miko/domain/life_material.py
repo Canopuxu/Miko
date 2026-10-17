@@ -100,7 +100,8 @@ def conversation_background(profiles, events, day, query):
 
 def generation_material(profiles, records, goals, day, rhythm=None, memory_events=()):
     shape = rhythm if rhythm is not None else day_rhythm(day)
-    owner_names = {'橙汁', profiles.chat.person_name('owner')}
+    identity = profiles.chat.identity()
+    owner_names = {name for name, subject in identity.aliases.items() if subject == 'owner'}
     rows = [r for r in profiles.list(subject='miko', active=True)
             if r['kind'] in ('overview', 'fact') and not r['account'] and not r['friend']
             and not (r['kind'] == 'overview' and any(name in r['content'] for name in owner_names))]

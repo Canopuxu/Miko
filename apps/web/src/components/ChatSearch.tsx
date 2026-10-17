@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowLeft, ArrowUpRight, LoaderCircle, Search, X } from 'lucide-react';
 import { getJson } from '../api/chat';
 import { views } from './AppShell';
+import { usePersonName } from './RuntimeStatus';
 import '../styles/history.css';
 
 export type HistoryMessage = { id: string; conversation_id: string; conversation_title: string;
@@ -30,6 +31,7 @@ export function ChatSearch({ source, conversationId, onClose, onOpen, navigation
   source: 'web' | 'qq'; conversationId: string | null; onClose: () => void;
   onOpen: (item: HistoryMessage) => void; navigationDisabled?: boolean;
 }) {
+  const personName = usePersonName();
   const [query, setQuery] = useState('');
   const channel = views.find(view => view.id === (source === 'qq' ? 'qq' : 'chat'))!;
   const ChannelIcon = channel.icon;
@@ -95,7 +97,7 @@ export function ChatSearch({ source, conversationId, onClose, onOpen, navigation
         <div ref={panel} className="history-context" aria-label="消息前后文" aria-busy={busy}>
           {context.has_before && <button className="ui-button history-window" disabled={busy} onClick={() => void read(context.messages[0], 16, 0, true)}>查看更早的消息</button>}
           {context.messages.map(item => <article ref={item.id === selected.id ? anchor : undefined} key={item.id} className={item.id === selected.id ? 'history-message selected' : 'history-message'}>
-            <div><strong>{item.author.name}</strong><time>{time(item.created_at)}</time>{item.id === selected.id && <small>选中消息</small>}</div>
+            <div><strong>{personName(item.author.id, item.author.name)}</strong><time>{time(item.created_at)}</time>{item.id === selected.id && <small>选中消息</small>}</div>
             <p className={item.recalled ? 'history-recalled' : ''}><MatchedText text={item.text || '（消息没有文字）'} query={applied?.query || ''}/></p>
           </article>)}
           {context.has_after && <button className="ui-button history-window" disabled={busy} onClick={() => void read(context.messages[context.messages.length - 1], 0, 16, true)}>查看更晚的消息</button>}
@@ -106,7 +108,7 @@ export function ChatSearch({ source, conversationId, onClose, onOpen, navigation
         <div className="history-result-heading" role="status">{busy ? <><LoaderCircle size={15} className="spinning"/>正在查找…</> : results ? `找到 ${results.total} 条消息` : '输入关键词，或选择想查看的日期'}</div>
         <div className="history-results" aria-label="聊天查找结果" aria-busy={busy}>
           {results?.messages.map(item => <button key={item.id} className="history-hit" disabled={busy} onClick={() => void read(item)}>
-            <span className="history-hit-meta"><strong>{item.author.name}</strong><span>{item.conversation_title}</span><time>{time(item.created_at)}</time></span>
+            <span className="history-hit-meta"><strong>{personName(item.author.id, item.author.name)}</strong><span>{item.conversation_title}</span><time>{time(item.created_at)}</time></span>
             <span className="history-hit-text"><MatchedText text={excerpt(item.text, applied?.query || '') || '（消息没有文字）'} query={applied?.query || ''}/></span>
           </button>)}
           {results?.total === 0 && <p className="history-empty">没有找到消息，可以换个词或调整日期、范围。</p>}

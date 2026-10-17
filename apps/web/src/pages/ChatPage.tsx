@@ -3,7 +3,7 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useRef, useState } from 'react';
 import { ArrowUp, NotebookPen, Plus, Search, Square, Trash2, X } from 'lucide-react';
 import { EmptyState, useDiscardGuard } from '../components/ui';
-import { useCharacterName, useRuntime } from '../components/RuntimeStatus';
+import { useCharacterName, useOwnerName, usePersonName, useRuntime } from '../components/RuntimeStatus';
 import { chatEvents, getJson, responseError, type Conversation, type ConversationDetail, type Message } from '../api/chat';
 import { ChatSearch } from '../components/ChatSearch';
 
@@ -13,6 +13,8 @@ const shortTime = (stamp: number) => new Intl.DateTimeFormat('zh-CN', { hour: '2
 
 export function ChatPage() {
   const characterName = useCharacterName();
+  const ownerName = useOwnerName();
+  const personName = usePersonName();
   const navigation = useContext(NavigationContext)!;
   const {status, error:runtimeError} = useRuntime();
   const connected = !!status?.dsh.ready && !runtimeError;
@@ -139,7 +141,7 @@ export function ChatPage() {
     const userId = crypto.randomUUID();
     const stamp = Date.now();
     setMessages(current => [...current,
-      { id: userId, author: { id: 'owner', kind: 'owner', name: '你' }, source: 'web', text,
+      { id: userId, author: { id: 'owner', kind: 'owner', name: ownerName }, source: 'web', text,
         status: 'completed', error: null, created_at: stamp },
       { id: assistantId, author: { id: 'miko', kind: 'miko', name: characterName }, source: 'web', text: '',
         status: 'running', error: null, created_at: stamp },
@@ -209,7 +211,7 @@ export function ChatPage() {
         {connected ? '已连接' : '连接中'}</div>
     </>}>
     <main className="main-panel">
-      <header className="page-header"><h1 title={title ?? '和 Miko 聊聊'}>{title ?? '和 Miko 聊聊'}</h1>
+      <header className="page-header"><h1 title={title ?? `和 ${characterName} 聊聊`}>{title ?? `和 ${characterName} 聊聊`}</h1>
         <div className="header-actions"><button className="ui-button" onClick={()=>setFinding(true)}><Search size={15}/>查找记录</button><button className="ui-button" onClick={()=>navigation.navigate('review',
           {day:new Date().toLocaleDateString('sv-SE'),peer:selected ?? '',reply:undefined})}><NotebookPen size={16}/>回顾与批注</button>
           <span className="model-label">{status?.chat.model ?? '等待模型配置'}</span></div></header>
@@ -218,8 +220,8 @@ export function ChatPage() {
           : messages.length === 0 && <EmptyState title="新对话"/>}
         {!loading && <div className="message-list">{messages.map(message => <article key={message.id}
           id={'message-'+message.id} className={`message ${message.author.kind === 'miko' ? 'assistant' : 'user'} ${navigation.search.get('message')===message.id?'message-highlight':''}`}>
-          <div className="message-avatar">{message.author.kind === 'miko' ? 'm' : message.author.name.slice(0, 1)}</div>
-          <div className="message-content"><div className="message-name">{message.author.name}
+          <div className="message-avatar">{personName(message.author.id, message.author.name).slice(0, 1)}</div>
+          <div className="message-content"><div className="message-name">{personName(message.author.id, message.author.name)}
             <time dateTime={new Date(message.created_at).toISOString()} title={dateTime(message.created_at)}>{shortTime(message.created_at)}</time></div>
             <div className="message-text">{message.text || (message.status === 'running' ? <span className="thinking">正在想…</span> : '')}</div>
             {(message.status === 'cancelled' || message.status === 'error' || message.status === 'interrupted') &&
@@ -231,10 +233,10 @@ export function ChatPage() {
       </section>
       <footer className="composer-area">
         {error && <div role="alert" className="error-notice">{error}<button onClick={() => setError('')} aria-label="关闭提示"><X size={15}/></button></div>}
-        {status && !status.chat.configured && <div className="error-notice">模型尚未配置，配置完成后就可以聊天。</div>}
+        {status && !status.chat.configured && <div className="error-notice">模型尚未配置</div>}
         <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
           <textarea ref={input} value={draft} onChange={event => setDraft(event.target.value)}
-            placeholder="给 Miko 留一句话…" aria-label="消息" rows={3}
+            placeholder={`给 ${characterName} 留一句话…`} aria-label="消息" rows={3}
             onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault(); void send();
             } }} />

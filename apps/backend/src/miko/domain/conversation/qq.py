@@ -107,7 +107,7 @@ class QqService:
                 else 'chatting' if friend['mode'] == 'miko' else 'listening')
             if key in self.storage_faults:
                 friend.update(state='blocked', blocked=1, note=self.storage_faults[key])
-            friends.append(friend)
+            friends.append(self.chat.store.identity().material(friend))
         return {'receiver': receiver, 'friends': friends, 'runs': self.store.runs(), 'faces': FACES,
                 'wait_seconds': self.wait_seconds, 'max_reply_chars': self.max_reply_chars,
                 'character_name': self.chat.store.character_name(), 'owner_name': self.chat.store.person_name('owner')}
@@ -462,7 +462,7 @@ class QqService:
                     self.stickers.used(key[0], bubble['sticker_id'], worker.run_id + ':' + str(i))
             self.store.update_run(worker.run_id, state='sent', receipt_id=receipt_id, error=warning)
             if self.versions.get(key, 0) == worker.version and not (cfg['chat_type'] == 2 and self.store.friend(key)['pending_since'] is not None):
-                self.store.update_friend(key, mode='miko', note=warning or 'Miko 正在接话',
+                self.store.update_friend(key, mode='miko', note=warning or '正在接话',
                     pending_since=None, pending_last=None, due_at=None)
             await self.settle_echoes(key)
         except StaleReply as exc:

@@ -6,7 +6,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
 
 from miko.api.local import local_request
 from miko import __version__
@@ -53,6 +53,10 @@ class FolderInput(BaseModel):
     folder: Literal['data', 'logs']
 
 
+class ExternalLink(BaseModel):
+    url: HttpUrl
+
+
 class QqInput(BaseModel):
     model_config = ConfigDict(extra='forbid', hide_input_in_errors=True)
     account: str
@@ -84,6 +88,12 @@ def settings_router(chat, qq):
         if not value['api_key'].strip():
             old = read(name)
             normalize = model_list_base if name == 'rerank.local.json' else lambda url: url.rstrip('/')
+            draft_key = {'provider.local.json':'provider','qq-provider.local.json':'qq_provider',
+                'life-provider.local.json':'life_provider','memory-provider.local.json':'memory_provider',
+                'embedding.local.json':'embedding_provider','rerank.local.json':'rerank_provider'}[name]
+            pending = read('models-draft.local.json').get(draft_key) or {}
+            if pending.get('api_key') and normalize(pending.get('api_base','')) == normalize(value['api_base']):
+                old = pending
             if (fallback and normalize(fallback.api_base) == normalize(value['api_base'])
                     and (not old.get('api_key') or normalize(old.get('api_base', '')) != normalize(value['api_base']))):
                 old = {'api_base': fallback.api_base, 'api_key': fallback.api_key.get_secret_value()}
@@ -110,7 +120,7 @@ def settings_router(chat, qq):
     @router.get('')
     async def get_settings():
         config = read('qq.local.json')
-        return {'provider': public_provider('provider.local.json'),
+        result = {'provider': public_provider('provider.local.json'),
                 'qq_provider': public_provider('qq-provider.local.json') if read('qq-provider.local.json') else None,
                 'life_provider': public_provider('life-provider.local.json') if read('life-provider.local.json') else None,
                 'memory_provider': public_provider('memory-provider.local.json') if read('memory-provider.local.json') else None,
@@ -123,6 +133,14 @@ def settings_router(chat, qq):
                 'rerank_shared': read('rerank.local.json').get('shared', not bool(read('rerank.local.json').get('api_base'))),
                 'qq': {'account': config.get('account', '') if config.get('enabled', True) else ''},
                 'configured': bool(chat.provider)}
+        draft = read('models-draft.local.json')
+        if draft:
+            result.update(draft)
+            for key in ('provider', 'qq_provider', 'life_provider', 'memory_provider', 'embedding_provider', 'rerank_provider'):
+                if result.get(key):
+                    result[key] = {**result[key], 'has_key': bool(result[key].get('api_key')), 'api_key': ''}
+            result['draft_pending'] = True
+        return result
 
     def public_rerank():
         value = read('rerank.local.json')
@@ -145,6 +163,16 @@ def settings_router(chat, qq):
         except OSError:
             raise HTTPException(400, '文件夹未能打开，请按页面显示的路径手动打开') from None
         return {'message': '文件夹已打开'}
+
+    @router.post('/open-link')
+    async def open_link(body: ExternalLink):
+        if body.url.scheme != 'https':
+            raise HTTPException(400, '请使用 HTTPS 网页链接')
+        try:
+            os.startfile(str(body.url))
+        except OSError:
+            raise HTTPException(400, '未能打开浏览器，请检查系统默认浏览器设置')
+        return {'message': '已在默认浏览器打开'}
 
     @router.post('/models/test')
     async def test_model(body: RerankInput, target: Literal['provider', 'qq', 'life', 'memory', 'embedding', 'rerank'] = 'provider', shared: bool = False):
@@ -204,7 +232,30 @@ def settings_router(chat, qq):
         return {'models': sorted(models.values(), key=lambda row: row['id'].lower())}
 
     @router.put('/models')
-    async def save_models(body: ModelsInput):
+    async def save_models(body: ModelsInput, draft: bool = False):
+        if draft:
+            previous = read('models-draft.local.json')
+            value = body.model_dump()
+            for key, name in [('provider','provider.local.json'),('qq_provider','qq-provider.local.json'),
+                    ('life_provider','life-provider.local.json'),('memory_provider','memory-provider.local.json'),
+                    ('embedding_provider','embedding.local.json'),('rerank_provider','rerank.local.json')]:
+                entry = value.get(key)
+                if not entry or entry['api_key'].strip():
+                    continue
+                normalize = model_list_base if key == 'rerank_provider' else lambda url: url.rstrip('/')
+                for saved in (previous.get(key) or {}, read(name), value['provider']):
+                    if saved.get('api_key') and normalize(saved.get('api_base','')) == normalize(entry['api_base']):
+                        entry['api_key'] = saved['api_key']
+                        break
+            root.mkdir(parents=True, exist_ok=True)
+            write_json(root / 'models-draft.local.json', value)
+            try:
+                await save_models(ModelsInput.model_validate(value), False)
+            except HTTPException as exc:
+                if exc.status_code not in (400,409):
+                    raise
+                return {'state':'waiting' if exc.status_code == 409 else 'draft'}
+            return {'state':'applied'}
         idle()
         if body.use_shared_model:
             body.qq_provider = None
@@ -282,6 +333,7 @@ def settings_router(chat, qq):
             chat.life.provider = task_providers['life']
             chat.life.model = (task_providers['life'].model if task_providers['life'] else body.life_model.strip()) or None
             chat.memory.configure_index()
+            (root / 'models-draft.local.json').unlink(missing_ok=True)
         return {'message': '模型设置已生效；语义索引将在后台更新'}
 
     def qq_config(body):

@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import { Check, ExternalLink, Trash2 } from 'lucide-react';
 import { NavigationContext } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
+import { useCharacterName } from '../components/RuntimeStatus';
 
 type Source = { message_id: string; text: string; recalled: boolean; sent_at: number };
 type Expression = { id: string; situation: string; style: string; surface_form: string; enabled: number; count: number; source: Source | null };
@@ -10,6 +11,7 @@ type Library = { enabled: boolean; expression_count: number; jargon_count: numbe
   library: { expressions_in_use: boolean; checked_expressions: number; expression_threshold: number }; expressions: Expression[]; jargon: Jargon[] };
 
 export function GroupLanguage({ account, friend }: { account: string; friend: string }) {
+  const characterName = useCharacterName();
   const navigation = useContext(NavigationContext);
   const base = `/api/qq/friends/${account}/${friend}/language`;
   const [data, setData] = useState<Library | null>(null);
@@ -63,11 +65,11 @@ export function GroupLanguage({ account, friend }: { account: string; friend: st
       <button className="text-button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '收起' : '查看表达与黑话'}</button></div>
     {error && <p role="alert">{error}</p>}
     {open && data && <div className="language-body">
-      <p className="language-caption">观察开启后的群友原话，句式、用词和玩笑形式保存在这里供查看。聊天时补充当前发言涉及的群内词语释义，Miko 的说话方式沿用自身设定。关闭后保留记录，并停止观察和提供释义。</p>
+      <p className="language-caption">观察开启后的群友原话，句式、用词和玩笑形式保存在这里供查看。聊天时补充当前发言涉及的群内词语释义，{characterName} 的说话方式沿用自身设定。关闭后保留记录，并停止观察和提供释义。</p>
       {data.enabled && <p className="language-caption">已核验 {data.library.checked_expressions} 条表达 · 待整理 {data.buffered_messages} 条消息</p>}
-      {!!data.last_failure && <p role="status">最近一次学习未完成，后续会按原模块规则重试；聊天仍可使用。</p>}
+      {!!data.last_failure && <p role="status">上次学习未完成，稍后自动重试。</p>}
       <h3>表达 · {data.expression_count}</h3>
-      {!data.expressions.length && <p className="language-caption">还没有学到可核验的表达，无需为这里单独准备消息。</p>}
+      {!data.expressions.length && <p className="language-caption">暂无表达记录。</p>}
       {data.expressions.map(item => <article className="language-item" key={item.id}>
         <div className="language-item-heading"><strong>{item.surface_form}</strong><span className="language-item-actions">
           <label><input type="checkbox" checked={!!item.enabled} disabled={busy}

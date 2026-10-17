@@ -1,10 +1,11 @@
-import { useCharacterName } from '../components/RuntimeStatus';
+import { useCharacterName, useOwnerName } from '../components/RuntimeStatus';
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
 import { getJson, responseError } from '../api/chat';
 import { LifeTimeline, goalStatus, type LifeGoal, type LifeEntry, type LifeEvent } from '../components/LifeTimeline';
 import '../styles/life.css';
-import { Plus, RefreshCw, Save, X, Pencil, Trash2, CalendarDays } from 'lucide-react';
+import { Plus, RefreshCw, Save, X, Pencil, Trash2, CalendarDays, SlidersHorizontal } from 'lucide-react';
+import { ExpressionSettingsDialog } from './ProfileTools';
 import { useDiscardGuard } from '../components/ui';
 
 type Entry = LifeEntry;
@@ -18,6 +19,7 @@ const today = () => new Date().toLocaleDateString('sv-SE');
 
 export function LifePage() {
   const characterName = useCharacterName();
+  const ownerName = useOwnerName();
   const [day, setDay] = useState(today);
   const [data, setData] = useState<Listing | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -29,6 +31,7 @@ export function LifePage() {
   const [mode, setMode] = useState<'timeline' | 'day'>('timeline');
   const [goal, setGoal] = useState<LifeGoal | null>(null);
   const [goalDirty, setGoalDirty] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const unsaved = dirty || goalDirty;
   const guard=useDiscardGuard(unsaved,()=>{setEntries(data?.record.entries ?? []);setDirty(false);setGoal(null);setGoalDirty(false);});
 
@@ -38,7 +41,7 @@ export function LifePage() {
       setData(value); setEntries(value.record.entries); setDirty(false); setEditing(null); setError('');
     } catch (e) { setError(String(e)); }
   }
-  useEffect(() => { void load(day); }, [day]);
+  useEffect(() => { if(!unsaved)void load(day); }, [day,characterName,ownerName]);
   useEffect(() => {
     if (!data?.status.generating || unsaved || busy) return;
     const timer = window.setInterval(() => void load(day), 2000);
@@ -129,8 +132,9 @@ export function LifePage() {
 
   return <AppShell view="life" sidebar={sidebar}><main className="main-panel life-panel">
     <header className="page-header"><h1>{mode === 'timeline' ? '生活轨迹' : day === today() ? '今天' : day}</h1>
+      <div className="header-actions"><button className="ui-button" onClick={()=>setPreferencesOpen(true)}><SlidersHorizontal size={15}/>生成偏好</button>
       <button className="life-button" disabled={busy || unsaved || data?.status.generating} onClick={() => void generate()}>
-        {busy || data?.status.generating ? '处理中…' : '推进今天'}</button>
+        {busy || data?.status.generating ? '处理中…' : '推进今天'}</button></div>
     </header>
     {(error || data?.status.error) && <p className="profile-notice life-page-notice" role="alert">{error || data?.status.error}</p>}
     {mode === 'timeline' && data && <LifeTimeline goals={data.goals} events={data.trajectory} onGoal={openGoal} onDay={showDay}/>}
@@ -175,5 +179,6 @@ export function LifePage() {
         {dirty && <button className="life-button" disabled={busy} onClick={() => void load()}>撤销修改</button>}
         <span role="status">{dirty ? '有未保存的修改' : notice}</span></div>
     </div>}
+    {preferencesOpen && <ExpressionSettingsDialog scope="life" onClose={()=>setPreferencesOpen(false)}/>}
     {guard.dialog}</main></AppShell>;
 }

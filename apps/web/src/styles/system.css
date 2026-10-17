@@ -41,7 +41,7 @@ input, textarea, select { accent-color: var(--sage); }
 .secondary-header { margin-bottom: 24px; }.secondary-header h2 { font-size: 12px; font-weight: 500; color: #8b8477; }
 .secondary-header button { display: inline-flex; justify-content: center; align-items: center; padding: 0; line-height: 1; flex-shrink: 0; border-radius: 7px; background: #eeece3; width: 26px; height: 26px; }
 .main-panel { background: var(--page); overflow: hidden; }
-.workspace-frame .page-header { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: start; gap: 20px; flex-shrink: 0; padding: 20px 32px; border-color: var(--line); min-height: 128px; }
+.workspace-frame .page-header { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: start; gap: 20px; flex-shrink: 0; padding: 20px 32px; border-color: var(--line); min-height: 114px; }
 .page-header > :first-child { min-width: 0; }
 .page-header > :last-child { justify-self: end; align-self: start; }
 .page-header h1 { font-weight: 600; letter-spacing: -.4px; color: var(--ink); font-size: 22px; line-height: 1.45; margin: 3px 0 5px; }
@@ -159,7 +159,6 @@ input, textarea, select { accent-color: var(--sage); }
 }
 @media (max-width: 600px) {
   .workspace-frame .page-header { grid-template-columns: minmax(0,1fr); gap: 12px; }
-  .page-header > :first-child { min-height: 2.9em; }
   .page-header > :last-child { justify-self: stretch; }
   .page-header > .header-actions,.page-header > .profile-actions,.page-header > .settings-header-actions { flex-wrap: wrap; justify-content: flex-start; }
 }

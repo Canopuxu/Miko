@@ -102,7 +102,7 @@ def qq_router(service: QqService):
         cfg = service.store.friend(key)
         if not cfg:
             raise HTTPException(404, '找不到这位好友')
-        return {'friend': cfg, 'messages': service.store.messages(key),
+        return {'friend': service.chat.store.identity().material(cfg), 'messages': service.store.messages(key),
                 'runs': service.store.runs(key),
                 'reactions': service.reactions.states(key) if hasattr(service, 'reactions') else []}
 

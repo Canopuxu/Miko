@@ -151,13 +151,10 @@ class ChatService:
         return self.named_prompt(base + '\n\n' + instructions + '\n\n' + json.dumps(reply_context(context), ensure_ascii=False))
 
     def named_prompt(self, text):
-        names = {'Miko': self.store.character_name(), '橙汁': self.store.person_name('owner')}
-        return re.sub(r'(?<![A-Za-z0-9_])Miko(?![A-Za-z0-9_])|橙汁', lambda match: names[match[0]], text)
+        return self.store.identity().display(text)
 
     def canonical_query(self, query):
-        names = {self.store.character_name().casefold(): 'Miko', self.store.person_name('owner').casefold(): '橙汁'}
-        pattern = '|'.join(re.escape(name) for name in sorted(names, key=len, reverse=True))
-        return re.sub(pattern, lambda match: names[match[0].casefold()], query, flags=re.IGNORECASE)
+        return self.store.identity().canonical(query)
 
     async def run(self, turn: Turn):
         status = "error"
@@ -170,10 +167,11 @@ class ChatService:
                     reference = await language.reference(turn.memory_key, turn.qq_records, turn.id)
                     if reference:
                         background += '\n\n' + reference
+                prompts = chat_prompts(self.settings.local_root)[0]
                 turn.system_prompt = '\n\n'.join([
-                    (REPO_ROOT / 'config/defaults' / name).read_text(encoding='utf-8').strip()
-                    for name in ('qq-system-prompt.txt', 'qq-group-context.txt' if group else 'qq-role-context.txt')
-                ] + [background, chat_prompts(self.settings.local_root)[0]['qq'],
+                    prompts['qq_base'],
+                    (REPO_ROOT / 'config/defaults' / ('qq-group-context.txt' if group else 'qq-role-context.txt')).read_text(encoding='utf-8').strip(),
+                ] + [background, prompts['qq'],
                      (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()])
                 if group:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-group-output.txt').read_text(encoding='utf-8').strip()
@@ -181,7 +179,7 @@ class ChatService:
                 previous = [r['content'] for r in self.store.history(turn.conversation_id) if r['role']=='user']
                 if previous and previous[-1]==turn.message: previous=previous[:-1]
                 context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id, previous=previous[-2:])
-                base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
+                base = self.system_prompt if turn.memory_key is None else chat_prompts(self.settings.local_root)[0]['qq_base']
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
                 if context.get('life_entries') or context.get('life_goals'):
                     instructions += '\n' + (REPO_ROOT / 'config/defaults/life-context.txt').read_text(encoding='utf-8').strip()
@@ -255,7 +253,7 @@ class ChatService:
         query = '\n'.join(r['text'] for r in records[-8:][::-1])
         turn = Turn(uuid.uuid4().hex, conversation_id, message,
                     context=[{'role': 'user', 'content': message}],
-                    system_prompt=self.compose_prompt(prompt_path.read_text(encoding='utf-8').strip(), query, (account, friend)) + '\n\n' + output,
+                    system_prompt=self.compose_prompt(chat_prompts(self.settings.local_root)[0]['qq_base'], query, (account, friend)) + '\n\n' + output,
                     json_output=True)
         turn.memory_query = query
         turn.memory_key = (account, friend)
@@ -355,6 +353,7 @@ class ChatService:
                            + [{"role": "user", "content": turn.message}]),
             "stream": True, "max_tokens": 8192 if turn.conversation_id == 'memory' or turn.memory_key is not None else 2048,
         }
+        payload['messages'] = self.store.identity().material(payload['messages'])
         if turn.json_output:
             payload['response_format'] = {'type': 'json_object'}
         if turn.qq_records is not None:
@@ -385,7 +384,7 @@ class ChatService:
                                 segment['content_status'] = 'unavailable'
                     turn.message = render_dialogue(text_input)
                     turn.context = [{'role': 'user', 'content': turn.message}]
-                    payload['messages'] = [payload['messages'][0], *turn.context]
+                    payload['messages'] = self.store.identity().material([payload['messages'][0], *turn.context])
                     turn.warning = '模型接口未接受图片，本轮已自动改用文字处理。可在模型设置中更换支持图片输入的模型。'
                     continue
                 break

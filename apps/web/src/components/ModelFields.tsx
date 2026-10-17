@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, RefreshCw } from 'lucide-react';
 import { responseError } from '../api/chat';
 
@@ -34,10 +34,19 @@ export function useModelCatalog(provider:Provider|null, target:Target, enabled=t
 function ModelPicker({value,change,kind,catalog}:{value:string;change:(value:string)=>void;kind:Kind;catalog:Catalog}){
   const id=useId();
   const [open,setOpen]=useState(false),[search,setSearch]=useState(''),[active,setActive]=useState(-1);
+  const container=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!open)return;
+    const dismiss=(event:PointerEvent)=>{if(!container.current?.contains(event.target as Node))setOpen(false);};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setOpen(false);};
+    document.addEventListener('pointerdown',dismiss,true);
+    document.addEventListener('keydown',escape);
+    return()=>{document.removeEventListener('pointerdown',dismiss,true);document.removeEventListener('keydown',escape);};
+  },[open]);
   const candidates=catalog.models.filter(row=>row.kind===kind);
   const shown=candidates.filter(row=>row.id.toLowerCase().includes(search.toLowerCase()));
   function select(model:string){if(model!==value)change(model);setOpen(false);setActive(-1);}
-  return <div className="settings-model-field" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setOpen(false);}}>
+  return <div ref={container} className="settings-model-field" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))setOpen(false);}}>
     <label htmlFor={id}>{kind==='embedding'?'向量模型':kind==='rerank'?'重排模型':'模型'}</label>
     <div className="settings-model-input"><input id={id} role="combobox" aria-autocomplete="list" aria-expanded={open}
       aria-controls={id+'-options'} aria-activedescendant={open&&active>=0?id+'-option-'+active:undefined}
@@ -57,12 +66,12 @@ function ModelPicker({value,change,kind,catalog}:{value:string;change:(value:str
         aria-selected={row.id===value} className={active===index?'active':''} onMouseDown={event=>event.preventDefault()} onClick={()=>select(row.id)}>{row.id}</button>)}
       {!shown.length&&<p>{catalog.state==='loading'?'正在获取模型…':catalog.state==='ready'?'没有匹配的候选，可直接填写模型名称':'可直接填写模型名称'}</p>}
     </div>}
-    {catalog.state==='ready'&&<small>{candidates.length?`${candidates.length} 个候选 · 可搜索或直接填写`:'未识别到此类模型，可直接填写后测试'}</small>}
+    {catalog.state==='ready'&&<small>{candidates.length?`${candidates.length} 个候选`:'未识别到此类模型，可直接填写后测试'}</small>}
   </div>;
 }
 
-export function ModelFields({value,change,target='provider',kind='chat',catalog,connection=true,inherited=false}:{
-  value:Provider;change:(value:Provider)=>void;target?:Target;kind?:Kind;catalog?:Catalog;connection?:boolean;inherited?:boolean;
+export function ModelFields({value,change,target='provider',kind='chat',catalog,connection=true,inherited=false,testAction}:{
+  value:Provider;change:(value:Provider)=>void;target?:Target;kind?:Kind;catalog?:Catalog;connection?:boolean;inherited?:boolean;testAction?:ReactNode;
 }){
   const ownCatalog=useModelCatalog(value,target,!catalog&&connection);
   const source=catalog??ownCatalog;
@@ -71,9 +80,9 @@ export function ModelFields({value,change,target='provider',kind='chat',catalog,
       <small>{kind==='rerank'?'填写 API 基础地址，程序自动连接对应的筛选接口。':'填写 OpenAI 兼容的 API 基础地址，例如 https://服务商域名/v1。'}</small></label>
       <label>API 密钥<input type="password" autoComplete="new-password" value={value.api_key} placeholder={value.has_key?(inherited?'共用聊天密钥；填写可更换':'已保存，留空保留'):'填写密钥'} onChange={event=>change({...value,api_key:event.target.value})}/></label></>}
     <ModelPicker value={value.model} change={model=>change({...value,model})} kind={kind} catalog={source}/>
-    {connection&&<div className="settings-catalog-status" aria-live="polite">
+    {connection&&<div className="settings-model-toolbar"><div className="settings-catalog-status" aria-live="polite">
       <button type="button" disabled={source.state==='loading'||!value.api_base.trim()||(!value.api_key.trim()&&!value.has_key)} onClick={source.refresh}><RefreshCw size={14} className={source.state==='loading'?'spinning':''}/>刷新模型列表</button>
-      <span className={source.state==='error'?'error':''}>{source.state==='loading'?'正在获取模型列表…':source.state==='error'?source.error:source.state==='ready'?`已获取 ${source.models.length} 个模型，按用途筛选候选`:'填写地址和密钥后自动获取模型'}</span>
-    </div>}
+      {(source.state==='loading'||source.state==='error')&&<span className={source.state==='error'?'error':''}>{source.state==='loading'?'正在获取模型列表…':source.error}</span>}
+    </div>{testAction}</div>}
   </div>;
 }
