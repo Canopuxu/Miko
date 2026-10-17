@@ -48,13 +48,13 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         config = ProviderConfig(api_base=settings.url + "/fake", api_key="fake-private-key", model="fake-model")
         with patch.object(Settings, "load_provider", return_value=config), patch.object(Settings, "load_qq_provider", return_value=None):
             self.service = ChatService(settings, self.store)
-        async def context(query, key=None, conversation_id=None):
+        async def context(query, key=None, conversation_id=None, **kwargs):
             material = self.service.profiles.context(query, key)
             if self.service.life:
                 material['life_entries'] = self.service.life.context(query)
                 material['life_goals'] = self.service.life.goals_context(query)
             return material
-        self.service.memory = SimpleNamespace(context=context, reranker=None)
+        self.service.memory = SimpleNamespace(context=context, reranker=None, local=None)
         app = FastAPI()
         app.include_router(chat_router(self.service))
 
@@ -66,6 +66,13 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
                 return JSONResponse({'error': {'message': 'image_url is not supported; fake-private-key'}}, status_code=400)
             if getattr(self, 'reject_text_fallback', False):
                 return JSONResponse({'error': {'message': 'invalid request; fake-private-key'}}, status_code=400)
+            if getattr(self, 'history_mode', False) and not any(m['role']=='tool' for m in payload['messages']):
+                async def tool_stream():
+                    yield 'data: ' + json.dumps({'id':'fake','object':'chat.completion.chunk','model':'fake-model',
+                        'choices':[{'index':0,'delta':{'tool_calls':[{'index':0,'id':'history1','type':'function',
+                        'function':{'name':'search_messages','arguments':'{"query":"音乐会"}'}}]},
+                        'finish_reason':'tool_calls'}]}) + '\n\ndata: [DONE]\n\n'
+                return StreamingResponse(tool_stream(), media_type='text/event-stream')
             message = payload["messages"][-1]["content"]
             if message == "fail":
                 return JSONResponse({"error": "fake-private-key"}, status_code=503)
@@ -142,6 +149,23 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertNotIn("tools", self.requests[-1])
         self.assertFalse(self.service.turns)
+
+    async def test_history_tool_roundtrip_through_real_runtime(self):
+        from miko.adapters.memory.service import Memory
+        self.history_mode = True
+        memory = Memory(self.service)
+        self.service.memory = memory
+        self.store.begin_turn('history-web', 'history-old', '音乐会后来取消了')
+        self.store.finish('history-old', '好，那就在家休息', 'completed', None)
+        try:
+            result = await self.collect('之前的音乐会还去吗', 'history-web')
+            self.assertEqual(result[-1]['status'], 'completed', result)
+            self.assertEqual(result[-1]['text'], '你好，Miko')
+            self.assertEqual(len(self.requests), 2)
+            read = next(m for m in self.requests[-1]['messages'] if m['role']=='tool')
+            self.assertIn('音乐会后来取消了', read['content'])
+        finally:
+            await memory.close()
 
     async def test_complete_stream_without_done_and_real_truncation(self):
         normal=await self.collect('no-marker')
@@ -292,7 +316,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_image_rejection_retries_text_once_with_warning(self):
         self.reject_images = True
-        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+        records = [{'author': {'id': 'qq:456', 'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
                     'text': '[图片]', 'segments': [{'type': 'image', 'content_status': 'attached'}], '_image_inputs': [
                         {'type': 'text', 'text': '消息 42 · 图片 1'},
                         {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,aW1hZ2U='}}]}]
@@ -313,7 +337,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejected_text_fallback_stops_after_two_requests(self):
         self.reject_images = self.reject_text_fallback = True
-        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+        records = [{'author': {'id': 'qq:456', 'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
                     'text': '[图片]', '_image_inputs': [
                         {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,aW1hZ2U='}}]}]
         turn = self.service.begin_qq('qq:123:456', records)

@@ -99,6 +99,7 @@ DSH SDK 与 Windows runtime 均使用官方 PyPI 发行版 `0.1.5rc1`，与上�
 ## 关系记忆与语义检索复用
 
 - [Tulpa](https://github.com/fumingyang2004/Tulpa)：MIT，本地固定基线 `7b603d32bc72cab082a3b39aa52658b64bd506ff` 的 `chatlocal/tulpa.py`，复用收集、分批整理、修正、证据校验、历史与后台工作器；仅将工作器的旧全局配置检查接到 Miko。页面沿用原记忆面板的功能组织，移植到统一 React 页面。
+- 同时复用原文搜索、邻近上下文、会话分页与消息读取模块，适配 Miko 数据和聊天范围。
 - [memU](https://github.com/NevaMind-AI/memU)：Apache-2.0，固定源码 `dc7bda82b1f2a6429d9d1531ebdfd08d71e4e2b1`（0.11.0-beta.3），完整未修改 Python 包保存于 `packages/upstream/memu/`，实际调用 MemoryService、SQLite 与 Embedding 检索；未启用其宿主插件。
 - [jieba](https://github.com/fxsjy/jieba)：MIT，0.42.1，用于 Tulpa 的中文分词。
 

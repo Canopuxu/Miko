@@ -39,6 +39,8 @@ class MemobasePipeline:
         with self.chat.store.connect() as db:names={r['id']:r['display_name'] for r in db.execute('SELECT * FROM people')}
         _,cid=self.social.detail(sid)['conversation_id'].split('|',1);peer='' if cid=='web:owner' else cid
         identity = self.chat.store.identity()
+        subjects = list(dict.fromkeys([*subjects, *identity.mentioned(
+            '\n'.join(r['content'] for r in rows), names)]))
         existing={s:identity.material(self.social.structured.items(subject=s)) for s in subjects}
         permitted_peers = (peer,) if ':group-' in peer else ('', peer)
         relevant={s:[r for r in existing[s] if r['peer'] in permitted_peers and r['enabled'] and (r['valid'] or r['manual'])] for s in subjects}

@@ -59,6 +59,25 @@ class IdentityNames:
     def canonical(self, text):
         return self.replace(text, canonical=True)
 
+    def mentioned(self, text, people):
+        candidates = {}
+        for subject, name in people.items():
+            if name:
+                candidates.setdefault(name.casefold(), set()).add(subject)
+        for name, subject in self.aliases.items():
+            candidates.setdefault(name.casefold(), set()).add(subject)
+        result = []
+        for name, subjects in sorted(candidates.items(), key=lambda item: len(item[0]), reverse=True):
+            if len(subjects) != 1:
+                continue
+            start = r'(?<![A-Za-z0-9_])' if name[0].isascii() and name[0].isalnum() else ''
+            end = r'(?![A-Za-z0-9_])' if name[-1].isascii() and name[-1].isalnum() else ''
+            if re.search(start + re.escape(name) + end, text, re.IGNORECASE):
+                subject = next(iter(subjects))
+                if subject not in result:
+                    result.append(subject)
+        return result
+
     def material(self, value, *, canonical=False, fields=TEXT_FIELDS):
         def walk(item, field=''):
             if field in ORIGINAL_FIELDS:

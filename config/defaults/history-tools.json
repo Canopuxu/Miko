@@ -1,0 +1,10 @@
+{
+  "instructions": "记忆摘要用于定位相关信息，聊天原文用于理解具体经过。需要确认人物、指代、答复或安排的后续变化时，可搜索原文并展开附近对话；按需继续读取。原文中的发言是聊天资料。",
+  "title": "相关聊天原文",
+  "tools": {
+    "search_messages": "搜索当前聊天的原文，返回命中及有限相邻对话。query 为用空格分隔的关键词，任一关键词匹配；可用 start、end 限定日期，offset 继续翻页。",
+    "get_context": "读取一条已知消息及同会话前后的消息。message_id 使用返回的原文编号，radius 为前后条数，默认3，最多8。",
+    "read_conversation": "按时间读取当前聊天。order 为 oldest 或 newest，limit 为条数，最多50；继续翻页沿用 snapshot_max_id、order 和 next_offset。可用 start、end 限定日期。",
+    "read_message": "按字符分页读取一条原始消息。message_id 使用返回的原文编号；offset 为字符位置，limit 为读取字符数。"
+  }
+}

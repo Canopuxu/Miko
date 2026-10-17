@@ -331,7 +331,7 @@ def render_dialogue(request):
     return '\n\n'.join(blocks)
 
 
-async def compose_qq_context(chat, records, key):
+async def compose_qq_context(chat, records, key, history_tools=None):
     contacts=[chat.canonical_query(r['text']) for r in records if r['author']['kind']=='contact']
     pending = pending_contacts(records)
     query='\n'.join(r['text'] for r in pending) if pending else records[-1]['text']
@@ -343,6 +343,10 @@ async def compose_qq_context(chat, records, key):
     context=await chat.memory.context(query,key,previous=previous,participants=participants,speaker=speaker,raw=True)
     core,selected,ranked=await select(chat.memory.reranker,query,context,local=chat.memory.local)
     result = render(context,core,selected)
+    if history_tools:
+        evidence = history_tools.seed(selected_context(context, selected), query)
+        if evidence:
+            result += '\n\n' + history_tools.contract['title'] + '：\n' + json.dumps(evidence, ensure_ascii=False)
     if context.get('owner_feedback'):
         from miko.settings import REPO_ROOT
         result += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()

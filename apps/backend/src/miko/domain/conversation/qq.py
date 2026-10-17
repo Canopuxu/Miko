@@ -415,7 +415,8 @@ class QqService:
                     raise ValueError(worker.turn.error or '本轮未生成可发送的回复')
                 try:
                     bubbles = parse_bubbles(worker.turn.text.strip(), records, candidates, self.max_reply_chars,
-                        group=cfg['chat_type'] == 2, reactions=reactions, reaction_targets=reaction_targets)
+                        group=cfg['chat_type'] == 2, reactions=reactions, reaction_targets=reaction_targets,
+                        quote_records=worker.turn.history_tools.quote_records() if getattr(worker.turn, 'history_tools', None) else ())
                     break
                 except ValueError:
                     if attempt == 3:

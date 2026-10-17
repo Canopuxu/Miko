@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/fumingyang2004/Tulpa",
+  "commit": "7b603d32bc72cab082a3b39aa52658b64bd506ff",
+  "license": "MIT",
+  "sources": {
+    "chatlocal/agent_tools.py": "6ab219e152ec5a7ce82c26b5b1e3f8736d2930aa8020eb8fb8e89288536438e9",
+    "chatlocal/store.py": "a778456abb25e4148c300388fa1f78dac1dde7d9f2ad5b4611df15164de867c7",
+    "chatlocal/mcp_tools.py": "1a63604e6b41dd96d655d5dc0eb0cc8114800ea6d9567a92ab4e43661501687b"
+  },
+  "adaptation": [
+    "Selected ChatTools search/context/conversation/validation methods and Store.context; removed unrelated tools and investigation notes.",
+    "Miko supplies live-message views, names, admission budgets, native QQ ID mapping and OpenAI tool-call transport.",
+    "read_message pagination follows the MCP handler; FTS reuses the existing message projection with Tulpa tokenization."
+  ]
+}

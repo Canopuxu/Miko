@@ -5,7 +5,7 @@ export type Message = { id: string; author: Author; source: 'web' | 'qq'; text: 
 export type Conversation = { id: string; title: string; source: string;
   created_at: number; updated_at: number; preview: string | null };
 export type ConversationDetail = Omit<Conversation, 'preview'> & { messages: Message[]; active_turn_id: string | null };
-export type ChatEvent = { type: string; text?: string; status?: Message['status']; error?: string;
+export type ChatEvent = { type: string; text?: string; status?: Message['status']; error?: string; warning?: string;
   turn_id?: string; conversation_id?: string; user_message_id?: string };
 
 export async function responseError(response: Response) {

@@ -6,12 +6,20 @@ optimistic revisions and history remain implemented by the vendored Tulpa.
 import asyncio
 import json
 import threading
+from contextlib import contextmanager
 
 from miko.storage.chat import ChatStore
 from miko.adapters.memory.tulpa_upstream.tulpa import Tulpa, MemoryWorker, initialize, collect
 
 
 class Projection(ChatStore):
+    @contextmanager
+    def connect(self):
+        from .tulpa_upstream.store import tokens
+        with super().connect() as db:
+            db.create_function('miko_tokens', 1, tokens)
+            yield db
+
     def __init__(self, path, source, structured=False):
         self.path = path
         self.source = source
@@ -30,6 +38,22 @@ class Projection(ChatStore):
               CREATE TABLE IF NOT EXISTS projection_cursor(id INTEGER PRIMARY KEY, sequence INTEGER NOT NULL);
             ''')
             initialize(db)
+            indexed = db.execute("SELECT 1 FROM sqlite_master WHERE name='message_fts'").fetchone()
+            db.executescript('''
+              CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(terms);
+              CREATE TRIGGER IF NOT EXISTS raw_search_insert AFTER INSERT ON messages BEGIN
+                INSERT INTO message_fts(rowid,terms) VALUES(NEW.id,miko_tokens(NEW.content));
+              END;
+              CREATE TRIGGER IF NOT EXISTS raw_search_update AFTER UPDATE OF content ON messages BEGIN
+                DELETE FROM message_fts WHERE rowid=OLD.id;
+                INSERT INTO message_fts(rowid,terms) VALUES(NEW.id,miko_tokens(NEW.content));
+              END;
+              CREATE TRIGGER IF NOT EXISTS raw_search_delete AFTER DELETE ON messages BEGIN
+                DELETE FROM message_fts WHERE rowid=OLD.id;
+              END;
+            ''')
+            if not indexed:
+                db.execute('INSERT INTO message_fts(rowid,terms) SELECT id,miko_tokens(content) FROM messages')
             first = db.execute('SELECT 1 FROM projection_cursor').fetchone() is None
         self.sync(initial=first)
 

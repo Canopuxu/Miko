@@ -84,6 +84,7 @@ class Turn:
     qq_input: dict | None = None
     warning: str | None = None
     provider_override: ProviderConfig | None = None
+    history_tools: object | None = None
 
     def close_runtime(self):
         with self.lifecycle:
@@ -104,7 +105,7 @@ class ChatService:
         self.turns: dict[str, Turn] = {}
         self.memory = None
         self.life = None
-        # SDK carrier includes coding tools by default. Chat has no tool calls in this stage.
+        # Disable the SDK's coding tools; Miko handles its scoped history tools.
         self.patch = settings.local_root / "runtime/dsh/chat.patch.json"
         self.patch.parent.mkdir(parents=True, exist_ok=True)
         self.patch.write_text(json.dumps([
@@ -159,8 +160,13 @@ class ChatService:
     async def run(self, turn: Turn):
         status = "error"
         try:
+            if (turn.conversation_id != 'memory' and self.memory and hasattr(self.memory, 'social')
+                    and self.memory.social.control()['enabled']):
+                from miko.adapters.memory.history import HistoryTools
+                await self.memory.sync()
+                turn.history_tools = HistoryTools(self.memory, turn.conversation_id)
             if turn.qq_records is not None:
-                background = await compose_qq_context(self, turn.qq_records, turn.memory_key)
+                background = await compose_qq_context(self, turn.qq_records, turn.memory_key, turn.history_tools)
                 group = turn.memory_key[1].startswith('group-')
                 language = getattr(self, 'qq_language', None)
                 if group and language:
@@ -188,6 +194,12 @@ class ChatService:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/feedback-context.txt').read_text(encoding='utf-8').strip()
                 if turn.memory_key:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
+                if turn.history_tools:
+                    evidence = turn.history_tools.seed(context, turn.memory_query)
+                    if evidence:
+                        turn.system_prompt += '\n\n' + turn.history_tools.contract['title'] + '：\n' + json.dumps(evidence, ensure_ascii=False)
+            if turn.history_tools:
+                turn.system_prompt = (turn.system_prompt or self.system_prompt) + '\n\n' + turn.history_tools.contract['instructions']
             turn.system_prompt = self.named_prompt(turn.system_prompt or self.system_prompt)
             turn.runtime = DshRuntime(
                 self.settings, base_url=f"{self.settings.url}/_runtime/llm/{turn.id}",
@@ -232,7 +244,7 @@ class ChatService:
             self.turns.pop(turn.id, None)
             turn.status = status
             turn.events.put_nowait({"type": "done", "status": status,
-                                    "text": turn.text, "error": turn.error})
+                                    "text": turn.text, "error": turn.error, "warning": turn.warning})
 
     def begin_qq(self, conversation_id: str, records: list[dict], stickers: list[dict] | None = None) -> Turn:
         prompt_path = REPO_ROOT / 'config/defaults/qq-system-prompt.txt'
@@ -364,20 +376,39 @@ class ChatService:
         if turn.conversation_id == 'memory':
             payload['thinking'] = {'type': 'disabled'}
             payload['stream_options'] = {'include_usage': True}
+        if turn.history_tools:
+            payload['tools'] = turn.history_tools.schemas_for_model
+            payload['tool_choice'] = 'auto'
+            payload['stream_options'] = {'include_usage': True}
         client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
-        try:
-            for attempt in range(2):
+        async def request(payload):
+            removed_images, removed_tools = False, False
+            for attempt in range(3):
                 if turn.cancelled:
                     raise asyncio.CancelledError
                 turn.provider_task = asyncio.create_task(client.send(client.build_request(
                     "POST", provider.api_base + "/chat/completions", json=payload,
                     headers={"Authorization": "Bearer " + provider.api_key.get_secret_value()},
                 ), stream=True))
-                remote = await turn.provider_task
+                try:
+                    remote = await turn.provider_task
+                finally:
+                    turn.provider_task = None
                 has_images = any(isinstance(message.get('content'), list) and
                     any(part.get('type') == 'image_url' for part in message['content'])
                     for message in payload['messages'])
-                if attempt == 0 and turn.qq_input is not None and has_images and remote.status_code in (400, 415, 422):
+                rejected_tools = False
+                if payload.get('tools') and remote.status_code in (400, 415, 422):
+                    body = (await remote.aread()).decode('utf-8', errors='replace').lower()
+                    rejected_tools = any(word in body for word in ('tool', 'function')) or not has_images
+                if not removed_tools and rejected_tools:
+                    await remote.aclose()
+                    payload.pop('tools', None)
+                    payload.pop('tool_choice', None)
+                    removed_tools = True
+                    turn.warning = '当前模型接口未接受原文回查工具，本轮使用已附带的原文回复。'
+                    continue
+                if not removed_images and turn.qq_input is not None and has_images and remote.status_code in (400, 415, 422):
                     await remote.aclose()
                     text_input = deepcopy(turn.qq_input)
                     for record in text_input['chat_records']:
@@ -386,10 +417,25 @@ class ChatService:
                                 segment['content_status'] = 'unavailable'
                     turn.message = render_dialogue(text_input)
                     turn.context = [{'role': 'user', 'content': turn.message}]
-                    payload['messages'] = self.store.identity().material([payload['messages'][0], *turn.context])
-                    turn.warning = '模型接口未接受图片，本轮已自动改用文字处理。可在模型设置中更换支持图片输入的模型。'
+                    # Preserve already-read tool results if a later request is
+                    # the first one rejected for image input.
+                    payload['messages'] = self.store.identity().material([
+                        {**message, 'content': turn.message} if isinstance(message.get('content'), list)
+                        else message for message in payload['messages']])
+                    removed_images = True
+                    warning = '模型接口未接受图片，本轮已自动改用文字处理。可在模型设置中更换支持图片输入的模型。'
+                    turn.warning = (turn.warning + '\n' if turn.warning else '') + warning
                     continue
                 break
+            if remote.status_code != 200:
+                turn.error = f"模型接口返回 HTTP {remote.status_code}，请检查模型配置或稍后重试"
+                if removed_images:
+                    turn.error = '图片请求被拒，改用文字后仍失败：' + turn.error
+                await remote.aclose()
+                raise HTTPException(502, 'Provider request failed')
+            return remote
+        try:
+            remote = await request(payload)
         except asyncio.CancelledError:
             await client.aclose()
             raise HTTPException(409, "Turn cancelled") from None
@@ -397,21 +443,19 @@ class ChatService:
             await client.aclose()
             turn.error = "无法连接模型接口，请稍后重试"
             raise HTTPException(502, "Provider connection failed") from None
-        finally:
-            turn.provider_task = None
-        if remote.status_code != 200:
-            turn.error = f"模型接口返回 HTTP {remote.status_code}，请检查模型配置或稍后重试"
-            if turn.warning:
-                turn.error = '图片请求被拒，改用文字后仍失败：' + turn.error
-            await remote.aclose()
+        except HTTPException:
             await client.aclose()
-            raise HTTPException(502, "Provider request failed")
+            raise
         turn.remote = remote
 
         async def stream():
             finished, done = False, False
             try:
-                async for line in remote.aiter_lines():
+                lines = remote.aiter_lines()
+                if turn.history_tools:
+                    from miko.domain.conversation.history import HistoryCompletion
+                    lines = HistoryCompletion(self, turn, payload, request).lines(remote)
+                async for line in lines:
                     if turn.cancelled:
                         break
                     if line.startswith('data:') and line[5:].strip() == '[DONE]':
@@ -439,10 +483,12 @@ class ChatService:
                         yield b'data: [DONE]\n\n'
                     else:
                         turn.error = '模型输出未完整结束，请重试'
-            except (httpx.HTTPError, ValueError):
+            except (httpx.HTTPError, ValueError, HTTPException):
                 if not turn.cancelled:
-                    turn.error = "模型输出中断，请重试"
+                    turn.error = turn.error or "模型输出中断，请重试"
             finally:
+                if turn.remote is not None and turn.remote is not remote:
+                    await turn.remote.aclose()
                 await remote.aclose()
                 await client.aclose()
                 turn.remote = None

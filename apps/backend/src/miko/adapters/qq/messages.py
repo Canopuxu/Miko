@@ -77,14 +77,14 @@ def model_message(payload):
     return [{k: v for k, v in item.items() if k != 'ref'} for item in payload.get('segments', [])]
 
 
-def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False, reactions=(), reaction_targets=()):
+def parse_bubbles(raw, records, stickers, max_chars=100, *, group=False, reactions=(), reaction_targets=(), quote_records=()):
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {'bubbles'}:
         raise ValueError('回复需要 bubbles JSON 对象')
     bubbles = value['bubbles']
     if not isinstance(bubbles, list) or not 0 <= len(bubbles) <= 3:
         raise ValueError('一次回复最多 3 个语义气泡，无需回复时使用空数组')
-    quotes = {r['message_id'] for r in records if 'message_id' in r}
+    quotes = {r['message_id'] for r in (*records, *quote_records) if 'message_id' in r}
     faces = {face['face_id'] for face in FACES}
     assets = {s['sticker_id'] for s in stickers}
     total = 0

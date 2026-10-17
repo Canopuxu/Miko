@@ -27,6 +27,7 @@ export function ChatPage() {
   const [observedTurn, setObservedTurn] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [deleting, setDeleting] = useState<Conversation | null>(null);
   const [removing, setRemoving] = useState(false);
   const [finding, setFinding] = useState(false);
@@ -146,7 +147,7 @@ export function ChatPage() {
       { id: assistantId, author: { id: 'miko', kind: 'miko', name: characterName }, source: 'web', text: '',
         status: 'running', error: null, created_at: stamp },
     ]);
-    setDraft(''); setError(''); setBusy(true); setStopping(false);
+    setDraft(''); setError(''); setWarning(''); setBusy(true); setStopping(false);
     turn.current = null; cancelRequested.current = false;
     controller.current = new AbortController();
     let finished = false;
@@ -163,6 +164,7 @@ export function ChatPage() {
             ? { ...message, text: message.text + (event.text ?? '') } : message));
         } else if (event.type === 'done') {
           finished = true;
+          setWarning(event.warning ?? '');
           setMessages(current => current.map(message => message.id === assistantId
             ? { ...message, text: event.text ?? message.text, status: event.status!, error: event.error ?? null } : message));
           if (event.status === 'error') setError(event.error ?? '生成失败，请重试');
@@ -189,7 +191,7 @@ export function ChatPage() {
   function newConversation() {
     if (generating || loading) return;
     conversation.current = null; turn.current = null; setSelected(null); remember(null);
-    setMessages([]); setDraft(''); setError(''); input.current?.focus();
+    setMessages([]); setDraft(''); setError(''); setWarning(''); input.current?.focus();
   }
 
   const enabled = connected && status?.chat.configured && !loading;
@@ -233,6 +235,7 @@ export function ChatPage() {
       </section>
       <footer className="composer-area">
         {error && <div role="alert" className="error-notice">{error}<button onClick={() => setError('')} aria-label="关闭提示"><X size={15}/></button></div>}
+        {warning && <div role="status" className="error-notice">{warning}<button onClick={() => setWarning('')} aria-label="关闭提示"><X size={15}/></button></div>}
         {status && !status.chat.configured && <div className="error-notice">模型尚未配置</div>}
         <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
           <textarea ref={input} value={draft} onChange={event => setDraft(event.target.value)}
