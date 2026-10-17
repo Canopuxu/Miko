@@ -74,6 +74,15 @@ def main():
     for path in site.glob('*.pth'):
         path.unlink()
     shutil.rmtree(site / 'bin', ignore_errors=True)
+    # Runtime never enables Paddle/POS/keyword analysis or AVIF/font rendering.
+    # Keep the tokenizer dictionary, supported image codecs and numerical runtime.
+    for relative in ('jieba/lac_small', 'jieba/posseg', 'jieba/analyse'):
+        shutil.rmtree(site / relative, ignore_errors=True)
+    for path in sorted((site / 'numpy').rglob('tests'), reverse=True):
+        shutil.rmtree(path)
+    for pattern in ('_avif.*', '_imagingft.*'):
+        for path in (site / 'PIL').glob(pattern):
+            path.unlink()
 
     # Export real desktop dependency provenance and retain the wheel license files.
     metadata = '''import importlib.metadata as m,json
@@ -95,7 +104,7 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
     Image.open(REPO / 'config/defaults/qq-avatar.png').convert('RGBA').save(icon, sizes=[(16,16),(32,32),(48,48),(256,256)])
     shutil.copyfile(icon, app / 'Miko.ico')
     compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-    run([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/reference:System.Windows.Forms.dll',
+    run([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
          '/win32icon:' + str(icon), '/out:' + str(output / 'Miko.exe'), REPO / 'scripts/desktop/Launcher.cs'])
     # Release identity changes whenever the application files change, including uncommitted builds.
     digest = hashlib.sha256()
@@ -112,7 +121,15 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
         'python_archive_sha256': python_hash, 'workbench': False}
     (app / 'portable.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     inventory = sorted(p.relative_to(app).as_posix() for p in app.rglob('*') if p.is_file())
+    inventory.extend(['portable-files.txt', 'portable-files.sha256'])
+    inventory.sort()
     (app / 'portable-files.txt').write_text('\n'.join(inventory) + '\n', encoding='utf-8')
+    checksums = []
+    for path in sorted(app.rglob('*')):
+        if path.is_file():
+            with path.open('rb') as stream:
+                checksums.append(hashlib.file_digest(stream, 'sha256').hexdigest() + '\t' + path.relative_to(app).as_posix())
+    (app / 'portable-files.sha256').write_text('\n'.join(checksums) + '\n', encoding='utf-8')
     # MikoLocal is deliberately absent: extracting a newer archive cannot replace user data.
     zip_path = output.parent / (output.name + '.zip')
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
@@ -120,6 +137,9 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
             if path.is_file() and path.relative_to(output).parts[0] != 'MikoLocal':
                 bundle.write(path, Path('Miko') / path.relative_to(output))
     total = sum(p.stat().st_size for p in output.rglob('*') if p.is_file())
+    with zip_path.open('rb') as stream:
+        zip_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
+    zip_path.with_suffix('.zip.sha256').write_text(zip_hash + '  ' + zip_path.name + '\n', encoding='ascii')
     print(json.dumps({'folder': str(output), 'zip': str(zip_path), 'unpacked_bytes': total,
         'zip_bytes': zip_path.stat().st_size, **manifest}, ensure_ascii=False))
 

@@ -40,14 +40,19 @@ def recorded_process(settings: Settings) -> tuple[dict, psutil.Process] | None:
                 or Path(process.exe()).resolve() != expected_python.resolve()
                 or "miko.server" not in command
                 or str(settings.local_root) not in command):
-            raise RuntimeError("Recorded PID belongs to another process; refusing to stop it")
+            # Migration and PID reuse can leave an unrelated live process here.
+            # Forget the record; never send that process a control request or signal.
+            settings.process_file.unlink(missing_ok=True)
+            return None
         return record, process
-    except psutil.NoSuchProcess:
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         settings.process_file.unlink(missing_ok=True)
         return None
 
 
 def start(settings: Settings) -> None:
+    from miko.restore import recover_interrupted_restore
+    recover_interrupted_restore(settings)
     previous = recorded_process(settings)
     if previous:
         record, _ = previous

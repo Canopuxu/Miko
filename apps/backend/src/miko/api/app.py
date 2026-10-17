@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import secrets
 from typing import Callable
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +17,7 @@ from miko.api.life import life_router
 from miko.api.settings import settings_router
 from miko.api.backups import backups_router
 from miko.api.history import history_router
+from miko.api.local import local_request
 from miko.api.qq_avatar import qq_avatar_router
 from miko.domain.life import Life
 from miko.adapters.memory.service import Memory
@@ -53,7 +54,8 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
             await chat.memory.close()
             await asyncio.to_thread(runtime.close)
 
-    app = FastAPI(title="Miko", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Miko", version=__version__, lifespan=lifespan,
+                  dependencies=[Depends(local_request)])
 
     @app.get("/health")
     async def health():

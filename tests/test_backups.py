@@ -2,6 +2,8 @@ from contextlib import closing
 import io
 import json
 from pathlib import Path
+import os
+import psutil
 import sqlite3
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -13,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from miko.api.backups import backups_router
-from miko.restore import restore
+from miko.restore import restore, recover_interrupted_restore, restore_status
 from miko.settings import Settings, write_json
 from miko.storage.backups import apply_backup, archive_path, backup_list, create_backup, inspect_backup
 
@@ -175,10 +177,28 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(client.post('/api/settings/backups/restore', json=body).status_code, 409)
             self.qq.workers.clear()
             (self.root / 'logs').mkdir()
-            with patch('miko.api.backups.subprocess.Popen') as process:
+            with patch('miko.api.backups.subprocess.Popen', return_value=SimpleNamespace(pid=os.getpid())) as process:
                 self.assertEqual(client.post('/api/settings/backups/restore', json=body).status_code, 200)
                 process.assert_called_once()
             self.assertEqual(client.get('/api/settings/backups/restore-status').json()['state'], 'starting')
+
+    def test_interrupted_restore_rolls_back_partial_data_before_startup(self):
+        safety = create_backup(self.root, reason='before-restore')
+        self.db.execute("UPDATE messages SET text='部分恢复的数据'"); self.db.commit(); self.db.close()
+        write_json(self.root / 'runtime/restore-status.json', dict(state='restoring', backup_id=safety['id'],
+                   pid=os.getpid(), created=psutil.Process().create_time() - 100))
+        self.assertEqual(restore_status(self.root)['state'], 'interrupted')
+        with patch('miko.restore.stop'):
+            recover_interrupted_restore(Settings(self.root, 7870))
+        self.assertEqual(self.value(self.root), '待备份的聊天')
+        self.assertEqual(restore_status(self.root)['state'], 'error')
+        self.assertTrue(archive_path(self.root, safety['id']).is_file())
+
+    def test_interrupted_restore_before_apply_unlocks_without_changing_data(self):
+        write_json(self.root / 'runtime/restore-status.json', {'state': 'starting'})
+        recover_interrupted_restore(Settings(self.root, 7870))
+        self.assertEqual(self.value(self.root), '待备份的聊天')
+        self.assertEqual(restore_status(self.root)['state'], 'error')
 
 
 if __name__ == '__main__':

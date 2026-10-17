@@ -1,12 +1,16 @@
 import importlib.util
 from contextlib import closing
 import json
+import os
+import psutil
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
 from miko.settings import write_json
+from miko.settings import Settings
+from miko.cli import recorded_process
 from miko.storage.backups import backup_list, relocate_settings
 
 spec = importlib.util.spec_from_file_location('miko_desktop', Path(__file__).parents[1] / 'scripts/desktop.py')
@@ -15,6 +19,16 @@ spec.loader.exec_module(desktop)
 
 
 class DesktopDataTests(unittest.TestCase):
+    def test_moved_pid_record_never_adopts_an_unrelated_process(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            settings = Settings(root, 7870)
+            settings.process_file.parent.mkdir(parents=True)
+            write_json(settings.process_file, {'pid': os.getpid(), 'created': psutil.Process().create_time()})
+            self.assertIsNone(recorded_process(settings))
+            self.assertFalse(settings.process_file.exists())
+            self.assertTrue(psutil.pid_exists(os.getpid()))
+
     def test_update_backs_up_existing_data_before_opening_it(self):
         with TemporaryDirectory() as folder:
             root = Path(folder) / 'MikoLocal'

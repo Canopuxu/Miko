@@ -43,7 +43,7 @@ export function DataBackups() {
           sessionStorage.removeItem('miko-restoring');
           sessionStorage.setItem('miko-restore-result', status.message || '数据已恢复');
           window.location.assign('/?view=settings&section=data');
-        } else if (status.state === 'error' || status.state === 'idle') {
+        } else if (status.state === 'error' || status.state === 'idle' || status.state === 'interrupted') {
           sessionStorage.removeItem('miko-restoring'); setRestoring(false);
           setError(status.message || '恢复未开始，请重新选择文件'); void load();
         } else { setNotice(status.message || '正在恢复数据…'); }

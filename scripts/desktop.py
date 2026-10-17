@@ -14,11 +14,38 @@ import sys
 import threading
 import time
 import urllib.request
+from urllib.parse import urlsplit
 import winreg
 
-from miko.cli import recorded_process, request, start, stop
-from miko.settings import REPO_ROOT, Settings, write_json
-from miko.storage.backups import create_backup
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_backend():
+    global recorded_process, request, start, stop, Settings, write_json, create_backup
+    from miko.cli import recorded_process, request, start, stop
+    from miko.settings import Settings, write_json
+    from miko.storage.backups import create_backup
+
+
+def progress(root, text):
+    (root / 'runtime').mkdir(parents=True, exist_ok=True)
+    (root / 'runtime/desktop-startup.txt').write_text(text, encoding='utf-8')
+
+
+def remove_retired_files(root):
+    current = REPO_ROOT / 'portable-files.txt'
+    previous = root / 'runtime/desktop-files.txt'
+    if not current.exists() or not previous.exists():
+        return
+    keep = set(current.read_text('utf-8').splitlines())
+    for relative in previous.read_text('utf-8').splitlines():
+        if not relative or relative in keep:
+            continue
+        target = (REPO_ROOT / relative).resolve()
+        if not target.is_relative_to(REPO_ROOT.resolve()):
+            raise RuntimeError('程序文件清单中的路径无效，请重新解压便携包。')
+        if target.is_file():
+            target.unlink()
 
 
 def message(text, title='Miko', *, question=False):
@@ -80,8 +107,8 @@ class ChildJob:
         if not self.handle or not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
             raise ctypes.WinError(ctypes.get_last_error())
 
-    def attach(self, process):
-        handle = self.kernel.OpenProcess(0x101 | 0x1000, False, process.pid)
+    def attach(self, pid):
+        handle = self.kernel.OpenProcess(0x101 | 0x1000, False, pid)
         try:
             member = wintypes.BOOL()
             if not handle or not self.kernel.IsProcessInJob(handle, self.handle, ctypes.byref(member)):
@@ -102,9 +129,10 @@ def webview_installed():
         for access in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
             try:
                 with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | access) as key:
-                    if winreg.QueryValueEx(key, 'pv')[0] not in ('', '0.0.0.0'):
+                    version = tuple(int(p) for p in winreg.QueryValueEx(key, 'pv')[0].split('.'))
+                    if version >= (86, 0, 622, 0):
                         return True
-            except OSError:
+            except (OSError, ValueError):
                 pass
     return False
 
@@ -115,22 +143,28 @@ def ensure_webview(root):
     if not message('首次打开需要补齐 Microsoft WebView2。现在下载并安装吗？', question=True):
         raise RuntimeError('尚未安装 WebView2。再次打开 Miko 时可以继续安装。')
     target = root / 'cache/tmp/MicrosoftEdgeWebview2Setup.exe'
-    urllib.request.urlretrieve('https://go.microsoft.com/fwlink/p/?LinkId=2124703', target)
+    progress(root, '正在下载 Microsoft WebView2…')
+    with urllib.request.urlopen('https://go.microsoft.com/fwlink/p/?LinkId=2124703', timeout=30) as response:
+        with target.open('wb') as output:
+            while chunk := response.read(256 * 1024):
+                output.write(chunk)
     # Trust the signed Microsoft bootstrapper before executing downloaded code.
     literal = str(target).replace("'", "''")
     script = "$s=Get-AuthenticodeSignature -LiteralPath '" + literal + "'; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {exit 1}"
     encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
     check = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-        creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+        creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=30)
     if check.returncode:
         raise RuntimeError('WebView2 安装程序校验未通过，请稍后重试。')
-    result = subprocess.run([str(target), '/silent', '/install'], creationflags=subprocess.CREATE_NO_WINDOW)
+    progress(root, '正在安装 Microsoft WebView2…')
+    result = subprocess.run([str(target), '/silent', '/install'], creationflags=subprocess.CREATE_NO_WINDOW, timeout=600)
     if result.returncode or not webview_installed():
         raise RuntimeError('WebView2 尚未安装成功，请检查网络后重新打开 Miko。')
     target.unlink(missing_ok=True)
 
 
 def prepare_data(root, build):
+    load_backend()
     (root / 'config').mkdir(parents=True, exist_ok=True)
     (root / 'cache/tmp').mkdir(parents=True, exist_ok=True)
     settings_file = root / 'config/miko.local.json'
@@ -144,6 +178,7 @@ def prepare_data(root, build):
     marker = root / 'runtime/desktop-build.json'
     previous = json.loads(marker.read_text('utf-8')) if marker.exists() else None
     if (root / 'data/database/miko.sqlite3').exists() and (not previous or previous.get('build') != build['build']):
+        progress(root, '正在备份升级前的数据…')
         create_backup(root, reason='before-upgrade', name='升级前备份-' + time.strftime('%Y%m%d-%H%M%S'))
     if previous and previous.get('local_root') and previous['local_root'] != str(root):
         from miko.storage.backups import relocate_settings
@@ -160,11 +195,7 @@ def prepare_data(root, build):
 
 def main():
     root = REPO_ROOT.parent / 'MikoLocal'
-    instance = SingleWindow(root)
-    if not instance.primary:
-        instance.close()
-        return
-    job = None
+    instance = None
     settings = None
     window = None
     cleanup_lock = threading.Lock()
@@ -186,24 +217,59 @@ def main():
         (root / 'logs').mkdir(parents=True, exist_ok=True)
         sys.stdout = sys.stderr = (root / 'logs/desktop.log').open('a', encoding='utf-8', buffering=1)
         logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+        instance = SingleWindow(root)
+        if not instance.primary:
+            return
+        # Own the process tree before any backend/restore process is launched.
+        # Keep this self-owned job open until process exit (closing it kills us too).
+        job = ChildJob()
+        job.attach(os.getpid())
+        progress(root, '正在准备 Miko…')
+        load_backend()
+        remove_retired_files(root)
         build = json.loads((REPO_ROOT / 'portable.json').read_text('utf-8'))
+        from miko.restore import recover_interrupted_restore, restore_status
         # A previous crash can leave the recorded server briefly shutting down.
         initial = root / 'config/miko.local.json'
         if initial.exists():
             old = Settings.load(root)
             if recorded_process(old):
                 stop(old)
+            recover_interrupted_restore(old)
         settings = prepare_data(root, build)
         os.environ['TEMP'] = os.environ['TMP'] = str(root / 'cache/tmp')
         ensure_webview(root)
         import webview
         webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = True
         webview.settings['ALLOW_DOWNLOADS'] = True
+        operation = threading.Lock()
+
+        class DesktopApi:
+            def restart_backend(self):
+                # Expose local recovery only to this app, never to an external page.
+                if window.get_current_url() and urlsplit(window.get_current_url())[:2] != urlsplit(settings.url)[:2]:
+                    raise RuntimeError('请从 Miko 页面重启后台')
+                if not operation.acquire(blocking=False):
+                    return {'ok': False, 'message': '后台正在重启，请稍候'}
+                try:
+                    if closing.is_set():
+                        return {'ok': False, 'message': 'Miko 正在退出'}
+                    if restore_status(root)['state'] in ('starting', 'restoring'):
+                        return {'ok': False, 'message': '正在恢复数据，请稍候'}
+                    stop(settings)
+                    start(settings)
+                    return {'ok': True}
+                except Exception:
+                    logging.exception('Desktop restart')
+                    return {'ok': False, 'message': '重启未完成，请查看运行日志后重试'}
+                finally:
+                    operation.release()
+
         window = webview.create_window('Miko', html='''<!doctype html><html><meta charset="utf-8"><style>
             body{margin:0;background:#f8f7f3;color:#6c8066;font:16px "Microsoft YaHei",sans-serif;display:grid;place-items:center;height:100vh}
             div{text-align:center}i{display:block;width:26px;height:26px;margin:0 auto 18px;border:2px solid #dfe4d9;border-top-color:#6c8066;border-radius:50%;animation:spin 1s linear infinite}
             @keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){i{animation:none}}</style><div><i></i>正在打开 Miko</div></html>''',
-            width=1180, height=820, min_size=(900, 600), background_color='#f8f7f3')
+            width=1180, height=820, min_size=(900, 600), background_color='#f8f7f3', js_api=DesktopApi())
         closing = threading.Event()
         stopped = threading.Event()
         boot_done = threading.Event()
@@ -218,8 +284,7 @@ def main():
             def shutdown():
                 boot_done.wait()
                 try:
-                    restore_file = root / 'runtime/restore-status.json'
-                    restore = json.loads(restore_file.read_text('utf-8')) if restore_file.exists() else {}
+                    restore = restore_status(root)
                     if restore.get('state') in ('starting', 'restoring'):
                         message('正在恢复数据，请完成后再退出。')
                         closing.clear()
@@ -234,7 +299,8 @@ def main():
                 except Exception:
                     logging.exception('Desktop closing status check')
                 try:
-                    cleanup()
+                    with operation:
+                        cleanup()
                 except Exception:
                     logging.exception('Desktop shutdown')
                     message('退出未完成，请稍后重试；详情见 MikoLocal\\logs。')
@@ -246,14 +312,9 @@ def main():
             return False
 
         def boot():
-            nonlocal job
             try:
+                progress(root, '正在启动后台…')
                 start(settings)
-                job = ChildJob()
-                backend = recorded_process(settings)[1]
-                job.attach(backend)
-                for child in backend.children(recursive=True):
-                    job.attach(child)
                 write_json(root / 'runtime/desktop-build.json', {**build, 'local_root': str(root)})
                 inventory = REPO_ROOT / 'portable-files.txt'
                 if inventory.is_file():
@@ -261,8 +322,10 @@ def main():
                 threading.Thread(target=wake, daemon=True).start()
                 if not closing.is_set():
                     window.load_url(settings.url)
+                progress(root, 'READY')
             except Exception as error:
                 logging.exception('Desktop startup')
+                progress(root, 'ERROR')
                 message(str(error) + '\n\n可在 MikoLocal\\logs 中查看日志。', 'Miko 启动失败')
                 stopped.set()
                 window.destroy()
@@ -281,15 +344,15 @@ def main():
         cleanup()
     except Exception as error:
         logging.exception('Desktop failed')
+        progress(root, 'ERROR')
         message(str(error) + '\n\n可在 MikoLocal\\logs 中查看日志。', 'Miko 启动失败')
     finally:
         try:
             cleanup()
         except Exception:
             logging.exception('Desktop final cleanup')
-        if job:
-            job.close()
-        instance.close()
+        if instance:
+            instance.close()
 
 
 if __name__ == '__main__':

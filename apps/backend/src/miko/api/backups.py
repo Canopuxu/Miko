@@ -1,10 +1,11 @@
 import asyncio
-import json
 import os
 import shutil
 import subprocess
 import sys
 import uuid
+
+import psutil
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from miko.api.local import local_request
 from miko.settings import REPO_ROOT, write_json
 from miko.storage.backups import archive_path, backup_list, create_backup, inspect_backup
+from miko.restore import restore_status as read_restore_status
 
 
 class RestoreInput(BaseModel):
@@ -32,7 +34,7 @@ def backups_router(chat, qq):
     status_file = root / 'runtime/restore-status.json'
 
     def status():
-        return json.loads(status_file.read_text('utf-8')) if status_file.exists() else {'state': 'idle'}
+        return read_restore_status(root)
 
     def idle():
         if (chat.turns or qq.workers or chat.life.generating or chat.memory.social.active_jobs
@@ -94,18 +96,16 @@ def backups_router(chat, qq):
             base = root / 'cache/restore'
             base.mkdir(parents=True, exist_ok=True)
             upload = base / (stage_id + '.zip')
-            size = 0
             try:
                 with upload.open('wb') as output:
                     async for chunk in request.stream():
-                        size += len(chunk)
-                        if size > 2 * 1024**3:
-                            raise HTTPException(400, '备份文件超过 2 GiB')
                         output.write(chunk)
                 summary = await asyncio.to_thread(inspect_backup, upload, base / stage_id)
                 return dict(summary, stage_id=stage_id)
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from None
+            except OSError:
+                raise HTTPException(400, '无法暂存备份，请检查磁盘空间后重试') from None
             finally:
                 upload.unlink(missing_ok=True)
 
@@ -119,10 +119,12 @@ def backups_router(chat, qq):
             write_json(status_file, {'state': 'starting', 'message': '正在停止服务并备份当前数据…'})
             try:
                 with (root / 'logs/restore.log').open('ab') as log:
-                    subprocess.Popen([sys.executable, '-X', 'utf8', '-m', 'miko.restore',
+                    worker = subprocess.Popen([sys.executable, '-X', 'utf8', '-m', 'miko.restore',
                         '--local-root', str(root), '--stage-id', body.stage_id], cwd=REPO_ROOT,
                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                write_json(status_file, {'state': 'starting', 'message': '正在停止服务并备份当前数据…',
+                                        'pid': worker.pid, 'created': psutil.Process(worker.pid).create_time()})
             except OSError:
                 write_json(status_file, {'state': 'error', 'message': '无法启动恢复，请检查运行日志'})
                 raise HTTPException(400, '无法启动恢复，当前数据未改变') from None

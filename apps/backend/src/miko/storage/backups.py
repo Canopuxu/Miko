@@ -1,5 +1,6 @@
 """Portable snapshots of Miko's local records and active settings."""
 from datetime import datetime, timezone
+from errno import ENOSPC
 from contextlib import closing
 import hashlib
 import json
@@ -145,17 +146,18 @@ def inspect_backup(archive_file, stage):
     try:
         with zipfile.ZipFile(archive_file) as archive:
             manifest_info = archive.getinfo('manifest.json')
-            if manifest_info.file_size > 8 * 1024 * 1024:
-                raise ValueError('备份目录过大')
+            if manifest_info.file_size > shutil.disk_usage(stage).free:
+                raise OSError(ENOSPC, '磁盘空间不足，请腾出空间后重试')
             manifest = json.loads(archive.read(manifest_info))
             if manifest.get('format') != 'miko-backup' or manifest.get('version') != 1:
                 raise ValueError('请选择 Miko 导出的完整备份文件')
             files = manifest['files']
             infos = archive.infolist()
             if (not isinstance(files, dict) or len(infos) != len(files) + 1
-                    or {info.filename for info in infos} != {'manifest.json', *files}
-                    or sum(info.file_size for info in infos) > 4 * 1024**3):
-                raise ValueError('备份目录不完整或解压后超过 4 GiB')
+                    or {info.filename for info in infos} != {'manifest.json', *files}):
+                raise ValueError('备份目录不完整')
+            if sum(info.file_size for info in infos) > shutil.disk_usage(stage).free:
+                raise OSError(ENOSPC, '磁盘空间不足，请腾出空间后重试')
             for relative, expected in files.items():
                 target = managed_path(stage, relative)
                 info = archive.getinfo(relative)
