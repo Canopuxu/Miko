@@ -17,6 +17,7 @@ from miko.api.life import life_router
 from miko.api.settings import settings_router
 from miko.api.backups import backups_router
 from miko.api.history import history_router
+from miko.api.qq_avatar import qq_avatar_router
 from miko.domain.life import Life
 from miko.adapters.memory.service import Memory
 from miko.domain.conversation.chat import ChatService
@@ -80,6 +81,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     app.include_router(memory_router(chat.memory))
     app.include_router(life_router(chat.life))
     app.include_router(settings_router(chat, qq))
+    app.include_router(qq_avatar_router(chat, qq))
     app.include_router(backups_router(chat, qq))
     app.include_router(history_router(chat.store))
     web_root = REPO_ROOT / "apps/web/dist"

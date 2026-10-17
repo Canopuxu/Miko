@@ -9,6 +9,7 @@ import { ModelFields, useModelCatalog, type Provider } from '../components/Model
 import { DataBackups } from './DataBackups';
 import { SearchIndexSettings } from '../components/SearchIndexSettings';
 import { ProviderLinks } from '../components/ProviderLinks';
+import { QqAvatarSettings } from '../components/QqAvatarSettings';
 
 type Reranker = Provider;
 type Qq = {account:string};
@@ -240,6 +241,7 @@ export function SettingsPage(){
             <small>{qqConnected?(runtime.qq?.receiver.note!=='QQ 已连接'?runtime.qq?.receiver.note:'可在“管理好友”中选择好友，再到 QQ 好友页开启接话。'):(config.qq.account&&bridge?.account===config.qq.account?bridge.note:runtime.qq?.receiver.note)||'选择账号后点击连接 QQ'}</small></span>
           </div>
           <p className="settings-footnote">目前适配 Windows 电脑版 QQ NT。程序按实际接口检测兼容性，QQ 更新后如提示不兼容，请重新检测。</p>
+          <QqAvatarSettings account={config.qq.account} connected={qqConnected}/>
         </section>
       </>:<>
         <section><h2>资料与记忆</h2><div className="settings-actions"><button onClick={()=>navigation.navigate('profiles',{focus:'profile-name'})}>修改称呼和资料<ArrowUpRight size={16}/></button><button onClick={()=>navigation.navigate('memory')}>管理记忆<ArrowUpRight size={16}/></button></div></section>
