@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/fumingyang2004/Tulpa",
+  "commit": "7b603d32bc72cab082a3b39aa52658b64bd506ff",
+  "license": "MIT",
+  "functions": {
+    "Plan": {
+      "source": "chatlocal/retrieval.py",
+      "sha256": "6d5793b0375926d9bbe8dce74ca8f391c2d9a18eb3e468d56ad6a520eb6ad498"
+    },
+    "scope_sql": {
+      "source": "chatlocal/retrieval.py",
+      "sha256": "0fa75f6b5f098060a5a7d4c81ecbb2a81c3366879dba22adadac5cacec062baf"
+    },
+    "words": {
+      "source": "chatlocal/reply_history.py",
+      "sha256": "b0497d65581541f45004e3d3ac8c79bb335c1ee4bbbba4991c806930c1364b8d"
+    },
+    "text_matches": {
+      "source": "chatlocal/reply_history.py",
+      "sha256": "2f77b3a654f771c6be53a84093b25d9541c1978dc89d0d5e9dce3a4234aceb1d"
+    }
+  }
+}

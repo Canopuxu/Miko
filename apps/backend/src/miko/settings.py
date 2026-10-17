@@ -141,7 +141,7 @@ class Settings:
     def load_rerank(self) -> RerankConfig | None:
         path = self.local_root / 'config/rerank.local.json'
         if not path.exists():
-            return legacy_rerank(self.load_provider())
+            return None
         value = json.loads(path.read_text(encoding='utf-8-sig'))
         value.pop('shared', None)
         if not value.pop('enabled', True):

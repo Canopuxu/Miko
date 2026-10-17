@@ -132,7 +132,7 @@ class ChatService:
         if any(t.conversation_id == conversation_id for t in self.turns.values()):
             raise HTTPException(409, "当前对话仍在生成，请先停止或等待结束")
         turn = Turn(uuid.uuid4().hex, conversation_id, message.strip())
-        query = turn.message + '\n' + '\n'.join(r['content'] for r in self.store.history(conversation_id)[-6:][::-1])
+        query = turn.message
         turn.system_prompt = self.compose_prompt(self.system_prompt, query)
         turn.memory_query = query
         turn.user_message_id = self.store.begin_turn(conversation_id, turn.id, turn.message)
@@ -178,7 +178,9 @@ class ChatService:
                 if group:
                     turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-group-output.txt').read_text(encoding='utf-8').strip()
             elif self.memory and turn.memory_query is not None:
-                context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id)
+                previous = [r['content'] for r in self.store.history(turn.conversation_id) if r['role']=='user']
+                if previous and previous[-1]==turn.message: previous=previous[:-1]
+                context = await self.memory.context(turn.memory_query, turn.memory_key, turn.conversation_id, previous=previous[-2:])
                 base = self.system_prompt if turn.memory_key is None else (REPO_ROOT / 'config/defaults/qq-system-prompt.txt').read_text(encoding='utf-8').strip()
                 instructions = (REPO_ROOT / 'config/defaults/role-context.txt').read_text(encoding='utf-8').strip()
                 if context.get('life_entries') or context.get('life_goals'):

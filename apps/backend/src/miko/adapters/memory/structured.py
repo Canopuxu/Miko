@@ -69,7 +69,7 @@ class StructuredMemory:
         db.execute('INSERT INTO memory_audit(item_id,kind,snapshot,created_at) VALUES(?,?,?,?)',
                    (value['id'], kind, encode(value), time.time_ns() // 1_000_000))
 
-    def items(self, query='', subject='', peer=None, category='', active=False):
+    def items(self, query='', subject='', peer=None, category='', active=False, limit=300):
         clauses, args = [], []
         for column, value in (('subject', subject), ('category', category)):
             if value:
@@ -88,7 +88,9 @@ class StructuredMemory:
         with self.projection.connect() as db:
             rows = [dict(r) for r in db.execute('SELECT i.* FROM memory_items i' + join +
                 (' WHERE ' + ' AND '.join(clauses) if clauses else '') +
-                ' ORDER BY i.updated_at DESC,i.id LIMIT 300', args)]
+                (' ORDER BY bm25(memory_fts),i.updated_at DESC,i.id' if join else
+                 ' ORDER BY i.updated_at DESC,i.id') + (' LIMIT ?' if limit is not None else ''),
+                 args + ([limit] if limit is not None else []))]
         for r in rows:
             r['content'] = r['manual'] or r['automatic']
         return rows
@@ -228,7 +230,7 @@ class StructuredMemory:
         # retain the restored content until the user clears the correction.
         return self.edit(item_id, snapshot['manual'] or snapshot['automatic'], revision, bool(snapshot['enabled']), snapshot['category'], snapshot['topic'])
 
-    def days(self, day='', subject='', peer=None, query=''):
+    def days(self, day='', subject='', peer=None, query='', limit=100):
         clauses, args = ['d.valid=1'], []
         for column, value in (('day', day),):
             if value:
@@ -247,7 +249,10 @@ class StructuredMemory:
             clauses.append('memory_fts MATCH ?'); args.append(match)
         with self.projection.connect() as db:
             rows = [dict(r) for r in db.execute('SELECT d.* FROM memory_days d' + join +
-                ' WHERE ' + ' AND '.join(clauses) + ' ORDER BY d.day DESC,d.updated_at DESC LIMIT 100', args)]
+                ' WHERE ' + ' AND '.join(clauses) +
+                (' ORDER BY bm25(memory_fts),d.day DESC,d.updated_at DESC' if join else
+                 ' ORDER BY d.day DESC,d.updated_at DESC') + (' LIMIT ?' if limit is not None else ''),
+                 args + ([limit] if limit is not None else []))]
             for r in rows:
                 r['sources'] = self._sources(db, r['id'])
                 r['subjects'] = [v[0] for v in db.execute(

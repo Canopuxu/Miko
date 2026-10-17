@@ -74,7 +74,7 @@ class ProfileStore:
                 raise ValueError('找不到这条资料')
             db.execute('DELETE FROM profile_fts WHERE entry_id=?', (entry_id,))
 
-    def list(self, query='', subject='', kind='', category='', key=None, active=False):
+    def list(self, query='', subject='', kind='', category='', key=None, active=False, limit=200):
         where, args = [], []
         for field, value in (('subject', subject), ('kind', kind), ('category', category)):
             if value:
@@ -94,7 +94,8 @@ class ProfileStore:
             order = 'bm25(profile_fts), p.updated_at DESC'
         with self.chat.connect() as db:
             rows = [dict(row) for row in db.execute('SELECT p.* FROM profile_entries p' + join
-                + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY ' + order + ' LIMIT 200', args)]
+                + (' WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY ' + order
+                + (' LIMIT ?' if limit is not None else ''), args + ([limit] if limit is not None else []))]
         library = ProfileCategories(self.chat)
         pinned = {}
         for who in {r['subject'] for r in rows}:

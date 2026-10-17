@@ -6,7 +6,7 @@ import httpx
 
 from miko.adapters.memory.rerank import rank
 from miko.adapters.memory.feedback import select_feedback
-from miko.domain.conversation.context_selection import select
+from retrieval_support import select
 from miko.settings import RerankConfig
 
 
@@ -27,10 +27,12 @@ class RerankConnectionTests(unittest.IsolatedAsyncioTestCase):
         rows=[{'scope':'example','feedback':'相似场景','reply':'回复','context':'问题'},
               {'scope':'global','feedback':'通用反馈','reply':'回复','context':''}]
         result=await select_feedback(None,'问题',rows)
-        self.assertEqual([r['feedback'] for r in result],['通用反馈'])
+        self.assertEqual([r['feedback'] for r in result],['通用反馈','相似场景'])
         context={'role_material':[{'subject':'miko','kind':'fact','category':'喜好','content':'文学'}]}
-        _,selected,_=await select(None,'你喜欢看书吗',context)
+        _,selected,_=await select(None,'你喜欢文学吗',context)
         self.assertEqual(len(selected),1)
+        _,selected,_=await select(None,'晚饭吃什么',context)
+        self.assertFalse(selected)
 
     async def test_profiles_and_feedback_use_the_same_selected_service(self):
         requests=[]
@@ -44,7 +46,7 @@ class RerankConnectionTests(unittest.IsolatedAsyncioTestCase):
         with patch('httpx.AsyncClient',side_effect=client):
             feedback=await select_feedback(config,'晚上吃什么',[
                 {'scope':'example','feedback':'简短一些','reply':'原回复','context':'晚上吃什么'}])
-            _,selected,_=await select(config,'你喜欢什么',{'role_material':[
+            _,selected,_=await select(config,'你喜欢文学吗',{'role_material':[
                 {'subject':'miko','kind':'fact','category':'喜好','content':'文学'}]})
         self.assertEqual(len(feedback),1)
         self.assertEqual(len(selected),1)

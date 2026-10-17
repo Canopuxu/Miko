@@ -48,7 +48,7 @@ class CategoryTests(unittest.TestCase):
 class PinnedCategoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_pin_is_persistent_background_and_unpin_restores_retrieval(self):
         from miko.storage.profile_categories import ProfileCategories
-        from miko.domain.conversation.context_selection import select
+        from retrieval_support import select
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'profiles.sqlite3'
             profiles = ProfileStore(ChatStore(path))

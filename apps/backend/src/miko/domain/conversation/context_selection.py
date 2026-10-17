@@ -1,10 +1,11 @@
 """QQ context selection: stored ownership, reranking and readable context."""
-import json,re
-from copy import deepcopy
-from datetime import datetime
+import json,re,logging
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import httpx
 from miko.adapters.memory.rerank import rank
+from miko.storage.search import keywords
+from itertools import zip_longest
 
 NAMES={'owner':'橙汁','miko':'Miko'}
 GROUPS=('role_material','social_memory','people_memory','dated_experiences','life_entries','life_goals')
@@ -86,14 +87,18 @@ def scoped_row(row,subjects):
 def near_duplicate(a,b):
     # Suppress repeated presentation only; never overwrite stored memories.
     sa,sb=a['source'],b['source']
-    scope=lambda x:(tuple(sorted(x.get('subjects') or [x.get('subject','miko' if 'goal_id' in x else '')])),x.get('peer',''),x.get('day',x.get('as_of','')))
+    scope=lambda x:(tuple(sorted(x.get('subjects') or [x.get('subject','miko' if 'goal_id' in x else '')])),x.get('peer',''),x.get('day',x.get('as_of','')) or '')
     if scope(sa)!=scope(sb):return False
     normalize=lambda x:re.sub(r'[^\w]','',x)
-    x,y=normalize(a['text']),normalize(b['text'])
+    body=lambda r:r['source'].get('content',r['source'].get('text',r['text']))
+    x,y=normalize(body(a)),normalize(body(b))
     if x==y:return True
     # Different dates/numbers or negation may change the fact; keep both.
     if re.findall(r'\d+',x)!=re.findall(r'\d+',y):return False
     if [w for w in ('不','没','未','否') if w in x]!=[w for w in ('不','没','未','否') if w in y]:return False
+    if min(len(x),len(y))>=2 and max(len(x),len(y))<=40 and (x in y or y in x):
+        labels=lambda r:set(w for w in keywords(r['source'].get('category','')+' '+r['source'].get('topic','')) if len(w)>=2)
+        if labels(a)&labels(b):return True
     grams=lambda t:{t[i:i+3] for i in range(len(t)-2)}
     gx,gy=grams(x),grams(y)
     return bool(gx and gy) and len(gx&gy)/len(gx|gy)>=.85
@@ -106,7 +111,7 @@ def scoring_query(topic):
 
 def scoring_document(row):
     source=row['source']
-    if row['group']=='people_memory' and ':group-' in source.get('peer', ''):
+    if row['group']=='people_memory':
         return source.get('category', '')+' · '+source.get('topic', '')+'：'+source.get('content', '')
     if row['group']!='role_material':return row['text']
     content=source.get('content','')
@@ -121,73 +126,112 @@ def scoring_document(row):
 
 
 def scoring_documents(rows):
-    # Short profile tags need their category peers to convey semantic meaning.
-    groups={}
-    for row in rows:
-        source=row['source']
-        if row['group']=='role_material' and source.get('category') and len(source.get('content',''))<=80:
-            key=(source.get('subject'),source['category'])
-            groups.setdefault(key,[]).append(source['content'])
-    result=[]
-    for row in rows:
-        source=row['source'];document=scoring_document(row)
-        if row['group']=='role_material' and len(source.get('content',''))<=80:
-            peers=groups.get((source.get('subject'),source.get('category')),[])
-            if len(peers)>1:
-                document=document.split('：',1)[0]+'：'+'；'.join(dict.fromkeys(peers))
-        result.append(document)
+    return [scoring_document(row) for row in rows]
+
+
+def retrieval_query(query, previous=()):
+    # Nearby speech resolves short follow-ups; full new topics use their own words.
+    if previous and (len(keywords(scoring_query(query))) < 2 or re.match(r'^(那|这|它|他|她|后来|然后)',query)):
+        return query+'\n'+'\n'.join(previous[-2:])
+    return query
+
+
+def source_key(row):
+    source = row['source']; group = row['group']
+    if group == 'role_material': return 'profile:' + source.get('id', '')
+    if group == 'people_memory': return 'item:' + source.get('id', '')
+    if group == 'dated_experiences': return source.get('id', '')
+    if group == 'life_goals': return 'life-goal:' + source.get('id', '')
+    if group == 'life_entries': return source.get('_retrieval_id', source.get('id', ''))
+    return 'social:' + str(source.get('id', ''))
+
+
+def topic_scopes(query, context):
+    previous = context.get('_previous_contact_texts', [])
+    topics = topic_queries(query)
+    names = context.get('_contact_names', {})
+    scopes = [subjects_for(topic, previous) | {person for person,name in names.items()
+              if person in topic or name and ('@'+name in topic or len(name)>1 and name in topic)} for topic in topics]
+    if context.get('_self_subject') == 'owner':
+        scopes = [scope | {'owner'} if re.search(r'我(?!们)', topic) or not re.search(r'Miko|你|橙汁',topic,re.I) else scope for topic, scope in zip(topics, scopes)]
+    speaker = context.get('_group_speaker')
+    if speaker:
+        for i,topic in enumerate(topics):
+            if (re.search(r'我的|按我|照我|适合我|我(?:平时|一般|喜欢|爱听|口味)',topic)
+                    or re.search(r'我(?!们)',topic) and not re.search(r'你|Miko|橙汁',topic,re.I)
+                    or topic.startswith('我') and re.search(r'你还记得|你记得',topic)):
+                person=next((person for text,person in speaker.get('by_text',{}).items() if topic in text),speaker['id'])
+                scopes[i]={person}
+    return topics, scopes
+
+
+def time_matches(row, topic, context):
+    day = row['source'].get('day', row['source'].get('as_of'))
+    if not day: return True
+    now = context.get('current_time', '')[:10]
+    if not now: return True
+    if row['group'] == 'life_entries' and day > now: return False
+    if any(w in topic for w in ('昨天','昨晚')):
+        return day == (datetime.fromisoformat(now) - timedelta(days=1)).date().isoformat()
+    if any(w in topic for w in ('今天','今晚','今早')): return day == now
+    explicit=re.search(r'\d{4}-\d{2}-\d{2}',topic)
+    if explicit:return day==explicit[0]
+    if '最近' in topic:return (datetime.fromisoformat(now)-timedelta(days=7)).date().isoformat()<=day<=now
+    return True
+
+
+async def select(provider,query,context,threshold=.5,limit=5,*,local):
+    core,rows=candidates(context)
+    topics,scopes=topic_scopes(query,context)
+    context['_subjects']=set().union(*scopes)
+    selected=[];rankings=[]
+    hits=context.get('retrieval',{}).get('hits',[])
+    async with httpx.AsyncClient(timeout=30,trust_env=False) as client:
+        for topic,subjects in zip(topics,scopes):
+            allowed={source_key(row):dict(row,candidate_index=i) for i,row in enumerate(rows)
+                     if scoped_row(row,subjects) and time_matches(row,topic,context)}
+            search=retrieval_query(topic,context.get('_previous_contact_texts',[]))
+            words=keywords(scoring_query(search))
+            if not allowed:continue
+            lexical=local.search(' '.join(words),allowed) if words else []
+            # A date/recency request can retrieve dated experiences directly.
+            if not lexical and re.search(r'今天|今晚|今早|昨天|昨晚|最近|\d{4}-\d{2}-\d{2}',topic):
+                dated=[name for name,row in allowed.items() if row['source'].get('day')]
+                lexical=local.recent(dated,limit=40)
+            semantic=[hit['name'] for hit in hits if hit['name'] in allowed and (provider or hit['score']>=.45)]
+            # Interleave ranked sources, without comparing unlike BM25/vector scores.
+            names=list(dict.fromkeys(name for pair in zip_longest(lexical,semantic) for name in pair if name))
+            if provider:
+                pool=names[:64]
+                if not pool:continue
+                try:
+                    ranked=await rank(client,provider,scoring_query(search),scoring_documents([allowed[name] for name in pool]),len(pool))
+                    ranked=sorted(ranked,key=lambda r:r['relevance_score'],reverse=True)
+                    names=[pool[r['index']] for r in ranked if r['relevance_score']>=threshold]
+                    if not names:names=lexical
+                except (httpx.HTTPError,KeyError,ValueError,TypeError) as exc:
+                    context.setdefault('retrieval',{})['rerank_error']='相关性筛选暂不可用，已使用本地排序'
+                    logging.getLogger(__name__).warning('Reranking failed; keeping local retrieval: %s',type(exc).__name__)
+            rankings.append([allowed[name] for name in names])
+    remaining=20000
+    # A round-robin gives each topic space before another topic fills the budget.
+    for batch in zip_longest(*rankings):
+        for row in batch:
+            if row is None or any(row['candidate_index']==x['candidate_index'] or near_duplicate(row,x) for x in selected):continue
+            if len(row['text'])>remaining:continue
+            selected.append(row);remaining-=len(row['text'])
+            if len(selected)==limit:break
+        if len(selected)==limit:break
+    return core,selected,[row for ranking in rankings for row in ranking]
+
+
+def selected_context(context, selected):
+    result=dict(context)
+    for group in GROUPS:
+        result[group]=[row['source'] for row in selected if row['group']==group]
+    result['role_material']=[r for r in context.get('role_material',[]) if r.get('pinned')]+result['role_material']
     return result
 
-
-async def select(provider,query,context,threshold=.70,limit=5):
-    core,rows=candidates(context)
-    if not rows:return core,[],[]
-    topics=list(dict.fromkeys([query]+topic_queries(query)));ranks=[]
-    previous=context.get('_previous_contact_texts',[])
-    scopes=[subjects_for(topic,previous) | set(context.get('_contact_subjects', [])) for topic in topics]
-    speaker=context.get('_group_speaker')
-    personal = speaker and re.search(r'按我|照我|适合我|我(?:的|平时|一般|喜欢|爱听|口味)',speaker['text'])
-    if personal:
-        scopes=[{speaker['id']} for _ in topics]
-    all_subjects=set().union(*scopes)
-    pinned_core={f"{NAMES.get(r.get('subject'), r.get('subject', ''))}：{r.get('content', '')}" for r in context.get('role_material', []) if r.get('pinned')}
-    core=[line for line in core if line in pinned_core or not line.startswith('橙汁：') or 'owner' in all_subjects]
-    context['_subjects']=all_subjects
-    if provider is None:
-        selected = [{**row, 'candidate_index': i, 'score': None} for i,row in enumerate(rows)
-                    if scoped_row(row, all_subjects)][:limit]
-        return core, selected, selected
-    async with httpx.AsyncClient(timeout=60,trust_env=False) as client:
-        for topic,subjects in zip(topics,scopes):
-            indexes=[i for i,row in enumerate(rows) if scoped_row(row,subjects)]
-            if not indexes:continue
-            ranking = await rank(client,provider,scoring_query(topic),scoring_documents([rows[i] for i in indexes]),len(indexes))
-            ranks.append([{**rows[indexes[x['index']]],'candidate_index':indexes[x['index']],'score':x['relevance_score'],'query':topic,'scoring_query':scoring_query(topic)} for x in ranking])
-    def eligible(row):
-        literal=row['source'].get('content','').strip()
-        cutoff=.60 if row['group']=='role_material' and row['source'].get('kind')=='fact' else threshold
-        if personal and row['group']=='people_memory' and row['source'].get('subject') == speaker['id']:
-            cutoff=.55
-        return row['score']>=cutoff or (row['group']=='role_material' and 2<=len(literal)<=30 and literal in query)
-    selected=[]
-    def add(row):
-        if not eligible(row):return False
-        if any(row['candidate_index']==x['candidate_index'] or near_duplicate(row,x) for x in selected):return False
-        selected.append(row);return True
-    # Reserve an eligible hit for each explicit topic before filling the shared budget.
-    for ranking in ranks:
-        for row in ranking:
-            if add(row):break
-    merged={}
-    for ranking in ranks:
-        for row in ranking:
-            old=merged.get(row['candidate_index'])
-            if old is None or old['score']<row['score']:merged[row['candidate_index']]=row
-    ranked=sorted(merged.values(),key=lambda x:x['score'],reverse=True)
-    for row in ranked:
-        if len(selected)>=limit:break
-        add(row)
-    return core,selected[:limit],ranked
 
 def render(context,core,selected):
     blocks=['当前时间：'+context['current_time'],'人物背景：\n'+'\n'.join(core)]
@@ -255,19 +299,12 @@ async def compose_qq_context(chat, records, key):
     pending = pending_contacts(records)
     query='\n'.join(r['text'] for r in pending) if pending else records[-1]['text']
     query = chat.canonical_query(query)
-    context=deepcopy(await chat.memory.context(query,key) if chat.memory else chat.profiles.context(query,key))
-    context['role_material']=chat.profiles.list(key=key,active=True,kind='overview')+chat.profiles.list(key=key,active=True,kind='fact')+[r for r in context.get('role_material',[]) if r.get('kind')=='recent']
-    if chat.life:
-        trajectory=chat.life.records()
-        days=sorted({r['day'] for r in trajectory if r['day']<=context['current_time'][:10]},reverse=True)[:2]
-        context.setdefault('life_entries',[]).extend(r for r in trajectory if r['day'] in days)
-    context['_previous_contact_texts']=contacts[:-len(pending)] if pending else contacts
-    if key[1].startswith('group-'):
-        context['friend_relationships'] = []
-        context['_contact_subjects'] = [r['author']['id'] for r in records if r['author']['kind'] == 'contact']
-        if pending:
-            context['_group_speaker'] = {'id': pending[-1]['author']['id'], 'text': pending[-1]['text']}
-    core,selected,ranked=await select(chat.memory.reranker,query,context)
+    previous=contacts[:-len(pending)] if pending else contacts[:-1]
+    participants={r['author']['id']:r['author']['name'] for r in records if r['author']['kind']=='contact'}
+    speaker={'id':pending[-1]['author']['id'],'text':pending[-1]['text'],
+             'by_text':{chat.canonical_query(r['text']):r['author']['id'] for r in pending}} if pending else None
+    context=await chat.memory.context(query,key,previous=previous,participants=participants,speaker=speaker,raw=True)
+    core,selected,ranked=await select(chat.memory.reranker,query,context,local=chat.memory.local)
     result = render(context,core,selected)
     if context.get('owner_feedback'):
         from miko.settings import REPO_ROOT

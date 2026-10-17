@@ -88,6 +88,23 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.memory.social.store.sync()
         self.assertEqual(self.memory.social.detail(sid)['valid'], 0)
 
+    async def test_embedding_failure_keeps_local_recall_and_model_change_has_own_index(self):
+        first=self.chat.profiles.save(ProfileInput(subject='miko',kind='fact',title='乐器',content='电吉他').record())
+        await self.memory.sync()
+        class Offline:
+            async def embed(self,texts):
+                raise RuntimeError('offline')
+        self.memory.index._embedding_pool._cache['embedding']=Offline()
+        result=await self.memory.context('你还在练电吉他吗',('123','456'))
+        self.assertEqual([r['id'] for r in result['role_material']],[first['id']])
+        self.assertTrue(result['retrieval']['error'])
+        (self.local/'config/embedding.local.json').write_text('{"model":"different-model"}',encoding='utf-8')
+        self.memory.configure_index()
+        self.assertFalse(self.memory.index.database.recall_file_repo.list_recall_files())
+        (self.local/'config/embedding.local.json').write_text('{"model":"test"}',encoding='utf-8')
+        self.memory.configure_index()
+        self.assertTrue(self.memory.index.database.recall_file_repo.list_recall_files())
+
 
 if __name__ == '__main__':
     unittest.main()
