@@ -95,6 +95,19 @@ class BackupTests(unittest.TestCase):
             apply_backup(self.root, stage)
         self.assertEqual(self.value(self.root), '待备份的聊天')
 
+    def test_named_backups_do_not_overwrite_and_legacy_files_remain_visible(self):
+        first = create_backup(self.root, name='首次配置.zip')
+        second = create_backup(self.root, name='首次配置')
+        self.assertEqual(archive_path(self.root, first['id']).name, '首次配置.zip')
+        self.assertEqual(archive_path(self.root, second['id']).name, '首次配置 (2).zip')
+        legacy_id = 'a' * 32
+        with zipfile.ZipFile(self.root / 'backups/archives' / (legacy_id + '.zip'), 'w') as archive:
+            archive.writestr('manifest.json', json.dumps({'created_at': first['created_at'], 'reason': 'manual', 'files': {}}))
+        self.assertEqual({row['id'] for row in backup_list(self.root)}, {first['id'], second['id'], legacy_id})
+        self.assertEqual(archive_path(self.root, legacy_id).name, legacy_id + '.zip')
+        with self.assertRaises(ValueError):
+            create_backup(self.root, name='../outside')
+
     def test_archive_cannot_write_outside_managed_data(self):
         destination = self.root / 'unsafe.zip'
         bad = 'data/qq/../../../outside.txt'
@@ -142,8 +155,12 @@ class BackupTests(unittest.TestCase):
         self.qq = SimpleNamespace(workers={})
         app = FastAPI(); app.include_router(backups_router(self.chat, self.qq))
         with TestClient(app) as client:
-            backup = client.post('/api/settings/backups').json()
+            backup = client.post('/api/settings/backups', json={'name': '我的备份'}).json()
+            self.assertEqual(backup['name'], '我的备份')
             self.assertEqual(client.get('/api/settings/backups').status_code, 200)
+            with patch('miko.api.backups.os.startfile') as opened:
+                self.assertEqual(client.post('/api/settings/backups/' + backup['id'] + '/open-folder').status_code, 200)
+                opened.assert_called_once_with(archive_path(self.root, backup['id']).parent)
             response = client.get('/api/settings/backups/' + backup['id'] + '/download')
             self.assertEqual(response.status_code, 200)
             preview = client.post('/api/settings/backups/inspect', content=response.content)

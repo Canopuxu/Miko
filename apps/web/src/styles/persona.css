@@ -102,9 +102,10 @@
 .profile-tools-preview details { margin:16px 0; font-size:13px; }
 .profile-tools-preview > p { font-size:13px; line-height:1.8; }
 .profile-tools-notice { color:var(--sage) !important; font-size:13px; }
-.profile-tools-transfer { padding:20px 0; border-top:1px solid var(--line); }
-.profile-tools-file { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
-.profile-tools-file input { width:100%; margin-top:8px; color:var(--muted); }
+.runtime-dialog.profile-transfer-dialog { width:min(560px,calc(100vw - 32px)); }
+.profile-transfer-dialog h3 { font-size:15px; margin:0 0 10px; }
+.profile-transfer-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:22px; }
+.profile-transfer-actions > button { flex:1; justify-content:center; min-width:140px; }
 .profile-file-entries { max-height:300px; overflow:auto; padding-right:6px; }
 .profile-file-entries article { padding:10px 0; border-top:1px solid var(--line); }
 .profile-file-entries small { color:var(--muted); }

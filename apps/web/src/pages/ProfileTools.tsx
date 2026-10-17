@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Download, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { getJson, responseError } from '../api/chat';
@@ -56,12 +56,11 @@ export function ExpressionSettingsDialog({ onClose, scope = 'all' }: { onClose: 
     <Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="runtime-dialog profile-tools-dialog">
       <header className="runtime-heading"><Dialog.Title>{title}</Dialog.Title>
         <button className="icon-button" aria-label={'关闭'+title} disabled={busy} onClick={() => guard.proceed(onClose)}><X size={18}/></button></header>
-      <Dialog.Description>{scope === 'life' ? '设置角色日常生活的节奏、活动和生成偏好。' : '这里设置角色怎样说话。性格、喜好等具体资料仍在词条中编辑。'}</Dialog.Description>
+      <Dialog.Description>{scope === 'life' ? '设置日常节奏和活动偏好，下次生成时生效。' : '调整说话方式，保存后从下一轮回复起生效。'}</Dialog.Description>
       {scope === 'all' && <div className="profile-tools-tabs" role="tablist" aria-label="表达设置范围">
         {chatSections.map(({ key, label, icon: Icon }) => <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}><Icon size={17} strokeWidth={1.6} aria-hidden="true"/>{label}</button>)}
       </div>}
       {!saved ? <p role="status">{error || '正在读取…'}</p> : <>
-        <p className="profile-tools-note">{scope === 'life' ? '保存后用于下一次生活生成。' : (tab === 'qq' ? '用于“QQ 聊天”中的私聊和群聊。' : '用于“聊天”中你与角色的直接对话。') + '保存后从下一轮回复起生效。'}</p>
         {editorKeys.map(key => <label className="profile-tools-editor" key={key}>{labels[key]}
           <textarea aria-label={labels[key].replace(' · ', '')} className={key === 'qq_base' ? 'profile-tools-short' : ''}
             rows={key === 'qq_base' ? 3 : 9} maxLength={12000} disabled={busy} value={draft[key]}
@@ -85,6 +84,7 @@ export function ProfileTransferDialog({ subject, name, onClose, onApplied }: {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [backup, setBackup] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
   async function exportFile() {
     setBusy(true); setError('');
     try {
@@ -116,22 +116,23 @@ export function ProfileTransferDialog({ subject, name, onClose, onApplied }: {
     } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose(); }}><Dialog.Portal>
-    <Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="runtime-dialog profile-tools-dialog">
+    <Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="runtime-dialog profile-transfer-dialog">
       <header className="runtime-heading"><Dialog.Title>资料导入导出</Dialog.Title><Dialog.Close className="icon-button" aria-label="关闭资料导入导出" disabled={busy}><X size={18}/></Dialog.Close></header>
-      <Dialog.Description>当前人物：{name}。资料文件包含名称、大小分类、稳定词条{subject === 'miko' ? '和表达设置' : ''}。</Dialog.Description>
-      <section className="profile-tools-transfer"><h3>导出资料</h3><p className="profile-tools-note">用于保存或分享当前人物设定。聊天记录、长期记忆、好友关系和 API 密钥保留在本机。</p>
-        <button className="ui-button" disabled={busy} onClick={() => void exportFile()}><Download size={14}/>导出 {name} 的资料</button></section>
-      <section className="profile-tools-transfer"><h3>导入资料</h3><label className="profile-tools-file"><Upload size={15}/><span>选择资料文件</span>
-        <input type="file" aria-label="选择资料文件" accept="application/json,.json" disabled={busy} onChange={event => void read(event.target.files?.[0])}/></label>
+      <Dialog.Description>{name} 的名称、分类、词条{subject === 'miko' ? '和表达设置' : ''}。</Dialog.Description>
+      <div className="profile-transfer-actions">
+        <button className="ui-button" disabled={busy} onClick={() => void exportFile()}><Upload size={16}/>导出资料</button>
+        <button className="ui-button" disabled={busy} onClick={() => fileInput.current?.click()}><Download size={16}/>导入资料</button>
+        <input ref={fileInput} hidden type="file" aria-label="选择资料文件" accept="application/json,.json" disabled={busy}
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void read(file); }}/>
+      </div>
         {card && <div className="profile-tools-preview"><h3>{name} → {card.name}</h3>
           <p>{card.categories.length} 个大分类 · {card.entries.length} 条资料{card.expression ? ' · 包含表达设置' : ''}</p>
-          <p>确认后替换当前人物的名称、分类和稳定词条{card.expression ? '，并应用文件中的表达设置' : ''}。导入前会自动备份原资料。</p>
+          <p>将替换当前资料{card.expression ? '和表达设置' : ''}，导入前会自动备份。</p>
           <details><summary>查看文件内容</summary><div className="profile-file-entries">
             <p className="profile-tools-note">{card.categories.map(c => c.name + (c.children.length ? '（' + c.children.map(s => s.name).join('、') + '）' : '')).join('；')}</p>
             {card.entries.map((entry, i) => <article key={i}><small>{entry.category || '待归类'}</small><p>{entry.content}</p></article>)}
             {card.expression && chatSections.map(({ key, label, icon: Icon }) => <div key={key}><h4 className="profile-expression-heading"><Icon size={15} strokeWidth={1.6} aria-hidden="true"/>{label} · {key === 'qq' ? '表达要求' : '基础设定'}</h4><pre>{card.expression![key]}</pre></div>)}
           </div></details><button className="send-button" disabled={busy} onClick={() => void apply()}>确认导入并替换</button></div>}
-      </section>
       {notice && <p role="status" className="profile-tools-notice">{notice}</p>}
       {backup && <a className="ui-button" href={'/api/profiles/portable/backups/' + backup} download><Download size={14}/>下载导入前的资料备份</a>}
       {error && <p role="alert">{error}</p>}{busy && <p role="status">正在处理…</p>}

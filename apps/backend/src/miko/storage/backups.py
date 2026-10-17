@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from contextlib import closing
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
@@ -41,14 +42,36 @@ def checksum(path):
 def archive_path(root, backup_id):
     if len(backup_id) != 32 or any(c not in '0123456789abcdef' for c in backup_id):
         raise ValueError('备份编号无效')
-    return Path(root) / 'backups/archives' / (backup_id + '.zip')
+    folder = Path(root) / 'backups/archives'
+    legacy = folder / (backup_id + '.zip')
+    if legacy.is_file():
+        return legacy
+    for path in folder.glob('*.zip'):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                if json.loads(archive.read('manifest.json')).get('id') == backup_id:
+                    return path
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+            continue
+    return legacy
 
 
-def create_backup(root, *, reason='manual'):
+def create_backup(root, *, reason='manual', name=''):
     root = Path(root).resolve()
     backup_id = uuid.uuid4().hex
-    destination = archive_path(root, backup_id)
+    name = name.strip()
+    if name.lower().endswith('.zip'):
+        name = name[:-4].rstrip()
+    name = name or ('恢复前备份' if reason == 'before-restore' else 'Miko备份') + '-' + datetime.now().strftime('%Y%m%d-%H%M%S')
+    if (len(name) > 80 or name.endswith(('.', ' ')) or any(c in '<>:"/\\|?*' or ord(c) < 32 for c in name)
+            or re.fullmatch(r'CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]', name.split('.')[0], re.I)):
+        raise ValueError('备份名称不能包含 \\ / : * ? " < > |，也不能使用系统保留名称')
+    destination = root / 'backups/archives' / (name + '.zip')
     destination.parent.mkdir(parents=True, exist_ok=True)
+    number = 2
+    while destination.exists():
+        destination = destination.with_name(f'{name} ({number}).zip')
+        number += 1
     (root / 'cache').mkdir(exist_ok=True)
     with TemporaryDirectory(dir=root / 'cache', prefix='backup-') as temporary:
         stage = Path(temporary)
@@ -80,7 +103,8 @@ def create_backup(root, *, reason='manual'):
         write_json(stage / 'config/expression.local.json', chat_prompts(root)[0])
         files = {p.relative_to(stage).as_posix(): {'bytes': p.stat().st_size, 'sha256': checksum(p)}
                  for p in sorted(stage.rglob('*')) if p.is_file()}
-        manifest = dict(format='miko-backup', version=1, app_version=__version__, reason=reason,
+        manifest = dict(format='miko-backup', version=1, id=backup_id, name=destination.stem,
+                        app_version=__version__, reason=reason,
                         created_at=datetime.now(timezone.utc).isoformat(), source_root=str(root), files=files)
         write_json(stage / 'manifest.json', manifest)
         partial = destination.with_suffix('.tmp')
@@ -91,7 +115,7 @@ def create_backup(root, *, reason='manual'):
             partial.replace(destination)
         finally:
             partial.unlink(missing_ok=True)
-    return dict(id=backup_id, created_at=manifest['created_at'], reason=reason,
+    return dict(id=backup_id, name=manifest['name'], created_at=manifest['created_at'], reason=reason,
                 bytes=destination.stat().st_size, files=len(files))
 
 
@@ -99,10 +123,12 @@ def backup_list(root):
     values = []
     for path in (Path(root) / 'backups/archives').glob('*.zip'):
         try:
-            archive_path(root, path.stem)
             with zipfile.ZipFile(path) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
-            values.append(dict(id=path.stem, bytes=path.stat().st_size,
+            backup_id = manifest.get('id', path.stem)
+            if not isinstance(backup_id, str) or not re.fullmatch('[0-9a-f]{32}', backup_id):
+                continue
+            values.append(dict(id=backup_id, name=manifest.get('name', '备份 ' + manifest['created_at'][:10]), bytes=path.stat().st_size,
                                created_at=manifest['created_at'], reason=manifest['reason'],
                                files=len(manifest['files'])))
         except (OSError, ValueError, KeyError, zipfile.BadZipFile):

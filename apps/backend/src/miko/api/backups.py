@@ -20,6 +20,11 @@ class RestoreInput(BaseModel):
     stage_id: str = Field(pattern='^[a-f0-9]{32}$')
 
 
+class BackupInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(default='', max_length=80)
+
+
 def backups_router(chat, qq):
     router = APIRouter(prefix='/api/settings/backups', dependencies=[Depends(local_request)])
     root = chat.settings.local_root
@@ -41,14 +46,16 @@ def backups_router(chat, qq):
         return {'backups': await asyncio.to_thread(backup_list, root)}
 
     @router.post('')
-    async def make_backup():
+    async def make_backup(body: BackupInput | None = None):
         async with lock:
             idle()
             try:
-                result = await asyncio.to_thread(create_backup, root)
-            except (OSError, ValueError):
+                result = await asyncio.to_thread(create_backup, root, name=body.name if body else '')
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+            except OSError:
                 raise HTTPException(400, '备份未完成，请检查磁盘空间和运行日志') from None
-            return dict(result, message='备份已保存在本机，可下载 ZIP 文件')
+            return dict(result, message='备份已创建')
 
     @router.get('/restore-status')
     async def restore_status():
@@ -62,7 +69,21 @@ def backups_router(chat, qq):
                 raise ValueError()
         except ValueError:
             raise HTTPException(404, '找不到这份备份') from None
-        return FileResponse(path, media_type='application/zip', filename='Miko-backup-' + backup_id[:8] + '.zip')
+        return FileResponse(path, media_type='application/zip', filename=path.name)
+
+    @router.post('/{backup_id}/open-folder')
+    async def open_backup_folder(backup_id: str):
+        try:
+            path = archive_path(root, backup_id)
+            if not path.is_file():
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(404, '找不到这份备份') from None
+        try:
+            os.startfile(path.parent)
+        except OSError:
+            raise HTTPException(400, '文件夹未能打开，请从本地数据目录旁的 backups 文件夹查看') from None
+        return {'message': '文件夹已打开'}
 
     @router.post('/inspect')
     async def inspect(request: Request):
