@@ -83,6 +83,45 @@ class HistoryToolTests(unittest.IsolatedAsyncioTestCase):
         forbidden = raw.replace('17', '19')
         self.assertRaises(ValueError, parse_bubbles, forbidden, records, [], quote_records=self.tools.quote_records())
 
+    async def test_group_sources_keep_each_messages_original_sender_name(self):
+        key = ('123', 'group-100')
+        for mid, name in ((21, '群里的阿林'), (22, '后来换的群名片')):
+            self.qq.event(key, mid, '周末一起吃饭', time.time()+mid, 'friend', {'sender_name': name})
+            self.qq.record(key, mid, 'qq:456')
+        with self.chat.store.connect() as db:
+            db.execute("UPDATE people SET display_name='私聊新备注' WHERE id='qq:456'")
+        self.memory.social.store.sync()
+        group = HistoryTools(self.memory, 'qq:123:group-100')
+        result = group.execute('search_messages', {'query': '吃饭'})
+        hits = [row for row in result['messages'] if row['id'] in result['hit_ids']]
+        self.assertEqual([row['sender'] for row in hits], ['群里的阿林', '后来换的群名片'])
+        self.assertEqual({row['sender_id'] for row in hits}, {'qq:456'})
+
+    async def test_search_current_role_and_owner_names_also_finds_former_names(self):
+        self.add(21, 'Miko说她爱听雨声')
+        self.add(22, '橙汁说他爱喝乌龙茶')
+        self.chat.store.rename_character('Niko')
+        self.chat.store.rename_character('阿澄', 'owner')
+        self.memory.social.store.sync()
+        tools = HistoryTools(self.memory, self.cid)
+        for name, expected in [('Niko', 21), ('阿澄', 22)]:
+            found = tools.execute('search_messages', {'query': name})
+            self.assertIn(expected, found['hit_ids'])
+
+    async def test_quoted_original_is_readable_and_recall_refreshes_cached_context(self):
+        self.qq.quote_snapshot(self.key, 18, {'message_id': 1, 'author': '朋友', 'text': '周六晚上一起去音乐会吗'})
+        result = self.tools.execute('get_context', {'message_id': 18, 'radius': 0})
+        quote = result['messages'][0]['quoted_message']
+        self.assertEqual(quote['message_id'], 1)
+        self.assertIn('音乐会', quote['text'])
+        self.assertIn({'message_id': 1}, self.tools.quote_records())
+        self.qq.recall(self.key, 1)
+        updated = self.tools.execute('get_context', {'message_id': 18, 'radius': 0})
+        quote = updated['messages'][0]['quoted_message']
+        self.assertEqual(quote['content_status'], 'unavailable')
+        self.assertNotIn('text', quote)
+        self.assertNotIn({'message_id': 1}, self.tools.quote_records())
+
     async def test_snapshot_pagination_and_long_message_read(self):
         first = self.tools.execute('read_conversation', {'order': 'oldest', 'limit': 2})
         self.add(21, '新消息不能挤入旧分页')

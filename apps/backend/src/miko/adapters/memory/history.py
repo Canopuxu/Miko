@@ -31,13 +31,22 @@ class ReadStore(ContextStore):
             db.executescript('''CREATE TEMP VIEW messages AS
               SELECT p.id,p.original_id,o.source AS platform,o.conversation_id,
                 p.conversation,p.conversation_type,p.sender_id,p.timestamp,p.content,
-                p.is_self,p.reply_to,n.display_name AS sender,'[]' AS media_json
+                p.is_self,p.reply_to,CASE WHEN n.kind='contact'
+                  THEN coalesce(nullif(json_extract(e.payload,'$.sender_name'),''),n.display_name)
+                  ELSE n.display_name END AS sender,'[]' AS media_json,
+                CASE WHEN q.recalled=1 THEN json_object('message_id',q.message_id,'content_status','unavailable')
+                  ELSE json_extract(e.payload,'$.quoted_message') END AS quoted_message,
+                (q.message_id IS NOT NULL AND q.recalled=0) AS quoted_local
               FROM main.messages p JOIN original.messages o ON o.id=p.original_id
               JOIN original.people n ON n.id=p.sender_id
+              LEFT JOIN original.qq_friends f ON f.conversation_id=o.conversation_id
+              LEFT JOIN original.qq_events e ON e.account=f.account AND e.friend=f.friend
+                AND e.message_id=CAST(substr(o.id,length(o.conversation_id)+2) AS INTEGER)
+              LEFT JOIN original.qq_events q ON q.account=f.account AND q.friend=f.friend
+                AND q.message_id=json_extract(e.payload,'$.quoted_message.message_id')
               WHERE p.conversation_id LIKE 'miko|%' AND o.status='completed'
                 AND o.conversation_id=miko_current_conversation()
-                AND NOT EXISTS(SELECT 1 FROM original.qq_events e
-                  WHERE o.id='qq:'||e.account||':'||e.friend||':'||e.message_id AND e.recalled=1);
+                AND coalesce(e.recalled,0)=0;
             ''')
             yield db
 
@@ -87,20 +96,24 @@ class HistoryTools(ReadTools):
         for row in rows:
             row = dict(row)
             mid = row['id']
-            if mid in self.messages:
-                admitted.append(self.messages[mid])
-                continue
+            previous = self.messages.get(mid)
             entry = {k: row[k] for k in ('id', 'original_id', 'platform', 'conversation_id', 'conversation',
                                          'conversation_type', 'sender', 'sender_id', 'is_self')}
             entry.update(time=datetime.fromtimestamp(row['timestamp'] / 1000, ZoneInfo('Asia/Shanghai')).isoformat(),
                          content=row['content'][:2000], truncated=len(row['content']) > 2000)
+            if row.get('quoted_message'):
+                quote = json.loads(row['quoted_message'])
+                entry['quoted_message'] = {key: quote[key] for key in ('message_id', 'author', 'text', 'content_status') if key in quote}
+                if 'text' in quote:
+                    entry['quoted_message'].update(text=quote['text'][:800], truncated=len(quote['text']) > 800)
             size = len(json.dumps(entry, ensure_ascii=False))
+            difference = size - len(json.dumps(previous, ensure_ascii=False)) if previous else size
             ceiling = self.max_chars if char_limit is None else min(self.max_chars, char_limit)
-            if len(self.messages) >= self.max_messages or self.used_chars + size > ceiling:
+            if (not previous and len(self.messages) >= self.max_messages) or self.used_chars + difference > ceiling:
                 self.incomplete = True
                 continue
             self.messages[mid], self.originals[mid] = entry, row
-            self.used_chars += size
+            self.used_chars += difference
             self.incomplete |= entry['truncated']
             admitted.append(entry)
         return admitted
@@ -136,6 +149,13 @@ class HistoryTools(ReadTools):
                 return {'error': 'reading_budget_exhausted'}
             try:
                 self._validate(name, args)
+                if name == 'search_messages':
+                    identity = self.memory.chat.store.identity()
+                    aliases = {alias.casefold(): subject for alias, subject in identity.aliases.items()}
+                    words = args['query'].split()
+                    subjects = {aliases[word.casefold()] for word in words if word.casefold() in aliases}
+                    words.extend(alias for alias, subject in identity.aliases.items() if subject in subjects)
+                    args = {**args, 'query': ' '.join(dict.fromkeys(words))}
                 if self.qq and 'message_id' in args:
                     with self.store.connect() as db:
                         row = db.execute('SELECT id FROM messages WHERE original_id=?',
@@ -154,6 +174,8 @@ class HistoryTools(ReadTools):
             row = self.originals.get(mid)
             return int(row['original_id'].rsplit(':', 1)[1]) if self.qq and row else mid
         def walk(item, key=''):
+            if key == 'quoted_message':
+                return item
             if isinstance(item, dict):
                 return {k: walk(v, k) for k, v in item.items()}
             if isinstance(item, list):
@@ -166,11 +188,17 @@ class HistoryTools(ReadTools):
     def quote_records(self):
         if not self.qq:
             return []
-        return [{'message_id': int(row['original_id'].rsplit(':', 1)[1])}
-                for row in self.originals.values()]
+        result = {int(row['original_id'].rsplit(':', 1)[1]) for row in self.originals.values()}
+        result.update(json.loads(row['quoted_message'])['message_id']
+                      for row in self.originals.values() if row.get('quoted_local') and row.get('quoted_message'))
+        return [{'message_id': mid} for mid in sorted(result)]
 
     def seed(self, context, query):
         """Attach short source windows for the memories actually selected this turn."""
+        # Memory.context has just synced the projection. Freeze that version,
+        # rather than syncing the full lexical/vector indexes twice per turn.
+        with self.store.connect() as db:
+            self.plan.snapshot_max_id = db.execute('SELECT coalesce(max(id),0) FROM messages').fetchone()[0]
         wordset = terms(' '.join(keywords(query)), limit=None)
         anchors = []
         for group in ('people_memory', 'dated_experiences'):

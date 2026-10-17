@@ -163,7 +163,6 @@ class ChatService:
             if (turn.conversation_id != 'memory' and self.memory and hasattr(self.memory, 'social')
                     and self.memory.social.control()['enabled']):
                 from miko.adapters.memory.history import HistoryTools
-                await self.memory.sync()
                 turn.history_tools = HistoryTools(self.memory, turn.conversation_id)
             if turn.qq_records is not None:
                 background = await compose_qq_context(self, turn.qq_records, turn.memory_key, turn.history_tools)

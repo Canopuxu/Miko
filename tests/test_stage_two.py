@@ -158,7 +158,9 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.store.begin_turn('history-web', 'history-old', '音乐会后来取消了')
         self.store.finish('history-old', '好，那就在家休息', 'completed', None)
         try:
-            result = await self.collect('之前的音乐会还去吗', 'history-web')
+            with patch.object(memory, 'sync', wraps=memory.sync) as sync:
+                result = await self.collect('之前的音乐会还去吗', 'history-web')
+            self.assertEqual(sync.await_count, 1)
             self.assertEqual(result[-1]['status'], 'completed', result)
             self.assertEqual(result[-1]['text'], '你好，Miko')
             self.assertEqual(len(self.requests), 2)
