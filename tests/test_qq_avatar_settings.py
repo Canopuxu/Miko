@@ -69,18 +69,24 @@ class AvatarSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.put(self.base,json={'enabled':True})).status_code,200)
             fetch.assert_not_awaited()
 
-    async def test_custom_images_manual_restore_and_default_reset(self):
+    async def test_custom_role_automatic_restore_and_default_reset(self):
         payload = {'image_base64':base64.b64encode(self.picture).decode()}
-        for kind in ['role','owner']:
-            response = await self.client.put(self.base+'/image/'+kind,json=payload)
-            self.assertEqual(response.status_code,200,response.text)
+        response = await self.client.put(self.base+'/image/role',json=payload)
+        self.assertEqual(response.status_code,200,response.text)
         self.assertEqual((await self.client.get(self.base+'/image/role')).content,self.picture)
         self.assertFalse((await self.client.get(self.base)).json()['using_default'])
-        with patch('miko.api.qq_avatar.current_qq_avatar',AsyncMock()) as fetch:
+        with patch('miko.api.qq_avatar.current_qq_avatar',AsyncMock(return_value=self.picture)) as fetch:
             await self.client.put(self.base,json={'enabled':True})
-            fetch.assert_not_awaited()
+            fetch.assert_awaited_once_with('123')
         self.assertTrue((await self.client.post(self.base+'/default')).json()['using_default'])
         self.assertTrue(self.qq.avatar.miko_file.endswith('role.image'))
+
+    async def test_role_can_be_customized_before_connecting_qq(self):
+        write_json(self.root/'config/qq.local.json',{})
+        response = await self.client.put(self.base+'/image/role',json={'image_base64':base64.b64encode(self.picture).decode()})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse(response.json()['using_default'])
+        self.assertEqual((await self.client.get(self.base+'/image/role')).content,self.picture)
 
     async def test_reject_active_edits_and_bad_image_without_losing_settings(self):
         self.qq.workers['reply'] = object()
@@ -93,11 +99,12 @@ class AvatarSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_account_switch_does_not_reuse_previous_accounts_images(self):
         payload = {'image_base64':base64.b64encode(self.picture).decode()}
         await self.client.put(self.base+'/image/role',json=payload)
-        await self.client.put(self.base+'/image/owner',json=payload)
+        with patch('miko.api.qq_avatar.current_qq_avatar',AsyncMock(return_value=self.picture)):
+            await self.client.put(self.base,json={'enabled':True})
         write_json(self.root/'config/qq.local.json',{**self.saved,'account':'456'})
         self.qq.client.config = QqConfig(**{**self.saved,'account':'456'})
         current = (await self.client.get(self.base)).json()
-        self.assertTrue(current['using_default'])
+        self.assertFalse(current['using_default'])
         self.assertFalse(current['has_owner'])
         self.assertFalse(current['enabled'])
 

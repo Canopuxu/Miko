@@ -5,7 +5,6 @@ import binascii
 import json
 from pathlib import Path
 import shutil
-from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,7 +42,7 @@ async def current_qq_avatar(account):
         image_info(raw)
         return raw
     except (httpx.HTTPError, ValueError):
-        raise HTTPException(400, '未能保存当前 QQ 头像，请先选择一张恢复头像，再开启切换') from None
+        raise HTTPException(400, '未能保存当前 QQ 头像，请检查网络后重试；头像切换尚未开启') from None
 
 
 def qq_avatar_router(chat, qq):
@@ -66,10 +65,13 @@ def qq_avatar_router(chat, qq):
         return root / 'data/qq/avatars' / account(saved)
 
     def files(saved):
+        custom = root / 'data/qq/avatars/role.image'
+        role = next((p for p in [custom, Path(saved.get('miko_avatar_file') or default), default] if p.is_file()), default)
         if not saved.get('account'):
-            return default, None
+            return role, None
         directory = folder(saved)
-        role = next((p for p in [Path(saved.get('miko_avatar_file') or directory / 'role.image'), default] if p.is_file()), default)
+        if not custom.is_file() and not saved.get('miko_avatar_file') and (directory / 'role.image').is_file():
+            role = directory / 'role.image'
         owner = Path(saved.get('owner_avatar_file') or directory / 'owner.image')
         return role, owner if owner.is_file() else None
 
@@ -116,12 +118,9 @@ def qq_avatar_router(chat, qq):
     async def status():
         return public()
 
-    @router.get('/image/{kind}')
-    async def image(kind: Literal['role', 'owner']):
-        role, owner = files(config())
-        path = role if kind == 'role' else owner
-        if not path:
-            raise HTTPException(404, '尚未保存恢复头像')
+    @router.get('/image/role')
+    async def image():
+        path, _ = files(config())
         info = image_info(path.read_bytes())
         mime = {'PNG':'image/png','JPEG':'image/jpeg','GIF':'image/gif','WEBP':'image/webp'}[info['format']]
         return FileResponse(path, media_type=mime, headers={'Cache-Control':'private, no-store'})
@@ -148,8 +147,8 @@ def qq_avatar_router(chat, qq):
             persist(saved, role, owner, body.enabled)
             return public()
 
-    @router.put('/image/{kind}')
-    async def upload(kind: Literal['role', 'owner'], body: AvatarImage):
+    @router.put('/image/role')
+    async def upload(body: AvatarImage):
         try:
             raw = base64.b64decode(body.image_base64, validate=True)
             image_info(raw)
@@ -158,17 +157,14 @@ def qq_avatar_router(chat, qq):
         async with lock:
             idle()
             saved = config()
-            directory = folder(saved)
-            role, owner = files(saved)
+            directory = root / 'data/qq/avatars'
+            _, owner = files(saved)
             await restore()
-            path = directory / ('role.image' if kind == 'role' else 'owner.image')
+            path = directory / 'role.image'
             directory.mkdir(parents=True, exist_ok=True)
             path.write_bytes(raw)
-            if kind == 'role':
-                role = path
-            else:
-                owner = path
-            persist(saved, role, owner, enabled(saved))
+            if saved.get('account'):
+                persist(saved, path, owner, enabled(saved))
             return public()
 
     @router.post('/default')
@@ -178,7 +174,11 @@ def qq_avatar_router(chat, qq):
             saved = config()
             _, owner = files(saved)
             await restore()
-            persist(saved, default, owner, enabled(saved))
+            path = root / 'data/qq/avatars/role.image'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(default, path)
+            if saved.get('account'):
+                persist(saved, path, owner, enabled(saved))
             return public()
 
     return router

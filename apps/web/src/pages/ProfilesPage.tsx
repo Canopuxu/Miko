@@ -3,8 +3,9 @@ import { AppShell, NavigationContext } from '../components/AppShell';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/persona.css';
-import { ArrowDownUp, Check, Pencil, Pin, Plus, Save, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { ArrowDownUp, Check, Image, Pencil, Pin, Plus, Save, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { ExpressionSettingsDialog, ProfileTransferDialog } from './ProfileTools';
+import { AvatarSettingsDialog } from '../components/QqAvatarSettings';
 import { useDiscardGuard, useNotice } from '../components/ui';
 import { useCharacterName, useOwnerName, useRuntime } from '../components/RuntimeStatus';
 
@@ -50,7 +51,7 @@ export function ProfilesPage() {
   const ownerName = useOwnerName();
   const [renaming,setRenaming]=useState(false);
   const [nameHighlighted,setNameHighlighted]=useState(false);
-  const [tools, setTools] = useState<'expression' | 'transfer' | null>(null);
+  const [tools, setTools] = useState<'avatar' | 'expression' | 'transfer' | null>(null);
   const [nameDraft,setNameDraft]=useState('');
   const [subject, setSubject] = useState<Subject>('miko');
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -319,6 +320,7 @@ export function ProfilesPage() {
       <button className="text-button" disabled={busy} aria-label={subject==='miko'?'重命名角色':'修改我的名字'} title="修改名字"
         onClick={()=>guard.proceed(()=>{setNameHighlighted(false);setNameDraft(currentName);setRenaming(true);})}><Pencil size={16}/></button></>}</div>
       <div className="header-actions persona-tools-actions">
+        {subject === 'miko' && <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('avatar'); })}><Image size={15}/>头像设置</button>}
         {subject === 'miko' && <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('expression'); })}><SlidersHorizontal size={14}/>表达设置</button>}
         <button className="ui-button" onClick={() => guard.proceed(() => { setEdit(null); setCategoryEdit(null); setTools('transfer'); })}><ArrowDownUp size={14}/>导入导出</button>
       </div></header>
@@ -380,6 +382,7 @@ export function ProfilesPage() {
         </div>
       </AlertDialog.Content>
     </AlertDialog.Root>
+    {tools === 'avatar' && <AvatarSettingsDialog onClose={() => setTools(null)}/>}
     {tools === 'expression' && <ExpressionSettingsDialog onClose={() => setTools(null)}/>}
     {tools === 'transfer' && <ProfileTransferDialog subject={subject} name={currentName} onClose={() => setTools(null)} onApplied={() => {
       setEdit(null); setCategoryEdit(null); setPreview(null); setRevision(value => value + 1); void runtime.refresh();
