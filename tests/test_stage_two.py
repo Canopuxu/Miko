@@ -21,6 +21,8 @@ from miko.settings import ProviderConfig, Settings, REPO_ROOT
 from miko.storage.chat import ChatStore
 from miko.storage.qq import QqStore
 from miko.api.profiles import ProfileInput
+from miko.adapters.memory.retrieval import LocalRecall
+from miko.domain.conversation.context_selection import candidates, source_key
 
 
 LOCAL_ROOT = Path(__file__).resolve().parents[2] / "MikoLocal"
@@ -48,13 +50,15 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         config = ProviderConfig(api_base=settings.url + "/fake", api_key="fake-private-key", model="fake-model")
         with patch.object(Settings, "load_provider", return_value=config), patch.object(Settings, "load_qq_provider", return_value=None):
             self.service = ChatService(settings, self.store)
+        self.local = LocalRecall(settings.local_root / 'retrieval.sqlite3')
         async def context(query, key=None, conversation_id=None, **kwargs):
             material = self.service.profiles.context(query, key)
             if self.service.life:
                 material['life_entries'] = self.service.life.context(query)
                 material['life_goals'] = self.service.life.goals_context(query)
+            self.index_material(material)
             return material
-        self.service.memory = SimpleNamespace(context=context, reranker=None, local=None)
+        self.service.memory = SimpleNamespace(context=context, reranker=None, local=self.local)
         app = FastAPI()
         app.include_router(chat_router(self.service))
 
@@ -126,6 +130,10 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         async for line in response.aiter_lines():
             if line.startswith("data:"):
                 yield json.loads(line[5:])
+
+    def index_material(self, material):
+        self.local.sync({source_key(row): {'row': row, 'peer': row['source'].get('peer', '')}
+                         for row in candidates(material)[1]})
 
     async def collect(self, message, conversation_id=None):
         async with self.client.stream("POST", "/api/chat", json={
@@ -282,8 +290,8 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.history(events[0]['conversation_id']), [])
 
     async def test_qq_uses_approved_identity_and_author_records(self):
-        records = [{'author': {'kind': 'owner', 'name': '你'}, 'text': '我稍后回来'},
-                   {'author': {'kind': 'contact', 'name': '测试好友'}, 'text': '你好'}]
+        records = [{'author': {'id': 'owner', 'kind': 'owner', 'name': '你'}, 'text': '我稍后回来'},
+                   {'author': {'id': 'qq:456', 'kind': 'contact', 'name': '测试好友'}, 'text': '你好'}]
         turn = self.service.begin_qq('qq:123:456', records)
         await asyncio.wait_for(turn.task, 10)
         self.assertEqual(turn.status, 'completed', turn.error)
@@ -304,7 +312,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_qq_image_parts_reach_provider_request(self):
         image_url = 'data:image/jpeg;base64,aW1hZ2U='
-        records = [{'author': {'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
+        records = [{'author': {'id': 'qq:456', 'kind': 'contact', 'name': '测试好友'}, 'message_id': 42,
                     'text': '[图片]', '_image_inputs': [
                         {'type': 'text', 'text': '消息 42 · 图片 1'},
                         {'type': 'image_url', 'image_url': {'url': image_url}}]}]
@@ -360,7 +368,7 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         await self.collect('和朋友甲聊设计')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
-        records = [{'author': {'kind':'contact','name':'朋友甲'}, 'text':'你和橙汁最近在学什么设计？'}]
+        records = [{'author': {'id':'qq:456','kind':'contact','name':'朋友甲'}, 'text':'你和橙汁最近在学什么设计？'}]
         turn = self.service.begin_qq('qq:123:456', records)
         await asyncio.wait_for(turn.task, 10)
         self.assertEqual(turn.status, 'completed', turn.error)
@@ -379,10 +387,11 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
                   'target_date': '2026-10-20', 'status': 'active'}]
         self.service.life = SimpleNamespace(context=lambda query: entries, goals_context=lambda query: goals,
                                             records=lambda: entries)
-        await self.collect('你最近在做什么')
+        await self.collect('你练构图和拍窗边照片怎么样了')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
-        turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'}, 'text': '你在做什么'}])
+        turn = self.service.begin_qq('qq:123:456', [{'author': {'id': 'qq:456', 'kind': 'contact', 'name': '朋友甲'},
+                                                'text': '你练构图和拍窗边照片怎么样了'}])
         await asyncio.wait_for(turn.task, 10)
         self.assertEqual(turn.status, 'completed', turn.error)
         qq_prompt = self.requests[-1]['messages'][0]['content']
@@ -411,14 +420,15 @@ class StageTwoTests(unittest.IsolatedAsyncioTestCase):
         })
         original = deepcopy(material)
 
-        async def context(*args):
-            return material
-        self.service.memory = SimpleNamespace(context=context, reranker=None)
-        await self.collect('最近在做什么')
+        self.index_material(material)
+        async def context(*args, **kwargs):
+            return deepcopy(material)
+        self.service.memory = SimpleNamespace(context=context, reranker=None, local=self.local)
+        await self.collect('明天练构图的摄影计划怎么样了？你和朋友甲刚认识吗？')
         web_prompt = self.requests[-1]['messages'][0]['content']
         web = json.loads(web_prompt.split('\n\n', 2)[2])
-        turn = self.service.begin_qq('qq:123:456', [{'author': {'kind': 'contact', 'name': '朋友甲'},
-                                                'text': '最近在做什么'}])
+        turn = self.service.begin_qq('qq:123:456', [{'author': {'id': 'qq:456', 'kind': 'contact', 'name': '朋友甲'},
+                                                'text': '明天练构图的摄影计划怎么样了？你和朋友甲刚认识吗？'}])
         await asyncio.wait_for(turn.task, 10)
         self.assertEqual(turn.status, 'completed', turn.error)
         prompt = self.requests[-1]['messages'][0]['content']
