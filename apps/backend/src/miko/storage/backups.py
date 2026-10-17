@@ -17,7 +17,7 @@ from miko import __version__
 from miko.settings import chat_prompts, write_json
 
 DATA_DIRS = ('attachments', 'database', 'life', 'qq')
-CONFIG_FILES = ('provider.local.json', 'qq-provider.local.json', 'life-provider.local.json',
+CONFIG_FILES = ('provider.local.json', 'models-draft.local.json', 'qq-provider.local.json', 'life-provider.local.json',
                 'memory-provider.local.json', 'embedding.local.json', 'rerank.local.json',
                 'life.local.json', 'memory.local.json', 'retrieval.local.json', 'expression.local.json', 'qq.local.json')
 
@@ -177,7 +177,7 @@ def inspect_backup(archive_file, stage):
             write_json(stage / 'manifest.json', manifest)
         return dict(created_at=manifest['created_at'], app_version=manifest['app_version'],
                     files=len(files), bytes=sum(row['bytes'] for row in files.values()),
-                    has_api_keys=any('provider' in name or 'embedding' in name or 'rerank' in name
+                    has_api_keys=any('provider' in name or 'embedding' in name or 'rerank' in name or name == 'config/models-draft.local.json'
                                      for name in files if name.startswith('config/')))
     except Exception as exc:
         shutil.rmtree(stage)

@@ -45,7 +45,7 @@ export function DataBackups() {
           window.location.assign('/?view=settings&section=data');
         } else if (status.state === 'error' || status.state === 'idle' || status.state === 'interrupted') {
           sessionStorage.removeItem('miko-restoring'); setRestoring(false);
-          setError(status.message || '恢复未开始，请重新选择文件'); void load();
+          setNotice('');setError(status.message || '恢复未开始，请重新选择文件'); void load().catch(() => {});
         } else { setNotice(status.message || '正在恢复数据…'); }
       } catch { if (alive) setNotice('服务正在重新启动，请稍候…'); }
     };
@@ -75,7 +75,6 @@ export function DataBackups() {
     if (!file) return;
     setBusy('inspect'); setPreview(null); setError(''); setNotice('');
     try {
-      if (file.size > 2 * 1024 ** 3) throw new Error('备份文件超过 2 GiB');
       const response = await fetch('/api/settings/backups/inspect', { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
       if (!response.ok) throw new Error(await responseError(response));
       setPreview(await response.json());
@@ -104,7 +103,7 @@ export function DataBackups() {
       <p>会替换当前的聊天、资料、记忆、生活和设置。恢复前自动备份当前数据，完成后重新启动服务。QQ 需要重新选择账号连接。</p>
       <div className="settings-actions"><button className="settings-primary" disabled={!!busy} onClick={() => setConfirming(true)}>恢复这份备份</button><button disabled={!!busy} onClick={() => setPreview(null)}>取消</button></div></div>}
     {busy && <p role="status" className="settings-notice"><LoaderCircle size={16} className="spinning"/>{busy === 'create' ? '正在创建备份…' : busy === 'inspect' ? '正在检查备份文件…' : '正在准备恢复…'}</p>}
-    {notice && <p role="status" className="settings-notice">{restoring && <LoaderCircle size={16} className="spinning"/>}{notice}</p>}
+    {notice && !error && <p role="status" className="settings-notice">{restoring && <LoaderCircle size={16} className="spinning"/>}{notice}</p>}
     {error && <p role="alert" className="error-notice">{error}</p>}
     <Dialog.Root open={creating} onOpenChange={open => { if (!busy) setCreating(open); }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/>
       <Dialog.Content className="runtime-dialog backup-confirm-dialog" aria-describedby={undefined}><header className="runtime-heading"><Dialog.Title>创建备份</Dialog.Title>

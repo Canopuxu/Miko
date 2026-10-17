@@ -97,6 +97,24 @@ class BackupTests(unittest.TestCase):
             apply_backup(self.root, stage)
         self.assertEqual(self.value(self.root), '待备份的聊天')
 
+    def test_restore_replaces_pending_api_edits_instead_of_leaving_stale_settings(self):
+        target = Path(self.tmp.name) / 'draft-target'
+        (target / 'config').mkdir(parents=True)
+        pending = {'provider': {'api_base': 'https://pending.example/v1', 'api_key': 'draft-secret', 'model': ''}}
+        write_json(target / 'config/models-draft.local.json', pending)
+        first = create_backup(self.root)
+        stage = target / 'cache/first'
+        inspect_backup(archive_path(self.root, first['id']), stage)
+        apply_backup(target, stage)
+        self.assertFalse((target / 'config/models-draft.local.json').exists())
+        write_json(self.root / 'config/models-draft.local.json', pending)
+        second = create_backup(self.root)
+        stage = target / 'cache/second'
+        summary = inspect_backup(archive_path(self.root, second['id']), stage)
+        self.assertNotIn('draft-secret', json.dumps(summary))
+        apply_backup(target, stage)
+        self.assertEqual(json.loads((target / 'config/models-draft.local.json').read_text('utf-8')), pending)
+
     def test_named_backups_do_not_overwrite_and_legacy_files_remain_visible(self):
         first = create_backup(self.root, name='首次配置.zip')
         second = create_backup(self.root, name='首次配置')

@@ -132,7 +132,7 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
     (app / 'portable-files.sha256').write_text('\n'.join(checksums) + '\n', encoding='utf-8')
     # MikoLocal is deliberately absent: extracting a newer archive cannot replace user data.
     zip_path = output.parent / (output.name + '.zip')
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
         for path in sorted(output.rglob('*')):
             if path.is_file() and path.relative_to(output).parts[0] != 'MikoLocal':
                 bundle.write(path, Path('Miko') / path.relative_to(output))

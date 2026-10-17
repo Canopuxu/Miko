@@ -101,19 +101,20 @@ export function SettingsPage(){
     return()=>{active=false;window.clearInterval(timer);};
   },[section]);
   useEffect(()=>{if(!dirty||saveState==='waiting')return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[dirty,saveState]);
-  function markDirty(){revision.current++;setSaveState('idle');setSaveError('');setTestResults({});setDirtySections(items=>items.includes(section)?items:[...items,section]);setNotice('');}
+  function markDirty(){revision.current++;setSaveState('idle');setSaveError('');setTestResults({});setBusy(current=>current==='test'||current.startsWith('test-')?'':current);setDirtySections(items=>items.includes(section)?items:[...items,section]);setNotice('');}
   function edit(value:Config){setConfig(value);markDirty();}
   async function action(name:string,path:string,body:unknown,method='POST',saved=false){
     const testing=name==='test'||name.startsWith('test-');
+    const testedRevision=revision.current;
     setBusy(name);setError('');setNotice('');
     if(testing)setTestResults(current=>({...current,[name]:{state:'running',message:'正在测试…'}}));
     try{const response=await fetch('/api/settings'+path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
       if(!response.ok)throw new Error(await responseError(response));const result=await response.json();
-      if(testing)setTestResults(current=>({...current,[name]:{state:'success',message:result.message}}));else setNotice(result.message);
+      if(testing){if(revision.current===testedRevision)setTestResults(current=>({...current,[name]:{state:'success',message:result.message}}));}else setNotice(result.message);
       if(saved){const next=await getJson<Config>('/api/settings');setConfig(current=>current?(path==='/models'?{...next,qq:current.qq}:{...current,qq:next.qq}):next);setDirtySections(items=>items.filter(item=>item!==(path==='/models'?'models':'qq')));await runtime.refresh();}
     }catch(e){const message=e instanceof Error?e.message:String(e);
-      if(testing)setTestResults(current=>({...current,[name]:{state:'error',message}}));else setError(message);
-    }finally{setBusy('');}
+      if(testing){if(revision.current===testedRevision)setTestResults(current=>({...current,[name]:{state:'error',message}}));}else setError(message);
+    }finally{if(!testing||revision.current===testedRevision)setBusy(current=>current===name?'':current);}
   }
   const models=config?{provider:cleanProvider(config.provider),qq_provider:config.qq_provider?cleanProvider(config.qq_provider):null,
     life_provider:config.life_provider?cleanProvider(config.life_provider):null,
