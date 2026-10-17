@@ -7,7 +7,7 @@ if (Test-Path -LiteralPath $releaseRoot) { throw 'Release output already exists.
 New-Item -ItemType Directory -Path $releaseApp -Force | Out-Null
 
 # Explicit source list: never copy the installed environment or private local data.
-$releaseFiles = @('LICENSE','THIRD_PARTY.md','pyproject.toml','requirements.lock.txt',
+$releaseFiles = @('README.md','LICENSE','THIRD_PARTY.md','pyproject.toml','requirements.lock.txt',
     'config/python-dependencies.lock.json','config/web-dependencies.lock.json','config/upstream.lock.json',
     'workspace.layout.json','scripts/common.ps1','scripts/start.ps1','scripts/stop.ps1',
     'scripts/status.ps1','scripts/check.ps1','scripts/setup.ps1','scripts/prepare_workspace.ps1',

@@ -4,66 +4,88 @@
     {
       "name": "Miko",
       "purpose": "可版本管理的源码、接口、开发脚本与静态资源",
-      "directories": [
-        { "path": "apps/web/src/pages", "purpose": "统一 Web 页面的入口" },
-        { "path": "apps/web/src/components", "purpose": "通用界面组件" },
-        { "path": "apps/web/src/styles", "purpose": "样式与主题" },
-        { "path": "apps/backend/src/miko/api", "purpose": "界面与后台的接口" },
-        { "path": "apps/backend/src/miko/domain/conversation", "purpose": "接话、主导权、好友关系与转达任务" },
-        { "path": "apps/backend/src/miko/domain/memory", "purpose": "核心记忆、人物属性、事件与记忆变更" },
-        { "path": "apps/backend/src/miko/domain/life", "purpose": "持续的自主生活与活动进展" },
-        { "path": "apps/backend/src/miko/domain/feedback", "purpose": "回复批注、修正与适用范围" },
-        { "path": "apps/backend/src/miko/adapters/qq", "purpose": "QQ 接收、发送与来源识别" },
-        { "path": "apps/backend/src/miko/adapters/dsh", "purpose": "DSH 调用与执行事件桥接" },
-        { "path": "apps/backend/src/miko/adapters/memu", "purpose": "memU 记忆文档与语义索引适配" },
-        { "path": "apps/backend/src/miko/storage", "purpose": "正式记录、版本、索引同步与数据库迁移" },
-        { "path": "apps/backend/src/miko/jobs", "purpose": "后台调度与记忆整理任务" },
-        { "path": "packages/dsh-miko/src/client", "purpose": "Miko 的 DSH 客户端扩展" },
-        { "path": "packages/dsh-miko/src/server", "purpose": "Miko 的 DSH 宿主扩展" },
-        { "path": "contracts/api", "purpose": "跨 Python 与 TypeScript 的接口契约" },
-        { "path": "contracts/events", "purpose": "消息、记忆与生活事件的公共格式" },
-        { "path": "config/defaults", "purpose": "可提交的非私密默认配置" },
-        { "path": "config/examples", "purpose": "后续填写的配置示例" },
-        { "path": "assets", "purpose": "可提交的头像、图标与其他静态资源" },
-        { "path": "scripts", "purpose": "开发、启动、迁移与打包脚本" },
-        { "path": "tests", "purpose": "后续功能验证" },
-        { "path": "docs", "purpose": "后续设计与使用文档" },
-        { "path": "licenses", "purpose": "实际复用模块的许可副本" }
-      ]
+      "directories": []
     },
     {
       "name": "MikoLocal",
       "purpose": "Miko 专属的私人资料、状态、环境与运行产物",
       "directories": [
-        { "path": "config", "purpose": "本机配置与凭据" },
-        { "path": "personas/miko", "purpose": "用户填写的 Miko 原创设定" },
-        { "path": "profiles/owner", "purpose": "用户填写的本人资料" },
-        { "path": "profiles/contacts", "purpose": "好友资料" },
-        { "path": "data/database", "purpose": "正式消息、事件、关系、批注与记忆版本数据库" },
-        { "path": "data/attachments", "purpose": "运行产生或导入的附件" },
-        { "path": "memory/documents/core", "purpose": "稳定记忆的可读视图" },
-        { "path": "memory/documents/people", "purpose": "人物与属性的可读视图" },
-        { "path": "memory/documents/days", "purpose": "按日期组织的事件与生活视图" },
-        { "path": "memory/documents/topics", "purpose": "按主题组织的记忆视图" },
-        { "path": "memory/documents/feedback", "purpose": "表达反馈的可读视图" },
-        { "path": "memory/index", "purpose": "可重建的关键词与语义索引" },
-        { "path": "memory/staging", "purpose": "记忆生成与提交的临时工作区" },
-        { "path": "dsh/home", "purpose": "独立 DSH 配置、插件、凭据和会话" },
-        { "path": "dsh/agents", "purpose": "独立的共享 Agent 配置根，供 Miko 实例专用" },
-        { "path": "dsh/skills", "purpose": "Miko 实例专属技能" },
-        { "path": "dsh/workspace", "purpose": "Miko 的运行工作目录" },
-        { "path": "envs/python", "purpose": "待创建的独立 Python 虚拟环境" },
-        { "path": "runtime/dsh", "purpose": "待安装的项目专用 DSH 运行程序" },
-        { "path": "runtime/pids", "purpose": "运行进程标识" },
-        { "path": "cache/python", "purpose": "Python 依赖缓存" },
-        { "path": "cache/pnpm", "purpose": "项目专用 pnpm 缓存" },
-        { "path": "cache/models", "purpose": "模型文件缓存" },
-        { "path": "cache/tmp", "purpose": "临时产物" },
-        { "path": "logs", "purpose": "运行日志" },
-        { "path": "backups", "purpose": "本地备份" },
-        { "path": "imports", "purpose": "待导入资料" },
-        { "path": "exports", "purpose": "用户导出资料" },
-        { "path": "research/upstream", "purpose": "后续开源源码调研副本" }
+        {
+          "path": "config",
+          "purpose": "本机配置与凭据"
+        },
+        {
+          "path": "data/database",
+          "purpose": "正式消息、事件、关系、批注与记忆版本数据库"
+        },
+        {
+          "path": "data/attachments",
+          "purpose": "运行产生或导入的附件"
+        },
+        {
+          "path": "dsh/home",
+          "purpose": "独立 DSH 配置、插件、凭据和会话"
+        },
+        {
+          "path": "dsh/agents",
+          "purpose": "独立的共享 Agent 配置根，供 Miko 实例专用"
+        },
+        {
+          "path": "dsh/workspace",
+          "purpose": "Miko 的运行工作目录"
+        },
+        {
+          "path": "envs/python",
+          "purpose": "待创建的独立 Python 虚拟环境"
+        },
+        {
+          "path": "runtime/dsh",
+          "purpose": "待安装的项目专用 DSH 运行程序"
+        },
+        {
+          "path": "runtime/pids",
+          "purpose": "运行进程标识"
+        },
+        {
+          "path": "cache/python",
+          "purpose": "Python 依赖缓存"
+        },
+        {
+          "path": "cache/pnpm",
+          "purpose": "项目专用 pnpm 缓存"
+        },
+        {
+          "path": "cache/tmp",
+          "purpose": "临时产物"
+        },
+        {
+          "path": "logs",
+          "purpose": "运行日志"
+        },
+        {
+          "path": "backups",
+          "purpose": "本地备份"
+        },
+        {
+          "path": "data/life",
+          "purpose": "生活记录"
+        },
+        {
+          "path": "data/qq",
+          "purpose": "QQ 消息与媒体"
+        },
+        {
+          "path": "cache/npm",
+          "purpose": "npm 缓存"
+        },
+        {
+          "path": "cache/dsh-resources",
+          "purpose": "DSH 资源缓存"
+        },
+        {
+          "path": "cache/jieba",
+          "purpose": "分词缓存"
+        }
       ]
     }
   ]

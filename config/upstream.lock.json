@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "stage": "source-preparation",
   "sources": [
     {
       "name": "deepseek-harness",
@@ -9,8 +8,6 @@
       "version": "0.2.1-alpha.2",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "localPath": "../MikoLocal/research/upstream/deepseek-harness",
-      "checkout": "full",
       "selectedModules": [
         "python/sdk",
         "packages/core/system-prompt",
@@ -31,13 +28,6 @@
       "version": "0.11.0-beta.3",
       "license": "Apache-2.0",
       "licenseFile": "LICENSE.txt",
-      "localPath": "../MikoLocal/research/upstream/memU",
-      "checkout": "sparse",
-      "sparseDirectories": [
-        "src",
-        "tests",
-        "docs"
-      ],
       "selectedModules": [
         "src/memu/app/service.py",
         "src/memu/app/agentic.py",
@@ -55,12 +45,6 @@
       "commit": "358c16bbc6d687937d79bc2f984a11c3be8da901",
       "license": "Apache-2.0",
       "licenseFile": "LICENSE",
-      "localPath": "../MikoLocal/research/upstream/memobase",
-      "checkout": "sparse",
-      "sparseDirectories": [
-        "src/server/api",
-        "docs/site"
-      ],
       "selectedModules": [
         "src/server/api/memobase_server/controllers/modal/chat/extract.py",
         "src/server/api/memobase_server/controllers/modal/chat/merge.py",
@@ -78,8 +62,6 @@
       "version": "0.42.1",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "localPath": "../MikoLocal/research/upstream/jieba",
-      "checkout": "full",
       "selectedModules": [
         "jieba"
       ],
@@ -92,15 +74,6 @@
       "commit": "7b603d32bc72cab082a3b39aa52658b64bd506ff",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "localPath": "../MikoLocal/research/upstream/tulpa-qq-baseline",
-      "checkout": "git-archive",
-      "archivePaths": [
-        "chatlocal",
-        "harness",
-        "requirements",
-        "requirements.txt",
-        "LICENSE"
-      ],
       "selectedModules": [
         "chatlocal/private_replies.py",
         "chatlocal/reply_live.py",
