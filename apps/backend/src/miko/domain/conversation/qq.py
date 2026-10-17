@@ -1,6 +1,6 @@
 """Private-message scheduler adapted from Tulpa's local QQ loop."""
 from miko.adapters.qq.images import attach_images
-from miko.adapters.qq.avatar import ReplyAvatar
+from miko.adapters.qq.avatar import ReplyAvatar, initialize_reply_avatar
 
 import asyncio
 from dataclasses import dataclass
@@ -51,7 +51,9 @@ class QqService:
         self.stickers = StickerLibrary(self.store, Path(local_root) / 'data/qq/stickers')
         self.client = client or (create_client(config, Path(local_root)) if config else None)
         self.avatar = (ReplyAvatar(self.client, config.miko_avatar_file, config.owner_avatar_file)
-                       if config and config.miko_avatar_file and config.owner_avatar_file else None)
+                       if config and config.avatar_switch_enabled and config.miko_avatar_file and config.owner_avatar_file else None)
+        self.avatar_task = None
+        self.avatar_error = ''
         self.receiver = create_receiver(self.client, self.receive, self.source_changed) if self.client else None
         self.stickers.bind(self)
         if config:
@@ -75,6 +77,20 @@ class QqService:
         if self.receiver:
             self.receiver.start()
         self.loop_task = asyncio.create_task(self.loop())
+        self.avatar_task = asyncio.create_task(self.prepare_avatar())
+
+    async def prepare_avatar(self):
+        self.avatar_error = ''
+        if not self.client or self.avatar or not getattr(self.client, 'config', None) or not self.client.config.avatar_switch_enabled:
+            return
+        while self.receiver and self.receiver.status()['state'] != 'connected':
+            await asyncio.sleep(.5)
+        if self.halted or not self.receiver:
+            return
+        try:
+            await initialize_reply_avatar(self, self.chat.settings.local_root)
+        except (ValueError, OSError) as exc:
+            self.avatar_error = str(exc)
 
     def sync_groups(self):
         if isinstance(self.client, NativeQq):
@@ -83,6 +99,10 @@ class QqService:
 
     async def close(self):
         self.halted = True
+        if self.avatar_task:
+            self.avatar_task.cancel()
+            await asyncio.gather(self.avatar_task, return_exceptions=True)
+            self.avatar_task = None
         await self.language.close()
         if self.loop_task:
             self.loop_task.cancel()
@@ -418,9 +438,13 @@ class QqService:
                     await self.pause_between(key, worker, bubbles[i-1])
                 self.check(key, worker)
                 self.store.update_bubble(worker.run_id, i, state='preparing')
-                if i == 0 and self.avatar:
-                    await self.avatar.acquire(worker.run_id)
-                    self.check(key, worker)
+                if i == 0:
+                    if self.avatar_task and not self.avatar_task.done():
+                        await asyncio.shield(self.avatar_task)
+                        self.check(key, worker)
+                    if self.avatar:
+                        await self.avatar.acquire(worker.run_id)
+                        self.check(key, worker)
                 if bubble['kind'] == 'reaction':
                     def reaction_guard():
                         self.check(key, worker)

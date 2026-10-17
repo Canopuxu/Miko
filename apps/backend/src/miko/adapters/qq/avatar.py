@@ -1,6 +1,78 @@
 """One account avatar shared by overlapping reply batches."""
 import asyncio
 import logging
+import json
+from pathlib import Path
+import shutil
+
+import httpx
+
+from miko.adapters.qq.media import image_info, MAX_BYTES
+from miko.settings import REPO_ROOT, write_json
+
+
+async def current_qq_avatar(account):
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True, trust_env=False) as client:
+            async with client.stream('GET', 'https://q1.qlogo.cn/g', params={'b':'qq','nk':account,'s':'640'}) as response:
+                response.raise_for_status()
+                chunks, size = [], 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_BYTES:
+                        raise ValueError('头像图片过大')
+                    chunks.append(chunk)
+        raw = b''.join(chunks)
+        image_info(raw)
+        return raw
+    except (httpx.HTTPError, ValueError):
+        raise ValueError('未能保存当前 QQ 头像，请检查网络后重试') from None
+
+
+def avatar_files(root, saved):
+    default = REPO_ROOT / 'config/defaults/qq-avatar.png'
+    custom = root / 'data/qq/avatars/role.image'
+    role = next((p for p in [custom, Path(saved.get('miko_avatar_file') or default), default] if p.is_file()), default)
+    uid = str(saved.get('account', ''))
+    if not uid:
+        return role, None
+    if not uid.isascii() or not uid.isdigit() or int(uid) <= 0:
+        raise ValueError('请先连接 QQ 账号')
+    directory = root / 'data/qq/avatars' / uid
+    if not custom.is_file() and not saved.get('miko_avatar_file') and (directory / 'role.image').is_file():
+        role = directory / 'role.image'
+    owner = Path(saved.get('owner_avatar_file') or directory / 'owner.image')
+    return role, owner if owner.is_file() else None
+
+
+async def initialize_reply_avatar(qq, root):
+    path = root / 'config/qq.local.json'
+    client = qq.client
+    if not client or qq.avatar or not path.is_file():
+        return
+    saved = json.loads(path.read_text('utf-8-sig'))
+    if not saved.get('avatar_switch_enabled', True) or saved.get('account') != client.config.account:
+        return
+    _, owner = avatar_files(root, saved)
+    raw = await current_qq_avatar(saved['account']) if not owner else None
+    latest = json.loads(path.read_text('utf-8-sig'))
+    if qq.client is not client or not latest.get('avatar_switch_enabled', True) or latest.get('account') != saved['account']:
+        return
+    role, owner = avatar_files(root, latest)
+    directory = root / 'data/qq/avatars' / saved['account']
+    directory.mkdir(parents=True, exist_ok=True)
+    if not owner:
+        owner = directory / 'owner.image'
+        owner.write_bytes(raw)
+    for source, name in [(role, 'role.image'), (owner, 'owner.image')]:
+        target = directory / name
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+    update = {'avatar_switch_enabled':True,'miko_avatar_file':str(directory/'role.image'),
+              'owner_avatar_file':str(directory/'owner.image')}
+    write_json(path, {**latest, **update})
+    client.config = client.config.model_copy(update=update)
+    qq.avatar = ReplyAvatar(client, update['miko_avatar_file'], update['owner_avatar_file'])
 
 
 class ReplyAvatar:

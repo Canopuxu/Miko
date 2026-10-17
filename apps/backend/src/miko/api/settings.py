@@ -394,7 +394,7 @@ def settings_router(chat, qq):
         await qq.close()
         qq.client = create_client(config, chat.settings.local_root)
         qq.receiver = create_receiver(qq.client, qq.receive, qq.source_changed)
-        qq.avatar = ReplyAvatar(qq.client, config.miko_avatar_file, config.owner_avatar_file) if config.miko_avatar_file and config.owner_avatar_file else None
+        qq.avatar = ReplyAvatar(qq.client, config.miko_avatar_file, config.owner_avatar_file) if config.avatar_switch_enabled and config.miko_avatar_file and config.owner_avatar_file else None
         root.mkdir(parents=True, exist_ok=True)
         write_json(root / 'qq.local.json', {**config.model_dump(exclude={'http_token', 'ws_token'}),
             'http_token': config.http_token.get_secret_value(), 'ws_token': config.ws_token.get_secret_value()})

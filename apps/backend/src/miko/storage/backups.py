@@ -187,7 +187,7 @@ def apply_backup(root, stage, *, reconnect=True):
         path = config / 'qq.local.json'
         if path.exists():
             qq = json.loads(path.read_text('utf-8-sig'))
-            value = {key: qq[key] for key in ('account', 'friends', 'miko_avatar_file', 'owner_avatar_file') if key in qq}
+            value = {key: qq[key] for key in ('account', 'friends', 'miko_avatar_file', 'owner_avatar_file', 'avatar_switch_enabled') if key in qq}
             for key in ('miko_avatar_file', 'owner_avatar_file'):
                 original = str(value.get(key, '')).replace('\\', '/')
                 prefix = manifest['source_root'].replace('\\', '/').rstrip('/') + '/'

@@ -73,8 +73,12 @@ class ProfileToolsTests(unittest.TestCase):
             turn = self.chat.begin_qq('qq:123:456', records)
             await turn.task
             self.assertEqual(turn.status, 'completed', turn.error)
+            self.assertEqual([r['kind'] for r in turn.qq_input['output_format']['bubbles']], ['text'])
+            self.assertEqual([r['kind'] for r in turn.qq_input['optional_bubble_formats']], ['face'])
+            self.assertIn('可选气泡格式：', turn.message)
         with patch('miko.domain.conversation.chat.DshRuntime') as runtime, \
-                patch('miko.domain.conversation.chat.Session') as session:
+                patch('miko.domain.conversation.chat.Session') as session, \
+                patch('miko.domain.conversation.chat.FACES', [{'face_id':'76','name':'赞'}]):
             session.return_value.run.return_value = result
             asyncio.run(generate())
         self.assertIn('本轮表达验证：小米 和小橙', runtime.call_args.kwargs['system_prompt'])

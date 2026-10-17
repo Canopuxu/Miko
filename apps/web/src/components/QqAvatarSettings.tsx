@@ -4,7 +4,7 @@ import { ImagePlus, LoaderCircle, RotateCcw, X } from 'lucide-react';
 import { getJson, responseError } from '../api/chat';
 import '../styles/qq-avatar.css';
 
-type Avatars = {account:string; enabled:boolean; connected:boolean; using_default:boolean};
+type Avatars = {account:string; enabled:boolean; connected:boolean; using_default:boolean; ready:boolean; error:string};
 const base = '/api/settings/qq/avatar';
 
 export function AvatarSettingsDialog({onClose}:{onClose:()=>void}) {
@@ -15,9 +15,15 @@ export function AvatarSettingsDialog({onClose}:{onClose:()=>void}) {
   const [saved,setSaved]=useState(false);
   useEffect(()=>{
     let alive=true;
-    getJson<Avatars>(base).then(value=>{if(alive)setData(value);}).catch(cause=>{if(alive)setError(String(cause));});
+    getJson<Avatars>(base).then(value=>{if(alive){setData(value);setError(value.error);}}).catch(cause=>{if(alive)setError(String(cause));});
     return()=>{alive=false;};
   },[]);
+  useEffect(()=>{
+    if(!data?.enabled||!data.connected||data.ready||error||busy)return;
+    let alive=true;
+    const timer=window.setInterval(()=>void getJson<Avatars>(base).then(value=>{if(alive){setData(value);setError(value.error);}}).catch(()=>{}),1000);
+    return()=>{alive=false;window.clearInterval(timer);};
+  },[data,error,busy]);
 
   async function update(action:string,path:string,body?:unknown,method='PUT') {
     setBusy(action);setError('');setSaved(false);
@@ -57,12 +63,12 @@ export function AvatarSettingsDialog({onClose}:{onClose:()=>void}) {
       </div></div>
       <div className="qq-avatar-switch-card"><div className="qq-avatar-heading"><h3>QQ 接话时切换头像</h3>
         <button type="button" role="switch" aria-label="QQ 接话时切换头像" aria-checked={!!data?.enabled} className="qq-idle-switch"
-          disabled={!data||!!busy||(!data.enabled&&!data.connected)} onClick={()=>void update('switch','',{enabled:!data!.enabled})}><span/></button></div>
+          disabled={!data||!!busy||!data.connected} onClick={()=>void update('switch','',{enabled:!data!.enabled})}><span/></button></div>
         <p>接话时使用角色头像，结束后自动恢复。你的 QQ 头像由程序自动保存。</p>
-        {data&&!data.connected&&!data.enabled&&<small>连接 QQ 后可开启。</small>}
-        {busy==='switch'&&<small role="status"><LoaderCircle size={13} className="spinning"/>正在保存…</small>}
+        {data&&!data.connected&&<small>连接 QQ 后自动生效。</small>}
+        {(busy==='switch'||(data?.enabled&&data.connected&&!data.ready&&!error))&&<small role="status"><LoaderCircle size={13} className="spinning"/>正在准备头像…</small>}
       </div>
-      {error&&<p className="error-notice" role="alert">{error}</p>}
+      {error&&<p className="error-notice" role="alert">{error}{data?.enabled&&data.connected&&<button className="text-button" disabled={!!busy} onClick={()=>void update('switch','',{enabled:true})}>重试</button>}</p>}
       <footer className="dialog-actions">{saved&&<span className="qq-avatar-saved" role="status">已保存</span>}
         <button className="ui-button" disabled={!!busy} onClick={onClose}>关闭</button></footer>
     </Dialog.Content>

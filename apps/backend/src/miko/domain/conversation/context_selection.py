@@ -248,6 +248,15 @@ async def select(provider,query,context,limit=5,*,local):
             selected.append(row);remaining-=len(row['text'])
             if len(selected)==limit:break
         if len(selected)==limit:break
+    linked = {row['source']['goal_id'] for row in selected
+              if row['group']=='life_entries' and row['source'].get('goal_id')}
+    present = {row['source']['id'] for row in selected if row['group']=='life_goals'}
+    for row in rows:
+        if row['group']!='life_goals' or row['source']['id'] not in linked - present:
+            continue
+        if len(row['text'])>remaining:continue
+        selected.append(row);remaining-=len(row['text'])
+        present.add(row['source']['id'])
     return core,selected,[row for ranking in rankings for row in ranking]
 
 
@@ -317,6 +326,8 @@ def render_dialogue(request):
                       +'\n可回应的消息编号：'+json.dumps(request['reaction_targets']))
     # Existing approved output contract stays structured; conversational input does not.
     blocks.append('输出格式：'+json.dumps(request['output_format'],ensure_ascii=False))
+    if request.get('optional_bubble_formats'):
+        blocks.append('可选气泡格式：'+json.dumps(request['optional_bubble_formats'],ensure_ascii=False))
     return '\n\n'.join(blocks)
 
 

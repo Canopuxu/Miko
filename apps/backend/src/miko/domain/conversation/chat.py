@@ -243,11 +243,13 @@ class ChatService:
         target = next((r for r in reversed(records) if r.get('author', {}).get('kind') == 'contact'), None)
         message = json.dumps({'reply_to': {k: target[k] for k in ('author', 'message_id', 'text') if k in target} if target else None,
                               'chat_records': [{k: v for k, v in r.items() if k != '_image_inputs'} for r in records], 'available_faces': FACES,
-                              'available_stickers': stickers or [], 'output_format': {'bubbles': [
-                                  bubble for bubble in OUTPUT_SCHEMA['bubbles']
+                              'available_stickers': stickers or [],
+                              'output_format': {'bubbles': [dict(OUTPUT_SCHEMA['bubbles'][0])]},
+                              'optional_bubble_formats': [
+                                  dict(bubble) for bubble in OUTPUT_SCHEMA['bubbles'][1:]
                                   if bubble['kind'] != 'face' or FACES
                                   if bubble['kind'] != 'sticker' or stickers
-                              ]}}, ensure_ascii=False)
+                              ]}, ensure_ascii=False)
         output = (REPO_ROOT / 'config/defaults/qq-output-format.txt').read_text(encoding='utf-8').strip()
         _, account, friend = conversation_id.split(':')
         query = '\n'.join(r['text'] for r in records[-8:][::-1])
@@ -273,7 +275,7 @@ class ChatService:
                 turn.system_prompt += '\n\n' + (REPO_ROOT / 'config/defaults/qq-reactions.txt').read_text(encoding='utf-8').strip()
                 turn.qq_input['available_reactions'] = available
                 turn.qq_input['reaction_targets'] = targets
-                turn.qq_input['output_format']['bubbles'].append(dict(kind='reaction', message_id='current group message integer',
+                turn.qq_input['optional_bubble_formats'].append(dict(kind='reaction', message_id='current group message integer',
                     reaction_id='candidate string', operation='add or remove'))
         turn.message = render_dialogue(turn.qq_input)
         image_parts = [part for r in records for part in r.get('_image_inputs', [])]

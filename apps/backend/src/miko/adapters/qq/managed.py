@@ -194,7 +194,7 @@ def resolve_connection(local_root, account, saved):
     if not isinstance(token, str) or not token.strip():
         raise ValueError('自建 QQ 桥接缺少连接凭据，请修复桥接配置')
     # Preserve preferences, never the previous provider endpoints.
-    retained = {key: saved[key] for key in ('friends', 'miko_avatar_file', 'owner_avatar_file')
+    retained = {key: saved[key] for key in ('friends', 'miko_avatar_file', 'owner_avatar_file', 'avatar_switch_enabled')
                 if saved.get('account') == account and key in saved}
     port = bridge.get('port', 17971)
     return QqConfig(account=account, http_url=f'http://127.0.0.1:{port}',

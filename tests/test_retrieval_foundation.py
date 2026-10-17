@@ -16,6 +16,20 @@ def profile(id, text, subject='miko', category='兴趣'):
 
 
 class RetrievalFoundationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_matched_life_entry_brings_its_goal_status_for_web_and_qq(self):
+        from miko.domain.conversation.context_selection import selected_context, render
+        context={'current_time':'2026-10-17T19:00:00+08:00',
+            'life_entries':[dict(id='entry',day='2026-10-16',text='调试网页布局',goal_id='site')],
+            'life_goals':[dict(id='site',text='做个人主页',status='completed',target_date='2026-10-16'),
+                          dict(id='other',text='学吉他',status='active',target_date='2026-11-01')]}
+        core,rows,_=await select(None,'布局弄好了吗',context,limit=1)
+        picked=selected_context(context,rows)
+        self.assertEqual([r['id'] for r in picked['life_entries']],['entry'])
+        self.assertEqual([r['id'] for r in picked['life_goals']],['site'])
+        self.assertEqual(picked['life_goals'][0]['status'],'completed')
+        self.assertIn('做个人主页',render(context,core,rows))
+        self.assertIn('completed',render(context,core,rows))
+
     async def test_local_relevance_ownership_and_duplicate_budget(self):
         context={'role_material': [profile('noise','红丝绒蛋糕'), profile('wrong','电吉他','owner'),
             profile('right','电吉他'),profile('duplicate','电吉他')],

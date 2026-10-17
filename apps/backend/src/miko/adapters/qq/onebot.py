@@ -31,6 +31,7 @@ class QqConfig(BaseModel):
     friends: list[dict[str, str]] = []
     miko_avatar_file: str = ''
     owner_avatar_file: str = ''
+    avatar_switch_enabled: bool = True
 
     @model_validator(mode='after')
     def local_endpoints(self):

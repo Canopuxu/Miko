@@ -13,6 +13,7 @@ from PIL import Image
 
 from miko.api.qq_avatar import qq_avatar_router
 from miko.adapters.qq.onebot import QqConfig
+from miko.adapters.qq.avatar import initialize_reply_avatar
 from miko.settings import write_json
 
 
@@ -41,7 +42,8 @@ class AvatarSettingsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_enable_overlap_restore_and_persist(self):
         status = (await self.client.get(self.base)).json()
-        self.assertFalse(status['enabled'])
+        self.assertTrue(status['enabled'])
+        self.assertFalse(status['ready'])
         self.assertTrue(status['using_default'])
         self.assertEqual((await self.client.get(self.base+'/image/role')).status_code,200)
         with patch('miko.api.qq_avatar.current_qq_avatar',AsyncMock(return_value=self.picture)) as fetch:
@@ -106,7 +108,22 @@ class AvatarSettingsTests(unittest.IsolatedAsyncioTestCase):
         current = (await self.client.get(self.base)).json()
         self.assertFalse(current['using_default'])
         self.assertFalse(current['has_owner'])
-        self.assertFalse(current['enabled'])
+        self.assertTrue(current['enabled'])
+
+    async def test_default_initializes_after_connection_without_opening_dialog(self):
+        with patch('miko.adapters.qq.avatar.current_qq_avatar',AsyncMock(return_value=self.picture)) as fetch:
+            await initialize_reply_avatar(self.qq,self.root)
+            fetch.assert_awaited_once_with('123')
+        self.assertIsNotNone(self.qq.avatar)
+        self.assertTrue((await self.client.get(self.base)).json()['ready'])
+        await self.client.put(self.base,json={'enabled':False})
+        persisted=json.loads((self.root/'config/qq.local.json').read_text('utf-8'))
+        self.assertFalse(persisted['avatar_switch_enabled'])
+        self.qq.client.config=QqConfig(**persisted)
+        with patch('miko.adapters.qq.avatar.current_qq_avatar',AsyncMock()) as fetch:
+            await initialize_reply_avatar(self.qq,self.root)
+            fetch.assert_not_awaited()
+        self.assertIsNone(self.qq.avatar)
 
 
 if __name__ == '__main__':
