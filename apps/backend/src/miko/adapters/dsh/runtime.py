@@ -21,8 +21,8 @@ class DshRuntime:
         self.server_info: dict = {}
         self.executable = Path(bundled_runtime_path()).resolve()
         # Use the runtime installed in Miko's environment, never an executable from PATH.
-        if not self.executable.is_relative_to(settings.local_root / "envs/python"):
-            raise RuntimeError("DSH runtime must be installed in MikoLocal/envs/python")
+        if not self.executable.is_relative_to(settings.python_root.resolve()):
+            raise RuntimeError("DSH runtime must be installed in Miko's bundled Python environment")
         if version("deepseek-harness-sdk") != version("deepseek-harness-runtime-bin"):
             raise RuntimeError("DSH SDK and runtime versions differ")
 

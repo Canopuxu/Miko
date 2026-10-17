@@ -214,11 +214,27 @@ def apply_backup(root, stage, *, reconnect=True):
         if path.exists():
             qq = json.loads(path.read_text('utf-8-sig'))
             value = {key: qq[key] for key in ('account', 'friends', 'miko_avatar_file', 'owner_avatar_file', 'avatar_switch_enabled') if key in qq}
-            for key in ('miko_avatar_file', 'owner_avatar_file'):
-                original = str(value.get(key, '')).replace('\\', '/')
-                prefix = manifest['source_root'].replace('\\', '/').rstrip('/') + '/'
-                if original.casefold().startswith(prefix.casefold()):
-                    value[key] = str(root / original[len(prefix):])
             write_json(path, dict(value, enabled=False))
         # PID, endpoint and authentication belong to this machine's next connection.
         (config / 'qq-client.local.json').unlink(missing_ok=True)
+    relocate_settings(root, manifest['source_root'])
+
+
+def relocate_settings(root, previous_root):
+    """Rebase Miko-owned file paths when restoring or moving the portable folder."""
+    root = Path(root)
+    prefix = str(previous_root).replace('\\', '/').rstrip('/') + '/'
+    for filename, keys in (('qq.local.json', ('miko_avatar_file', 'owner_avatar_file')),
+                           ('embedding.local.json', ('index_file',))):
+        path = root / 'config' / filename
+        if not path.is_file():
+            continue
+        value = json.loads(path.read_text('utf-8-sig'))
+        changed = False
+        for key in keys:
+            original = str(value.get(key, '')).replace('\\', '/')
+            if original.casefold().startswith(prefix.casefold()):
+                value[key] = str(root / original[len(prefix):])
+                changed = True
+        if changed:
+            write_json(path, value)

@@ -10,6 +10,9 @@ Miko 使用以下开源项目。固定版本和来源见 `config/upstream.lock.j
 | Memobase | https://github.com/memodb-io/memobase | Apache-2.0 | 中文记忆提炼、条目合并与整理模块 |
 | AstrBot Life Scheduler | https://github.com/muyouzhi6/astrbot_plugin_life_scheduler | MIT | 生活记录的日期归一化与 JSON 存取 |
 | Frida | https://github.com/frida/frida | wxWindows Library Licence 3.1 | 自建 QQ 桥接的客户端加载；随包保留许可及第三方声明 |
+| CPython | https://www.python.org/ | PSF License Agreement | 便携版内置 Python 运行环境 |
+| pywebview | https://github.com/r0x0r/pywebview | BSD-3-Clause | 便携版独立窗口，使用系统 WebView2 |
+| pythonnet | https://github.com/pythonnet/pythonnet | MIT | Windows 窗口与 .NET 组件连接 |
 | jieba | https://github.com/fxsjy/jieba | MIT | 中文分词 |
 | PyYAML | https://github.com/yaml/pyyaml | MIT | 中文记忆主题配置 |
 | React、React DOM | https://github.com/facebook/react | MIT | 用户界面 |

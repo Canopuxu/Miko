@@ -35,7 +35,7 @@ def recorded_process(settings: Settings) -> tuple[dict, psutil.Process] | None:
     try:
         process = psutil.Process(record["pid"])
         command = process.cmdline()
-        expected_python = settings.local_root / "envs/python/Scripts/python.exe"
+        expected_python = settings.python_executable
         if (process.create_time() != record["created"]
                 or Path(process.exe()).resolve() != expected_python.resolve()
                 or "miko.server" not in command
@@ -66,7 +66,7 @@ def start(settings: Settings) -> None:
     kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     with (settings.local_root / "logs/backend.log").open("ab") as log:
         child = subprocess.Popen(
-            [sys.executable, "-X", "utf8", "-m", "miko.server", "--local-root", str(settings.local_root)],
+            [str(settings.python_executable), "-X", "utf8", "-m", "miko.server", "--local-root", str(settings.local_root)],
             cwd=settings.workspace, env=env, stdin=subprocess.DEVNULL,
             stdout=log, stderr=log, **kwargs,
         )

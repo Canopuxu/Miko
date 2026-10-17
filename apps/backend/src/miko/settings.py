@@ -107,6 +107,18 @@ class Settings:
         return self.local_root / "data/database/miko.sqlite3"
 
     @property
+    def python_executable(self) -> Path:
+        if (REPO_ROOT / 'portable.json').is_file():
+            return REPO_ROOT / 'python/python.exe'
+        return self.local_root / 'envs/python/Scripts/python.exe'
+
+    @property
+    def python_root(self) -> Path:
+        if (REPO_ROOT / 'portable.json').is_file():
+            return REPO_ROOT / 'python'
+        return self.local_root / 'envs/python'
+
+    @property
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
