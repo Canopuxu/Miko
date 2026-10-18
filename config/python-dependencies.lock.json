@@ -404,8 +404,8 @@
     },
     {
       "name": "frida",
-      "version": "17.23.3",
-      "source": "https://pypi.org/project/frida/17.23.3/",
+      "version": "17.24.1",
+      "source": "https://pypi.org/project/frida/17.24.1/",
       "license": "wxWindows",
       "licenseFiles": [
         "licenses/frida-COPYING.txt"

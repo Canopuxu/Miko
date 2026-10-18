@@ -10,8 +10,8 @@ import subprocess
 import sys
 
 
-VERSION = '17.23.3'
-COMMIT = '3c7ea1530edb0c3bb9b1de84444510163052b18a'
+VERSION = '17.24.1'
+COMMIT = '4bd95e6f33f90a41a28455ed71174252bbf49827'
 OPTIONS = [
     '-Dfrida_tools=disabled', '-Dfrida_python=enabled',
     '-Dgraft_tool=disabled', '-Dgadget=disabled', '-Dserver=disabled',
@@ -44,8 +44,8 @@ def main():
         raise SystemExit('Build this wheel on Windows x64.')
     cache = args.cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    recipe = hashlib.sha256(json.dumps(OPTIONS).encode()).hexdigest()[:12]
-    source, output = cache / 'source', cache / 'wheels'
+    recipe = hashlib.sha256(json.dumps([COMMIT, OPTIONS]).encode()).hexdigest()[:12]
+    source, output = cache / f'source-{VERSION}', cache / 'wheels'
     build = cache / f'build-local-{recipe}'
     output.mkdir(exist_ok=True)
     if not source.exists():
@@ -105,6 +105,8 @@ def main():
     provenance = {
         'name': 'frida', 'version': VERSION, 'profile': 'miko-windows-x64-local-quickjs',
         'source': 'https://github.com/frida/frida', 'commit': COMMIT,
+        'gum_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'],
+            cwd=source / 'subprojects/frida-gum', text=True).strip(),
         'options': OPTIONS, 'python': sys.version, 'wheel': wheel.name,
         'wheel_sha256': wheel_hash, 'wheel_bytes': wheel.stat().st_size,
         'extension_bytes': extension.stat().st_size,

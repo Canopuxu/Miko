@@ -12,7 +12,7 @@ dependencies = [
   "fastapi==0.143.0",
   "uvicorn==0.54.0",
   "psutil==7.2.2",
-  "frida==17.23.3",
+  "frida==17.24.1",
   "deepseek-harness-sdk==0.1.5rc1",
   "deepseek-harness-runtime-bin==0.1.5rc1",
   "httpx==0.28.1",
