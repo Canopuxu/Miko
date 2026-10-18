@@ -32,6 +32,7 @@ class DshRuntime:
             "DSH_HOME": str(settings.dsh_home),
             "DSH_AGENTS_HOME": str(settings.agents_home),
             "DSH_RESOURCE_CACHE": str(settings.local_root / "cache/dsh-resources"),
+            "PKG_NATIVE_CACHE_PATH": str(settings.local_root / "cache/dsh-resources"),
             "DSH_PRIMARY_RUNTIME": "", "DSH_OFFICE_SIDECAR": "", "DSH_RUNTIME_MODE": "exe",
             "TEMP": str(settings.local_root / "cache/tmp"),
             "TMP": str(settings.local_root / "cache/tmp"),
