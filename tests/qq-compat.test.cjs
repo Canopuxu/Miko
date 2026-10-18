@@ -143,7 +143,7 @@ test('native loader locates complete exported API without a fixed DLL filename',
     const attached=[];const messages=[];
     vm.runInNewContext(fs.readFileSync(path.join(folder,'loader.js'),'utf8'),{
         Process:{enumerateModules:()=>[module]},__MIKO_PAYLOAD__:'test',
-        NativeFunction:function(){return ()=>0;},Interceptor:{attach:(address)=>{attached.push(address);return {detach(){}};}},
+        NativeFunction:function(){return ()=>0;},Interceptor:{attach:(address)=>{attached.push(address);return {detach(){}};}},rpc:{exports:{}},
         send:message=>messages.push(message)});
     assert.deepEqual(attached,['napi_get_cb_info']);assert.equal(messages[0].ready,true);
 });

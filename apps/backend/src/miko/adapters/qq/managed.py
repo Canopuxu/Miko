@@ -14,16 +14,18 @@ import psutil
 
 from miko.adapters.qq.onebot import QqConfig
 from miko.settings import REPO_ROOT, write_json
+from .loading import LoadingBusy, loading_lock
 
 
-def bridge_processes(local_root):
-    target = str((local_root / 'config/qq-client.local.json').resolve()).replace('/', '\\').casefold()
+def bridge_processes(local_root=None):
+    target = (str((local_root / 'config/qq-client.local.json').resolve()).replace('/', '\\').casefold()
+              if local_root is not None else None)
     result = []
     for process in psutil.process_iter(['cmdline']):
         try:
             command = process.info['cmdline'] or []
             if (any(Path(arg).name == 'run_qq_client_bridge.py' for arg in command)
-                    and any(arg.replace('/', '\\').casefold() == target for arg in command)):
+                    and (target is None or any(arg.replace('/', '\\').casefold() == target for arg in command))):
                 result.append(process)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
@@ -32,11 +34,19 @@ def bridge_processes(local_root):
 
 def start_bridge(local_root):
     """Share the same runner between application startup and settings connect."""
+    with loading_lock('runner-' + str(local_root.resolve()).casefold(), timeout_ms=5000):
+        _start_bridge(local_root)
+
+
+def _start_bridge(local_root):
     existing = bridge_processes(local_root)
     if existing:
         path = local_root / 'runtime/qq-bridge-status.json'
         status = json.loads(path.read_text('utf-8')) if path.exists() else {}
-        if status.get('adapter_hash') == adapter_signature():
+        # A just-launched runner may not have published its status yet. An old
+        # status file must not make the next caller kill that new runner.
+        if (status.get('runner_pid') not in {process.pid for process in existing}
+                or status.get('runner_hash') == runner_signature()):
             return
         for process in existing:
             try:
@@ -54,8 +64,15 @@ def start_bridge(local_root):
 
 
 def adapter_signature():
-    return hashlib.sha256(b'\0'.join((REPO_ROOT / 'apps/qq-bridge' / name).read_bytes()
-        for name in ('client.js', 'compat.js'))).hexdigest()
+    files = ('apps/qq-bridge/client.js', 'apps/qq-bridge/compat.js')
+    return hashlib.sha256(b'\0'.join((REPO_ROOT / name).read_bytes() for name in files)).hexdigest()
+
+
+def runner_signature():
+    files = ('apps/qq-bridge/client.js', 'apps/qq-bridge/compat.js', 'apps/qq-bridge/loader.js',
+             'scripts/load_qq_probe.py', 'scripts/run_qq_client_bridge.py', 'scripts/qq_clients.py',
+             'apps/backend/src/miko/adapters/qq/managed.py', 'apps/backend/src/miko/adapters/qq/loading.py')
+    return hashlib.sha256(b'\0'.join((REPO_ROOT / name).read_bytes() for name in files)).hexdigest()
 
 
 def free_port():
@@ -134,7 +151,10 @@ class ManagedQq:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json(path, config)
         try:
-            await asyncio.to_thread(start_bridge, self.root)
+            try:
+                await asyncio.to_thread(start_bridge, self.root)
+            except LoadingBusy as error:
+                raise ValueError(str(error)) from None
             deadline = asyncio.get_running_loop().time() + 30
             async with httpx.AsyncClient(trust_env=False, timeout=2) as client:
                 while asyncio.get_running_loop().time() < deadline:

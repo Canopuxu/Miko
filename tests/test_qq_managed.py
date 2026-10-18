@@ -142,6 +142,7 @@ class ClientDiscoveryTests(unittest.TestCase):
         row = {'pid': 42, 'started_at': 10.0, 'executable': 'D:/QQ/QQ.exe'}
         process = SimpleNamespace(create_time=lambda: 10.0)
         with TemporaryDirectory() as folder, patch.object(qq_clients.psutil, 'Process', return_value=process), \
+                patch.object(qq_clients, 'other_connected_client', return_value=None), \
                 patch.object(qq_clients, 'load_payload') as load:
             load.side_effect = RuntimeError('QQ is still starting')
             result = qq_clients.inspect_client(row, folder)

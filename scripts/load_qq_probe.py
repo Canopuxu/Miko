@@ -7,8 +7,15 @@ import time
 import uuid
 from pathlib import Path
 
+from miko.adapters.qq.loading import loading_lock
+
 
 def load_payload(pid, payload, result_dir, frida_path=None, await_result=True):
+    with loading_lock(f'client-{pid}'):
+        return _load_payload(pid, payload, result_dir, frida_path, await_result)
+
+
+def _load_payload(pid, payload, result_dir, frida_path=None, await_result=True):
     if frida_path and str(frida_path) not in sys.path:
         sys.path.insert(0, str(frida_path))
     import frida
@@ -26,12 +33,18 @@ def load_payload(pid, payload, result_dir, frida_path=None, await_result=True):
     finished = threading.Event()
     session = frida.attach(pid)
     reply = {}
+    script = None
+    loaded = False
+    ready = False
 
     def message(value, data):
+        nonlocal ready
         if value.get('type') == 'error':
             reply['error'] = value.get('description', 'QQ loader failed')
             finished.set()
-        elif not value.get('payload', {}).get('ready'):
+        elif value.get('payload', {}).get('ready'):
+            ready = True
+        else:
             reply.update(value.get('payload', {}))
             finished.set()
 
@@ -39,6 +52,7 @@ def load_payload(pid, payload, result_dir, frida_path=None, await_result=True):
         script = session.create_script(code)
         script.on('message', message)
         script.load()
+        loaded = True
         if not finished.wait(20):
             raise TimeoutError('QQ did not enter a Node-API callback')
         if 'error' in reply:
@@ -54,8 +68,18 @@ def load_payload(pid, payload, result_dir, frida_path=None, await_result=True):
                 raise RuntimeError(reply['error'])
         return reply.get('result')
     finally:
-        session.detach()
-        output.unlink(missing_ok=True)
+        try:
+            if loaded:
+                try:
+                    if ready:
+                        script.exports_sync.dispose()
+                finally:
+                    script.unload()
+        finally:
+            try:
+                session.detach()
+            finally:
+                output.unlink(missing_ok=True)
 
 
 def main():

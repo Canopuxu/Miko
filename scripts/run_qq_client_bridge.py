@@ -5,13 +5,15 @@ import json
 import logging
 from pathlib import Path
 import sys
+import time
 
 import httpx
 import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'apps/backend/src'))
 from miko.settings import write_json
-from miko.adapters.qq.managed import adapter_signature
+from miko.adapters.qq.managed import adapter_signature, runner_signature
+from miko.adapters.qq.loading import LoadingBusy
 from load_qq_probe import load_payload
 from qq_clients import main_processes, inspect_client, select_client
 
@@ -47,11 +49,24 @@ async def run(args):
     runner = psutil.Process()
     signature = adapter_signature()
     last_state = None
+    inspected = {}
+
+    def inspect(row, config):
+        key = (row['pid'], row.get('started_at'))
+        previous = inspected.get(key)
+        if previous and previous[0] > time.monotonic():
+            return previous[1]
+        value = inspect_client(row, local_root, config.get('frida_path') or args.frida_path)
+        # An unrelated logged-in account is not a reason to load/unload Frida
+        # every three seconds. Manual detection remains an immediate fresh read.
+        if value.get('state') == 'ready' and value.get('account') != str(config['account']):
+            inspected[key] = (time.monotonic() + 30, value)
+        return value
 
     def status(state, note, config=None, version=''):
         nonlocal last_state
         value = {'state': state, 'note': note, 'account': str((config or {}).get('account', '')),
-                 'version': version, 'adapter_hash': signature,
+                 'version': version, 'adapter_hash': signature, 'runner_hash': runner_signature(),
                  'runner_pid': runner.pid, 'runner_started_at': runner.create_time()}
         if value != last_state:
             path = local_root / 'runtime/qq-bridge-status.json'
@@ -87,14 +102,15 @@ async def run(args):
                               and config.get('preferred_started_at') is not None
                               and row.get('started_at') == config['preferred_started_at']), None)
             rows = ([{**preferred, 'account': str(config['account']), 'state': 'ready'}] if preferred else
-                    await asyncio.gather(*(asyncio.to_thread(inspect_client, row, local_root,
-                        config.get('frida_path') or args.frida_path) for row in candidates)))
+                    await asyncio.gather(*(asyncio.to_thread(inspect, row, config) for row in candidates)))
             if read_config(args.config) != config:
                 continue
             row = select_client(rows, config['account'], selected_pid)
             if not row:
                 fault = next((row for row in rows if row['state'] in ('unsupported', 'permission', 'component', 'error')), None)
-                status(fault['state'] if fault else 'waiting', fault['note'] if fault else
+                pending = next((row for row in rows if row['state'] == 'loading'), None)
+                current = fault or pending
+                status(current['state'] if current else 'waiting', current['note'] if current else
                        f"请在 QQ 登录账号 {config['account']}，其他已登录账号不会自动接入", config)
                 await asyncio.sleep(3)
                 continue
@@ -105,7 +121,12 @@ async def run(args):
                 logged_in = await identity(config)
                 if not logged_in:
                     raise ValueError('QQ account changed during connection')
+            except LoadingBusy as error:
+                status('loading', str(error), config)
+                await asyncio.sleep(3)
+                continue
             except Exception:
+                logging.getLogger('qq-bridge').exception('QQ adapter loading failed for PID %s', row['pid'])
                 status('error', 'QQ 连接未完成，请打开主界面后重试；若刚更新 QQ，请重新检测兼容性', config)
                 await asyncio.sleep(3)
                 continue

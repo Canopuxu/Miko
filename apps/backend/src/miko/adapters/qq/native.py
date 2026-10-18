@@ -120,9 +120,9 @@ class NativeReceiver(EventReceiver):
                     if current and current['session'] == driver.event_session:
                         await self.update('blocked', 'QQ 消息接收出现缺失，接话已暂停；请到设置中重新连接', account='')
                         return
-                await self.update('disconnected', 'QQ 连接已断开，正在等待原账号重新登录', account='')
+                await self.update('disconnected', 'QQ 暂未连接，正在自动重试', account='')
             except Exception:
-                await self.update('disconnected', 'QQ 连接已断开，正在等待原账号重新登录', account='')
+                await self.update('disconnected', 'QQ 暂未连接，正在自动重试', account='')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 10)
 
