@@ -25,3 +25,5 @@ Miko 使用以下开源项目。固定版本和来源见 `config/upstream.lock.j
 Python 和前端的直接、间接依赖及其许可分别记录在上述依赖清单中，包括构建工具和第三方组件的传递依赖。内嵌源码的固定提交、文件哈希与适配范围见各模块的 `source-manifest.json` 或来源记录。
 
 发布包保留实际随包组件的许可与第三方声明。
+
+专用 Frida 构建使用 [PortableMSVC](https://github.com/tgbender/portablemsvc)（MIT）准备本地编译工具；该工具不随便携包分发。
