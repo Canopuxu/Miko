@@ -125,9 +125,16 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
     icon = cache / 'Miko.ico'
     Image.open(REPO / 'config/defaults/qq-avatar.png').convert('RGBA').save(icon, sizes=[(16,16),(32,32),(48,48),(256,256)])
     shutil.copyfile(icon, app / 'Miko.ico')
+    version = subprocess.check_output([str(python / 'python.exe'), '-B', '-c', 'from miko import __version__; print(__version__)'], text=True).strip()
+    version_source = cache / 'Miko.Version.cs'
+    version_source.write_text('\n'.join([
+        f'[assembly: System.Reflection.AssemblyVersion("{version}.0")]',
+        f'[assembly: System.Reflection.AssemblyFileVersion("{version}.0")]',
+        f'[assembly: System.Reflection.AssemblyInformationalVersion("{version}")]',
+    ]) + '\n', encoding='utf-8')
     compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     run([compiler, '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
-         '/win32icon:' + str(icon), '/out:' + str(output / 'Miko.exe'), REPO / 'scripts/desktop/Launcher.cs'])
+         '/win32icon:' + str(icon), '/out:' + str(output / 'Miko.exe'), REPO / 'scripts/desktop/Launcher.cs', version_source])
     # Release identity changes whenever the application files change, including uncommitted builds.
     digest = hashlib.sha256()
     digest.update((REPO / 'scripts/desktop/Launcher.cs').read_bytes())
@@ -136,7 +143,6 @@ print(json.dumps([{'name':n,'version':m.version(n),'license':m.metadata(n).get('
             digest.update(path.relative_to(app).as_posix().encode())
             with path.open('rb') as stream:
                 digest.update(hashlib.file_digest(stream, 'sha256').digest())
-    version = subprocess.check_output([str(python / 'python.exe'), '-B', '-c', 'from miko import __version__; print(__version__)'], text=True).strip()
     with archive.open('rb') as stream:
         python_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
     manifest = {'version': version, 'build': digest.hexdigest(), 'python': PYTHON_VERSION,
