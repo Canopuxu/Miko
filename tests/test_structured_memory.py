@@ -23,7 +23,8 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.social.loop=asyncio.get_running_loop()
         self.calls=[]
 
-        async def complete(system,message,model=None,json_output=False):
+        async def complete(system,message,model=None,json_output=False,**options):
+            self.assertTrue(options['allow_reasoning'])
             self.calls.append(message)
             if json_output:
                 text=json.dumps({'facts':[
@@ -159,12 +160,12 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
         self.add_turn('我暂停吉他，现在改练贝斯')
         captured=self.chat.complete_memory
         touched=False
-        async def concurrent_edit(system,message,model=None,json_output=False):
+        async def concurrent_edit(system,message,model=None,json_output=False,**options):
             nonlocal touched
             if not touched:
                 touched=True
                 self.memory.structured.edit(owner['id'],'用户确认仍练吉他',owner['revision'])
-            return await captured(system,message,model,json_output)
+            return await captured(system,message,model,json_output,**options)
         self.chat.complete_memory=concurrent_edit
         result=await asyncio.to_thread(self.social.consolidate,sid,None,True)
         self.assertEqual(result['status'],'superseded')
@@ -184,8 +185,8 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
     async def test_changed_subtopic_updates_named_item_and_category_history(self):
         import ast
         original=self.chat.complete_memory
-        async def classify(system,message,model=None,json_output=False):
-            answer=await original(system,message,model,json_output)
+        async def classify(system,message,model=None,json_output=False,**options):
+            answer=await original(system,message,model,json_output,**options)
             if json_output:
                 value=json.loads(answer['text'])
                 fact=value['facts'][0]
@@ -229,7 +230,7 @@ class StructuredTests(unittest.IsolatedAsyncioTestCase):
                 collect(db, mid)
             sid = db.execute('SELECT id FROM tulpa_scopes WHERE conversation_id=?', (cid,)).fetchone()[0]
 
-        async def extract(system, message, model=None, json_output=False):
+        async def extract(system, message, model=None, json_output=False, **options):
             self.assertIn('下次带你去演唱会', message)
             return {'text': json.dumps({'facts': [], 'events': [{'subjects': ['miko', 'qq:789'],
                 'date': date.today().isoformat(), 'text': '好友说下次有机会一起去演唱会，尚未定时间'}]}), 'usage': {}}

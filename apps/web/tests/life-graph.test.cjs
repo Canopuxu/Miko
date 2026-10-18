@@ -17,134 +17,174 @@ const { buildLifeGraph } = load('components/lifeGraph.ts');
 const { mockAt } = load('previews/lifeMock.ts');
 const full = mockAt('2026-10-09');
 const graph = buildLifeGraph(full.goals, full.events, 'Miko', '2026-10-09');
-
-test('the dense mock preserves every event and places all connections forward in time', () => {
-  assert.ok(full.events.length >= 60);
-  assert.equal(graph.nodes.filter(node => node.data.kind === 'activity').length, full.events.length);
-  assert.equal(graph.nodes.filter(node => node.data.kind === 'goal').length, full.goals.length);
-  assert.equal(new Set(graph.nodes.map(node => node.id)).size, graph.nodes.length);
-  const nodes = new Map(graph.nodes.map(node => [node.id, node]));
-  for (const edge of graph.edges) {
-    assert.ok(nodes.get(edge.source), `missing source ${edge.source}`);
-    assert.ok(nodes.get(edge.target).position.y > nodes.get(edge.source).position.y||edge.source==='header:hub', edge.id);
-  }
-});
-
-test('milestones follow progress, stay muted while pending, and do not light up just because due dates pass', () => {
-  for (const goal of full.goals) {
-    const endpoint = graph.nodes.find(node => node.id === 'goal:' + goal.id);
-    const before = graph.nodes.filter(node => node.data.event?.goal_id === goal.id && node.data.event.day <= (goal.completed_date ?? '9999'));
-    assert.ok(before.every(node => node.position.y < endpoint.position.y), goal.id);
-    assert.equal(graph.edges.find(edge => edge.target === endpoint.id).className.includes('planned'), goal.status !== 'completed');
-  }
-  const overdue = buildLifeGraph([{id:'late',text:'尚未做完',start_date:'2026-10-01',target_date:'2026-10-02',status:'active'}],
-    [{day:'2026-10-09',text:'今天继续',goal_id:'late'}], 'Miko', '2026-10-09');
-  assert.equal(overdue.nodes.find(node => node.id === 'goal:late').data.goal.status, 'active');
-  assert.ok(overdue.nodes.find(node => node.id === 'goal:late').position.y > overdue.nodes.find(node => node.data.kind === 'activity').position.y);
-});
-
-test('the top keeps its rail without start nodes, and later goals grow from a later junction', () => {
-  assert.ok(graph.nodes.every(node=>node.data.kind!=='start'));
+const activities=graph=>graph.nodes.filter(node=>node.data.event);
+const reading=(graph,date)=>activities(graph).filter(node=>node.data.event.day===date)
+  .sort((a,b)=>a.position.y-b.position.y||a.position.x-b.position.x);
+function connected(graph){
   const nodes=new Map(graph.nodes.map(node=>[node.id,node]));
-  const hub=nodes.get('header:hub');
-  assert.equal(graph.edges.find(edge=>edge.source==='root').target,hub.id);
-  assert.ok(graph.edges.filter(edge=>edge.source===hub.id).every(edge=>nodes.get(edge.target).position.y===hub.position.y));
-  for (const id of ['drawing','cooking','photo','plant']) {
-    const first=graph.nodes.find(node=>node.data.event?.goal_id===id);
-    const edge=graph.edges.find(edge=>edge.target===first.id);
-    const origin=graph.edges.find(other=>other.target===edge.source);
-    assert.equal(nodes.get(origin.source).data.kind,'fork');
-    assert.equal(edge.type,'straight');
-    assert.notEqual(nodes.get(origin.source).position.x,first.position.x);
+  const incoming=new Map(graph.edges.map(edge=>[edge.target,edge.source]));
+  for(const node of graph.nodes.filter(node=>node.data.kind!=='date')){
+    let id=node.id;const seen=new Set();
+    while(id!=='root'){
+      assert.ok(!seen.has(id),'cycle at '+id);seen.add(id);
+      assert.ok(incoming.has(id),'disconnected '+id);id=incoming.get(id);
+      assert.ok(nodes.has(id),'missing '+id);
+    }
   }
-  assert.ok(full.goals.every(goal => !('parent_goal_id' in goal)));
-  const early = mockAt('2026-10-02');
-  assert.equal(early.goals.length, 4);
-  assert.equal(early.goals.filter(goal => goal.status === 'completed').length, 0);
-  assert.equal(full.goals.filter(goal => goal.status === 'completed').length, 4);
-  const activeOn=day=>mockAt(day).goals.filter(goal=>goal.status==='active'||goal.status==='paused').length;
-  assert.equal(activeOn('2026-10-03'),3);
-  assert.equal(activeOn('2026-10-06'),5);
-});
+}
+function noOverlaps(graph){
+  const blocks=graph.nodes.filter(node=>['activity','goal'].includes(node.data.kind));
+  for(let i=0;i<blocks.length;i++)for(let j=i+1;j<blocks.length;j++){
+    const a=blocks[i],b=blocks[j];
+    assert.ok(a.position.x+a.width<=b.position.x||b.position.x+b.width<=a.position.x||
+      a.position.y+a.height<=b.position.y||b.position.y+b.height<=a.position.y,`${a.id} overlaps ${b.id}`);
+  }
+}
 
-test('progress stays in the restored fixed branch columns',()=>{
+test('the complete history preserves every record and continuous goal tracks from the header',()=>{
+  assert.ok(full.events.length>=60);
+  for(const event of full.events)assert.ok(activities(graph).some(node=>node.data.event.day===event.day&&node.data.event.text.includes(event.text)),event.text);
+  assert.equal(graph.nodes.filter(node=>node.data.kind==='goal').length,full.goals.length);
+  assert.equal(new Set(graph.nodes.map(node=>node.id)).size,graph.nodes.length);
   for(const goal of full.goals){
-    const points=graph.nodes.filter(node=>node.data.branch===goal.id&&node.data.kind!=='date');
-    assert.ok(points.every(node=>node.position.x===points[0].position.x));
+    const progress=activities(graph).filter(node=>node.data.event.goal_id===goal.id);
+    assert.equal(new Set(progress.map(node=>node.position.x)).size,1,goal.id);
+    assert.equal(graph.nodes.find(node=>node.id==='goal:'+goal.id).position.x,progress[0].position.x);
   }
+  connected(graph);noOverlaps(graph);
 });
 
-test('later births and completions preserve the positions of earlier progress',()=>{
-  const early=mockAt('2026-10-02');
-  const before=buildLifeGraph(early.goals,early.events,'Miko','2026-10-02');
-  for(const node of before.nodes.filter(node=>node.data.event?.goal_id)){
-    const after=graph.nodes.find(other=>other.id===node.id);
-    assert.equal(after.position.x,node.position.x,node.id);
-    assert.equal(after.position.y,node.position.y,node.id);
+test('four first-day records create four trunks even with zero or one goal',()=>{
+  const goal={id:'cake',text:'做蛋糕',start_date:'2026-10-12',target_date:'2026-10-20',status:'active'};
+  const entries=['上午还书','中午做蛋糕','下午闲聊','睡前游戏'].map((text,index)=>({day:'2026-10-12',text,...(index===1?{goal_id:'cake'}:{})}));
+  const original=JSON.stringify(entries);
+  for(const goals of [[],[goal]]){
+    const value=buildLifeGraph(goals,entries,'Miko','2026-10-12');
+    const nodes=reading(value,'2026-10-12');
+    assert.equal(value.edges.filter(edge=>edge.source==='header:hub').length,4);
+    assert.equal(new Set(nodes.map(node=>node.position.x)).size,4);
+    assert.equal(new Set(nodes.map(node=>node.position.y)).size,1);
+    assert.equal(nodes.map(node=>node.data.label).join('|'),entries.map(entry=>entry.text).join('|'));
+    connected(value);
   }
+  assert.equal(JSON.stringify(entries),original);
 });
 
-test('straight trunks and new forks do not cross each other in the dense mock',()=>{
+test('sparse days remain connected and additional records fork locally without moving older days',()=>{
+  const events=[4,2,5,3].flatMap((count,day)=>Array.from({length:count},(_,i)=>({day:`2026-10-${12+day}`,text:`${day}:${i}`})));
+  const early=buildLifeGraph([],events.filter(event=>event.day<'2026-10-14'),'Miko','2026-10-13');
+  const later=buildLifeGraph([],events,'Miko','2026-10-15');
+  connected(later);
+  for(const before of activities(early)){
+    const after=later.nodes.find(node=>node.id===before.id);
+    assert.deepEqual(after.position,before.position);
+  }
+  const compact=buildLifeGraph([],events.filter(event=>event.day<'2026-10-14'),'Miko','2026-10-13','','',new Map(),900);
+  const extended=buildLifeGraph([],events,'Miko','2026-10-15','','',new Map(),900);
+  for(const before of activities(compact)){
+    const after=extended.nodes.find(node=>node.id===before.id);
+    assert.deepEqual(after.position,before.position);assert.equal(after.width,before.width);
+  }
+  assert.equal(compact.startWidth,extended.startWidth);
+  const fifth=reading(later,'2026-10-14')[4];
+  const join=later.nodes.find(node=>node.id===later.edges.find(edge=>edge.target===fifth.id).source);
+  const fork=later.nodes.find(node=>node.id===later.edges.find(edge=>edge.target===join.id).source);
+  assert.equal(fork.data.kind,'fork');assert.equal(fork.data.day,'2026-10-14');
+  assert.ok(fork.position.y>reading(later,'2026-10-13')[0].position.y);
+  for(const date of new Set(events.map(event=>event.day)))
+    assert.equal(reading(later,date).map(node=>node.data.label).join('|'),events.filter(event=>event.day===date).map(event=>event.text).join('|'));
+});
+
+test('goal progress keeps its track while independent records fill the free cells in input order',()=>{
+  const goals=['a','b','c'].map((id,i)=>({id,text:id,start_date:`2026-10-${12+i}`,target_date:'2026-10-20',status:'active'}));
+  const events=Array.from({length:4},(_,day)=>Array.from({length:4},(_,i)=>({day:`2026-10-${12+day}`,text:`${day}:${i}`,goal_id:i===1?goals[day%3].id:undefined}))).flat();
+  const value=buildLifeGraph(goals,events,'Miko','2026-10-15');
+  for(const date of new Set(events.map(event=>event.day))){
+    const nodes=reading(value,date).filter(node=>!node.data.event.goal_id);
+    assert.equal(nodes.map(node=>node.data.label).join('|'),events.filter(event=>event.day===date&&!event.goal_id).map(event=>event.text).join('|'));
+  }
+  for(const goal of goals){
+    const nodes=activities(value).filter(node=>node.data.event.goal_id===goal.id);
+    assert.equal(new Set(nodes.map(node=>node.position.x)).size,1);
+    assert.equal(value.nodes.find(node=>node.id==='goal:'+goal.id).position.x,nodes[0].position.x);
+  }
+  assert.ok(activities(value).every(node=>node.data.event.goal_id===undefined||node.data.branch===node.data.event.goal_id));
+});
+
+test('milestones stay after progress, remain muted until completed and closed trunks branch again near new activity',()=>{
+  for(const goal of full.goals){
+    const endpoint=graph.nodes.find(node=>node.id==='goal:'+goal.id);
+    const before=activities(graph).filter(node=>node.data.event.goal_id===goal.id&&node.data.event.day<=(goal.completed_date??'9999'));
+    assert.ok(before.every(node=>node.position.y<=endpoint.position.y),goal.id);
+    assert.equal(graph.edges.find(edge=>edge.target===endpoint.id).className.includes('planned'),goal.status!=='completed');
+  }
+  const goal={id:'one',text:'完成一件事',start_date:'2026-10-01',target_date:'2026-10-02',completed_date:'2026-10-01',status:'completed'};
+  const value=buildLifeGraph([goal],[{day:'2026-10-01',text:'做完',goal_id:'one'},
+    {day:'2026-10-03',text:'新的日常'},{day:'2026-10-03',text:'另一件日常'}],'Miko','2026-10-03');
+  connected(value);
+  const endpoint=value.nodes.find(node=>node.id==='goal:one');
+  const following=value.nodes.find(node=>node.data.event?.day==='2026-10-03');
+  assert.ok(following.position.y>endpoint.position.y);
+  assert.ok(value.nodes.some(node=>node.data.kind==='fork'&&node.data.day==='2026-10-03'));
+  const ongoing={id:'ongoing',text:'另一件事',start_date:'2026-10-01',target_date:'2026-10-08',status:'active'};
+  const next={id:'next',text:'后来开始的事',start_date:'2026-10-03',target_date:'2026-10-10',status:'active'};
+  const continued=buildLifeGraph([goal,ongoing,next],[
+    {day:'2026-10-01',text:'做完',goal_id:'one'},
+    {day:'2026-10-01',text:'开始另一件事',goal_id:'ongoing'},
+    {day:'2026-10-02',text:'普通日常'},
+    {day:'2026-10-03',text:'新目标开工',goal_id:'next'},
+    {day:'2026-10-03',text:'继续另一件事',goal_id:'ongoing'},
+  ],'Miko','2026-10-03');
+  connected(continued);noOverlaps(continued);
+  const old=continued.nodes.find(node=>node.id==='goal:one');
+  const fresh=activities(continued).find(node=>node.data.event.goal_id==='next');
+  assert.equal(fresh.position.x,old.position.x);
+  assert.ok(fresh.position.y>old.position.y);
+  assert.ok(!continued.edges.some(edge=>edge.source===old.id),'a surviving trunk supplies the new branch');
+  assert.ok(continued.nodes.some(node=>node.data.kind==='fork'&&node.data.day==='2026-10-03'));
+});
+
+test('four daily entries and two goals occupy one row; completion replaces its progress and old duplicates retain their text',()=>{
+  const goals=[{id:'a',text:'蛋糕做完',start_date:'2026-10-12',target_date:'2026-10-12',completed_date:'2026-10-12',status:'completed'},
+    {id:'b',text:'读完一本书',start_date:'2026-10-12',target_date:'2026-10-20',status:'active'}];
+  const events=[{day:'2026-10-12',text:'烤好蛋糕',goal_id:'a'},
+    {day:'2026-10-12',text:'旧记录里的收尾',goal_id:'a'},
+    {day:'2026-10-12',text:'看了下一章',goal_id:'b'},
+    ...['上课','吃饭','散步','闲聊'].map(text=>({day:'2026-10-12',text}))];
+  const value=buildLifeGraph(goals,events,'Miko','2026-10-12');
+  const row=reading(value,'2026-10-12');
+  assert.equal(row.length,6);assert.equal(new Set(row.map(node=>node.position.y)).size,1);
+  assert.equal(new Set(row.map(node=>node.position.x)).size,6);
+  const completed=row.find(node=>node.data.goal?.id==='a');
+  assert.ok(completed.data.event.text.includes('烤好蛋糕'));
+  assert.ok(completed.data.event.text.includes('旧记录里的收尾'));
+  assert.equal(row.filter(node=>node.data.event.goal_id==='a').length,1);
+  assert.ok(!value.edges.some(edge=>edge.source===completed.id));
+  connected(value);noOverlaps(value);
+});
+
+test('straight tracks and local forks do not cross or run backwards',()=>{
   const nodes=new Map(graph.nodes.map(node=>[node.id,node]));
-  const lines=graph.edges.filter(edge=>edge.type==='straight').map(edge=>({edge,
+  const lines=graph.edges.map(edge=>({edge,
     a:{x:nodes.get(edge.source).position.x+14,y:nodes.get(edge.source).position.y+18},
     b:{x:nodes.get(edge.target).position.x+14,y:nodes.get(edge.target).position.y+18}}));
   const side=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  for(const line of lines)assert.ok(line.b.y>line.a.y||line.edge.source==='header:hub',line.edge.id);
   for(let i=0;i<lines.length;i++)for(let j=i+1;j<lines.length;j++){
     const a=lines[i],b=lines[j];
-    const crosses=side(a.a,a.b,b.a)*side(a.a,a.b,b.b)<-.01&&side(b.a,b.b,a.a)*side(b.a,b.b,a.b)<-.01;
-    assert.equal(crosses,false,`${a.edge.id} crosses ${b.edge.id}`);
+    assert.equal(side(a.a,a.b,b.a)*side(a.a,a.b,b.b)<-.01&&side(b.a,b.b,a.a)*side(b.a,b.b,a.b)<-.01,false,`${a.edge.id} crosses ${b.edge.id}`);
   }
 });
 
-test('the dense map has no overlapping content blocks, and date/search filters remain connected', () => {
-  const blocks = graph.nodes.filter(node => ['activity','goal'].includes(node.data.kind));
-  for (let i=0;i<blocks.length;i++)for(let j=i+1;j<blocks.length;j++) {
-    const a=blocks[i],b=blocks[j];
-    const overlap=a.position.x < b.position.x+b.width && b.position.x < a.position.x+a.width &&
-      a.position.y < b.position.y+b.height && b.position.y < a.position.y+a.height;
-    assert.equal(overlap,false,`${a.id} overlaps ${b.id}`);
-  }
+test('date and text filtering retain the selected records and connected goal context',()=>{
   const filtered=buildLifeGraph(full.goals,full.events,'Miko','2026-10-09','','薄荷');
-  assert.ok(filtered.nodes.some(node => node.id==='goal:plant'));
+  assert.ok(filtered.nodes.some(node=>node.id==='goal:plant'));connected(filtered);
   const daily=buildLifeGraph(full.goals,full.events,'Miko','2026-10-09','2026-10-05');
-  assert.ok(daily.nodes.filter(node => node.data.event).every(node => node.data.event.day==='2026-10-05'));
+  assert.ok(activities(daily).every(node=>node.data.event.day==='2026-10-05'));connected(daily);
 });
 
-test('unlinked daily events fill free goal columns in reading order without becoming goal progress',()=>{
-  const goals=['a','b','c','d'].map(id=>({id,text:id,start_date:'2026-10-01',target_date:'2026-10-10',status:'active'}));
-  const progress={day:'2026-10-01',text:'目标进度',goal_id:'b'};
-  const daily=Array.from({length:50},(_,index)=>({day:'2026-10-01',text:'日常 '+index}));
-  const input=JSON.stringify([goals,daily]);
-  const result=buildLifeGraph(goals,[progress,...daily],'Miko','2026-10-01');
-  const ordinary=result.nodes.filter(node=>node.data.event&&!node.data.event.goal_id);
-  const ordered=[...ordinary].sort((a,b)=>a.position.y-b.position.y||a.position.x-b.position.x);
-  assert.equal(ordered.map(node=>node.data.event.text).join(','),daily.map(event=>event.text).join(','));
-  assert.equal(new Set(ordinary.map(node=>node.position.x)).size,4);
-  assert.equal(ordinary.length,50);
-  assert.ok(ordinary.every(node=>node.data.branch==='ordinary'));
-  assert.equal(result.width,buildLifeGraph(goals,[progress],'Miko','2026-10-01').width);
-  assert.equal(JSON.stringify([goals,daily]),input);
-  const blocks=result.nodes.filter(node=>['activity','goal'].includes(node.data.kind));
-  for(let i=0;i<blocks.length;i++)for(let j=i+1;j<blocks.length;j++){
-    const a=blocks[i],b=blocks[j];
-    assert.ok(a.position.x+a.width<=b.position.x||b.position.x+b.width<=a.position.x||
-      a.position.y+a.height<=b.position.y||b.position.y+b.height<=a.position.y,`${a.id} overlaps ${b.id}`);
-  }
-  const found=buildLifeGraph(goals,[progress,...daily],'Miko','2026-10-01','','日常 49');
-  assert.equal(found.nodes.filter(node=>node.data.event).length,1);
-  assert.ok(found.edges.some(edge=>edge.target===found.nodes.find(node=>node.data.event).id));
-});
-
-test('measured long labels expand the layout without overlapping later rows or milestones',()=>{
-  const measured=new Map(graph.nodes.filter(node=>['activity','goal'].includes(node.data.kind))
-    .map((node,index)=>[node.id,54+(index%4)*38]));
+test('measured long text expands the day without overlapping the next day or milestones',()=>{
+  const measured=new Map(graph.nodes.filter(node=>['activity','goal'].includes(node.data.kind)).map((node,i)=>[node.id,90+(i%4)*38]));
   const expanded=buildLifeGraph(full.goals,full.events,'Miko','2026-10-09','','',measured);
-  const blocks=expanded.nodes.filter(node=>['activity','goal'].includes(node.data.kind));
-  assert.ok(blocks.some(node=>node.height>150));
-  for(let i=0;i<blocks.length;i++)for(let j=i+1;j<blocks.length;j++){
-    const a=blocks[i],b=blocks[j];
-    assert.ok(a.position.x+a.width<=b.position.x||b.position.x+b.width<=a.position.x||
-      a.position.y+a.height<=b.position.y||b.position.y+b.height<=a.position.y,`${a.id} overlaps ${b.id}`);
-  }
+  assert.ok(expanded.nodes.some(node=>node.height>180));noOverlaps(expanded);connected(expanded);
 });

@@ -13,7 +13,7 @@ from miko.api.life import life_router
 from miko.api.profiles import ProfileInput
 from miko.domain.conversation.chat import ChatService, reply_context
 from miko.domain.life import Life, GoalInput
-from miko.domain.life_material import conversation_background, generation_material
+from miko.domain.life_material import DAYTIME, LEISURE, conversation_background, generation_material
 from miko.storage.search import terms
 from miko.settings import Settings
 from miko.adapters.memory.service import Memory
@@ -30,6 +30,16 @@ class SimulatedDay(date):
 class Embeddings:
     async def embed(self, texts):
         return [[1., 0.] if '摄影' in text or '相机' in text else [0., 1.] for text in texts], {}
+
+
+def plan_fixture(output, material):
+    entries = [dict(row, **({'result': row.get('result', row['text'])} if row.get('goal_id') else {}))
+               for row in output.get('entries', [])]
+    minimum = material['本次可补充条数']['min']
+    while len(entries) < minimum:
+        entries.append({'text': '日常休息片段' + str(len(entries))})
+    return {'text': json.dumps({'entries': entries, 'goal_updates': output.get('goal_updates', []),
+              'new_goals': [dict(row, done_when=row['text']) for row in output.get('new_goals', [])]}, ensure_ascii=False)}
 
 
 class LifeTests(unittest.IsolatedAsyncioTestCase):
@@ -62,9 +72,9 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             material = json.loads(message)
             inputs.append(material)
             if len(inputs) > 1:
-                self.assertIn('摄影', json.dumps(material['既有角色生活记录'], ensure_ascii=False))
+                self.assertIn('摄影' if len(inputs)==2 else '构图', json.dumps(material['既有角色生活记录'], ensure_ascii=False))
             self.assertIn('前端配色', json.dumps(material['真实用户资料'], ensure_ascii=False))
-            return {'text': json.dumps({'entries': [{'text': '开始学摄影' if len(inputs) == 1 else '练构图'}]}, ensure_ascii=False)}
+            return plan_fixture({'entries': [{'text': '开始学摄影' if len(inputs) == 1 else '练构图'}]}, material)
 
         self.chat.complete_memory = generate
         with patch('miko.domain.life.date', SimulatedDay):
@@ -115,9 +125,10 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.life.generate()
         self.assertEqual(self.life.store.get(day).entries[0]['text'], '练和弦')
-        async def concurrent(*args, **kwargs):
+        async def concurrent(system, message, **kwargs):
+            material = json.loads(message)
             self.life.save(day, [{'text': '号主修正：今天休息'}], 1)
-            return {'text': '{"entries":[{"text":"练新曲"}]}'}
+            return plan_fixture({'entries':[{'text':'练新曲'}]}, material)
         self.chat.complete_memory = concurrent
         with self.assertRaises(ValueError):
             await self.life.generate()
@@ -125,9 +136,10 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_background_survives_page_close_and_pause_stops_new_days(self):
         calls = []
-        async def complete(*args, **kwargs):
+        async def complete(system, message, **kwargs):
             calls.append(1)
-            return {'text': '{"entries":[{"text":"练配色"}]}'}
+            material = json.loads(message)
+            return plan_fixture({'entries':[{'text':'练配色'}]}, material)
         self.chat.complete_memory = complete
         from datetime import datetime, time
         from zoneinfo import ZoneInfo
@@ -166,8 +178,9 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         ]
         inputs = []
         async def complete(system, message, **kwargs):
-            inputs.append(json.loads(message))
-            return {'text': json.dumps(outputs.pop(0), ensure_ascii=False)}
+            material = json.loads(message)
+            inputs.append(material)
+            return plan_fixture(outputs.pop(0), material)
         self.chat.complete_memory = complete
         with patch('miko.domain.life.date', SimulatedDay), patch('miko.domain.life_material.day_rhythm',
                 return_value={'白天的时间去向': '半天处理本职事务，另外处理生活琐事',
@@ -176,13 +189,13 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             self.life.save(SimulatedDay.today(), [{'text': '午后小憩'}], 0)
             await self.life.generate()
             goal_id = next(iter(self.life.store.goals))
-            self.assertEqual(len(self.life.listing()['record']['entries']), 3)
-            self.assertEqual(self.life.store.get(SimulatedDay.today()).entries[1]['goal_id'], goal_id)
+            self.assertEqual(len(self.life.listing()['record']['entries']), 2)
+            self.assertEqual(self.life.store.get(SimulatedDay.today()).progress[0]['goal_id'], goal_id)
             # Passing an estimate does not change the goal's state.
             SimulatedDay.current = date(2026, 10, 9)
             await self.life.generate()
             self.assertEqual(self.life.store.goals[goal_id]['status'], 'active')
-            self.assertEqual(inputs[-1]['生活目标'][0]['id'], goal_id)
+            self.assertEqual(inputs[-1]['未完成目标总数'], 1)
             outputs.append({'goal_updates': [{'id': goal_id, 'status': 'paused', 'target_date': '2026-10-12'}],
                             'entries': [{'text': '收起相机，改天再拍', 'goal_id': goal_id}]})
             await self.life.generate()
@@ -197,7 +210,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restarted.store.goals[goal_id]['status'], 'completed')
         self.assertEqual(restarted.store.goals[goal_id]['completed_date'], '2026-10-12')
         self.assertEqual(len(restarted.store.goals), 2)
-        self.assertEqual(len(restarted.listing()['trajectory']), 7)
+        self.assertEqual(len(restarted.listing()['trajectory']), 8)
         context = await self.memory.context('相机')
         self.assertTrue(any(g['id'] == goal_id and g['status'] == 'completed' for g in context['life_goals']))
         self.assertTrue(any(r.get('goal_id') == goal_id for r in context['life_entries']))
@@ -215,22 +228,148 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
     async def test_goal_generation_is_atomic_and_owner_edit_wins(self):
         self.life.save_goal(GoalInput(text='练和弦', target_date=date.today()), self.life.store.revision)
         goal_id = next(iter(self.life.store.goals))
-        async def invalid(*args, **kwargs):
-            return {'text': json.dumps({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
-                'entries': [{'text': '随手写了几个字', 'goal_id': 'missing'}]})}
+        async def invalid(system, message, **kwargs):
+            return plan_fixture({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
+                'entries': [{'text': '随手写了几个字', 'goal_id': 'missing'}]}, json.loads(message))
         self.chat.complete_memory = invalid
         with self.assertRaises(ValueError): await self.life.generate()
         self.assertEqual(Life(self.chat).store.goals[goal_id]['status'], 'active')
         self.assertFalse(self.life.store.has(date.today()))
-        async def concurrent(*args, **kwargs):
+        async def concurrent(system, message, **kwargs):
+            material = json.loads(message)
             self.life.save_goal(GoalInput(text='练和弦，先搁置', target_date=date.today(), status='paused'),
                                 self.life.store.revision, goal_id)
-            return {'text': json.dumps({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
-                                       'entries': [{'text': '练和弦', 'goal_id': goal_id}]})}
+            return plan_fixture({'goal_updates': [{'id': goal_id, 'status': 'completed'}],
+                                'entries': [{'text': '练和弦', 'goal_id': goal_id}]}, material)
         self.chat.complete_memory = concurrent
         with self.assertRaises(ValueError): await self.life.generate()
         self.assertEqual(Life(self.chat).store.goals[goal_id]['status'], 'paused')
         self.assertFalse(self.life.store.has(date.today()))
+
+    async def test_whole_day_budget_single_call_order_and_atomic_goal_changes(self):
+        from datetime import timedelta
+        today = date.today()
+        for name in ('拍窗边照片', '做一只蛋糕'):
+            self.life.save_goal(GoalInput(text=name, done_when=name+'完成', target_date=today+timedelta(days=7)), self.life.store.revision)
+        first, second = self.life.store.goals
+        requests, outputs = [], []
+        self.life.provider = self.chat.provider.model_copy(update={'model':'life-model'})
+        self.life.model = 'life-model'
+        async def complete(system, message, **kwargs):
+            material = json.loads(message)
+            self.assertEqual(kwargs['model'], 'life-model')
+            self.assertEqual(kwargs['provider'], self.life.provider)
+            self.assertTrue(kwargs['allow_reasoning'])
+            requests.append(material)
+            response = plan_fixture(outputs.pop(0), material)
+            # Actual providers may include harmless classification metadata.
+            parsed = json.loads(response['text'])
+            for row in parsed['entries']:
+                row['type'] = 'goal_progress' if row.get('goal_id') else 'daily'
+            if len(requests) == 1:
+                parsed['entries'][1].pop('result')
+            return {'text': json.dumps(parsed)}
+        self.chat.complete_memory = complete
+        outputs.append({'entries':[{'text':'早上买菜'}, {'text':'试了窗边构图','goal_id':first},
+            {'text':'午后洗衣服'}, {'text':'试烤蛋糕','goal_id':second}]})
+        await self.life.generate(today)
+        self.assertEqual(len(requests),1)
+        record = self.life.store.get(today)
+        self.assertEqual((len(record.entries),len(record.progress)),(2,2))
+        self.assertEqual([r['text'] for r in Life(self.chat).store.get(today).activities],
+                         ['早上买菜','试了窗边构图','午后洗衣服','试烤蛋糕'])
+        # The edit endpoint receives the displayed metadata and preserves order.
+        app = FastAPI(); app.include_router(life_router(self.life))
+        with TestClient(app) as client:
+            edited = list(record.activities)
+            edited[0] = dict(edited[0], text='早上去菜场买菜')
+            response = client.put('/api/life',json={'day':str(today),'revision':record.revision,'entries':edited})
+            self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(Life(self.chat).store.get(today).activities[1]['goal_id'],first)
+        outputs.append({'entries':[{'text':'忙课业'},{'text':'散步'}]})
+        await self.life.generate(today+timedelta(days=1))
+        self.assertEqual(self.life.store.get(today+timedelta(days=1)).progress,[])
+        outputs.append({'entries':[{'text':'日常'+str(i)} for i in range(3)]+[{'text':'选好最后一张照片','goal_id':first}],
+            'goal_updates':[{'id':first,'status':'completed','current_state':'照片挑选结束'}]})
+        await self.life.generate(today+timedelta(days=2))
+        self.assertEqual(len(requests),3)
+        self.assertEqual(self.life.store.goals[first]['completed_date'],str(today+timedelta(days=2)))
+        self.assertEqual(Life(self.chat).goal_records()[0]['current_state'],'选好最后一张照片')
+        next_day = today+timedelta(days=3)
+        outputs.append({'entries':[{'text':'准备原料','goal_id':second},{'text':'逛公园'},
+                                   {'text':'试烤完成','goal_id':second}]})
+        await self.life.generate(next_day)
+        consolidated = Life(self.chat).store.get(next_day)
+        self.assertEqual(len(consolidated.progress),1)
+        self.assertEqual(consolidated.progress[0]['text'],'准备原料；试烤完成')
+        self.assertEqual(consolidated.progress[0]['result'],'试烤完成')
+        self.assertEqual([r['text'] for r in consolidated.activities],['逛公园','准备原料；试烤完成'])
+        next_day += timedelta(days=1)
+        outputs.append({'entries':[{'text':'日常'+str(i)} for i in range(4)]+[{'text':'蛋糕完成','goal_id':second}],
+            'goal_updates':[{'id':second,'status':'completed'}]})
+        with self.assertRaisesRegex(ValueError,'生活片段数量'):
+            await self.life.generate(next_day)
+        self.assertFalse(self.life.store.has(next_day))
+        self.assertEqual(Life(self.chat).store.goals[second]['status'],'active')
+
+    async def test_life_preserves_model_reasoning_and_only_stores_final_content(self):
+        import httpx
+        from miko.domain.conversation.chat import Turn
+        payloads = []
+        async def provider(request):
+            payloads.append(json.loads(request.content))
+            chunks = [{'choices':[{'delta':{'reasoning_content':'先判断今天是否有精力'},'index':0}]},
+                      {'choices':[{'delta':{'content':'{"entries":[]}'},'index':0,'finish_reason':'stop'}]}]
+            return httpx.Response(200,text=''.join('data: '+json.dumps(c)+'\n\n' for c in chunks)+'data: [DONE]\n\n')
+        client_type = httpx.AsyncClient
+        with patch('miko.domain.conversation.chat.httpx.AsyncClient',
+                   side_effect=lambda **kw: client_type(transport=httpx.MockTransport(provider),**kw)):
+            for allow in (False, True):
+                turn = Turn(str(allow),'memory','生成当天记录',json_output=True,allow_reasoning=allow)
+                response = await self.chat.proxy(turn)
+                async for _ in response.body_iterator:
+                    pass
+                self.assertEqual(turn.text,'{"entries":[]}')
+        self.assertEqual(payloads[0]['thinking'],{'type':'disabled'})
+        self.assertNotIn('thinking',payloads[1])
+
+    async def test_setting_a_goal_does_not_require_progress_on_the_same_day(self):
+        today = date.today()
+        async def complete(system, message, **kwargs):
+            material = json.loads(message)
+            return {'text':json.dumps({'entries':[{'text':'买菜'},{'text':'看书'}],
+                'new_goals':[{'ref':'cake','text':'做一只蛋糕','done_when':'完成一只蛋糕',
+                              'target_date':str(today)}]})}
+        self.chat.complete_memory = complete
+        await self.life.generate(today)
+        record = Life(self.chat).store.get(today)
+        self.assertEqual(len(record.entries),2)
+        self.assertEqual(record.progress,[])
+        self.assertEqual(next(iter(self.life.store.goals.values()))['status'],'active')
+
+    async def test_unfinished_goal_limit_is_shared_by_manual_and_generated_changes(self):
+        today = date.today()
+        for i in range(3):
+            self.life.save_goal(GoalInput(text=str(i),target_date=today,
+                status='paused' if i==0 else 'active'),self.life.store.revision)
+        with self.assertRaisesRegex(ValueError,'三个未完成目标'):
+            self.life.save_goal(GoalInput(text='第四个',target_date=today),self.life.store.revision)
+        first = next(iter(self.life.store.goals))
+        outputs = [
+            {'new_goals':[{'ref':'four','text':'第四个','done_when':'完成','target_date':str(today)}]},
+            {'entries':[{'text':'完成原目标','goal_id':first}],
+             'goal_updates':[{'id':first,'status':'completed'}],
+             'new_goals':[{'ref':'next','text':'下一个','done_when':'完成','target_date':str(today)}]}]
+        async def complete(system, message, **kwargs):
+            material = json.loads(message)
+            return plan_fixture(outputs.pop(0),material)
+        self.chat.complete_memory = complete
+        with self.assertRaisesRegex(ValueError,'三个未完成目标'):
+            await self.life.generate(today)
+        self.assertFalse(self.life.store.has(today))
+        await self.life.generate(today)
+        self.assertEqual(sum(g['status']!='completed' for g in self.life.store.goals.values()),3)
+        self.assertEqual(self.life.store.goals[first]['status'],'completed')
 
     async def test_daily_background_does_not_turn_all_hobbies_into_a_task_list(self):
         self.chat.profiles.save(ProfileInput(subject='miko', kind='fact', category='兴趣与能力/学习与工作',
@@ -251,12 +390,18 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             {g['id']: g for g in (old, drawing, piano)}, date(2026, 10, 6),
             {'白天的时间去向': '处理手上工作和家务', '空下来之后': '看电影，吃饭洗澡后休息'})
         self.assertEqual([g['id'] for g in material['生活目标']], ['drawing'])
+        self.assertEqual(material['未完成目标总数'], 2)
         self.assertNotIn('贝斯', json.dumps(material['role_material'], ensure_ascii=False))
         self.assertNotIn('小傲娇', json.dumps(material['role_material'], ensure_ascii=False))
         self.assertEqual(material['相关事项的最新进展'][0]['goal_id'], 'drawing')
         self.assertTrue(all('goal_id' not in r for r in material['既有角色生活记录']))
         self.assertEqual(material['已经告一段落的事项'][0]['status'], 'completed')
         self.assertNotIn('id', material['已经告一段落的事项'][0])
+
+        busy = generation_material(self.chat.profiles, records,
+            {'piano': piano}, date(2026, 10, 6),
+            {'白天的时间去向': DAYTIME[0], '空下来之后': LEISURE[4]})
+        self.assertEqual([g['id'] for g in busy['生活目标']], ['piano'])
 
     async def test_owner_facts_are_separate_from_generated_stories_and_names_follow_settings(self):
         self.chat.store.rename_character('青柠', subject='owner')
@@ -271,8 +416,9 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
             {'text': '橙汁新买了键盘'}, {'text': '继续画《秋天》的分镜'}], 0, 'generated')
         captured = {}
         async def complete(system, message, **kwargs):
-            captured.update(system=self.chat.named_prompt(system), material=json.loads(message))
-            return {'text': json.dumps({'entries': [{'text': '和青柠一起吃晚饭'}]}, ensure_ascii=False)}
+            material = json.loads(message)
+            captured.update(system=self.chat.named_prompt(system), material=material)
+            return plan_fixture({'entries': [{'text': '和青柠一起吃晚饭'}]}, material)
         self.chat.complete_memory = complete
         await self.life.generate(date(2026, 10, 9))
         material = captured['material']
@@ -360,7 +506,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
                      'text': '好友去了音乐节', 'source_ids': [1]},
                     {'kind': 'plan', 'date': '2026-10-10', 'period': '晚上', 'people': ['Miko', '橙汁'],
                      'text': '明天去音乐会', 'source_ids': [1]}]}, ensure_ascii=False)}
-            return {'text': json.dumps({'entries': [{'text': '饭后在楼下散步'}]}, ensure_ascii=False)}
+            return plan_fixture({'entries': [{'text': '饭后在楼下散步'}]}, material)
         self.chat.complete_memory = complete
         embeddings = self.memory.index._embedding_pool._cache['embedding']
         with patch.object(embeddings, 'embed', side_effect=AssertionError('Life must not call embeddings')) as embed:
@@ -371,6 +517,7 @@ class LifeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('实验室', json.dumps(inputs[0], ensure_ascii=False))
         self.assertNotIn('对话提炼记录', inputs[1])
         self.assertEqual(inputs[1]['已占用时段'], ['晚上'])
+        self.assertNotIn('本次补充片段数', inputs[1])
         stored = self.life.store.get(date(2026, 10, 9)).entries
         self.assertEqual([r['text'] for r in stored], ['饭后在楼下散步', '晚上与橙汁约好玩《双人成行》'])
         self.memory.social.toggle(False)

@@ -147,6 +147,7 @@ class IdentityAliasTests(unittest.IsolatedAsyncioTestCase):
         captured=[]
         async def complete(system,message,**kwargs):
             captured.append((system,message))
+            material=json.loads(message)
             return {'text':json.dumps({'entries':[{'text':'花梨和阿柚吃了晚饭'}]},ensure_ascii=False)}
         self.chat.complete_memory=complete
         await self.chat.life.generate(date.today())
@@ -154,6 +155,8 @@ class IdentityAliasTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.current,captured[0][1])
         self.assertNotIn('Niko',captured[0][1])
         self.assertNotIn('阿澄',captured[0][1])
+        names=self.store.identity().material({'result':self.original,'done_when':self.original,'current_state':self.original})
+        self.assertTrue(all(value==self.current for value in names.values()))
         self.assertEqual(self.store.messages('example')[0]['text'],self.original)
 
     async def test_import_uses_same_alias_history_and_evidence_stays_original(self):

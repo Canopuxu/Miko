@@ -1,4 +1,4 @@
-.life-navigation { display: flex; flex-direction: column; gap: 16px; height: 100%; }
+.life-navigation { display: flex; flex: 1; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
 .life-navigation label { display: grid; gap: 8px; font-size: 12px; color: #8c8073; }
 .life-navigation input { width: 100%; box-sizing: border-box; border: 1px solid #ddd5c9; border-radius: 8px; padding: 10px; background: transparent; color: inherit; font: inherit; }
 .life-button { border: 1px solid #d9d3c8; border-radius: 8px; padding: 9px 13px; background: transparent; color: #776a5c; font: inherit; cursor: pointer; }
@@ -79,11 +79,11 @@
 .life-timeline-filter, .life-branch-detail { flex-shrink: 0; }
 
 .life-navigation { min-height: 0; gap: 16px; }
-.life-goal-list { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+.life-goal-list { flex: 1; min-width: 0; min-height: 0; max-height: none; overflow-y: auto; scrollbar-width: thin; }
 .life-goal-list .life-list-heading { position: sticky; top: 0; z-index: 1; background: var(--page); padding: 0 0 10px; }
-.life-goal-link { border: 1px solid transparent; border-radius: 9px; padding: 12px; margin: 0 0 6px; gap: 8px; }
+.life-goal-link { grid-template-columns: minmax(0,1fr); min-width: 0; border: 1px solid transparent; border-radius: 9px; padding: 12px; margin: 0 0 6px; gap: 8px; }
 .life-goal-link:hover { background: var(--sage-wash); }
-.life-goal-link > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.6; }
+.life-goal-link > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .life-goal-link small { color: #706b62; font-size: 12px; }
 .life-date-list { min-height: 0; }
 .life-date-list button { display: flex; align-items: center; gap: 10px; }

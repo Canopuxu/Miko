@@ -44,22 +44,37 @@ class ScheduleData:
     """单日数据（date 只作为内部 key，不对外暴露格式责任）"""
 
     date: str  # yyyy-mm-dd
-    entries: list[dict[str, str]] = field(default_factory=list)
+    entries: list[dict] = field(default_factory=list)
     revision: int = 1
     source: str = "generated"
+    progress: list[dict] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Older snapshots stored both kinds together; retain every original text.
+        if any(row.get('goal_id') for row in self.entries):
+            self.entries = [dict(row, order=row.get('order', index)) for index, row in enumerate(self.entries)]
+        linked = [row for row in self.entries if row.get('goal_id')]
+        self.entries = [row for row in self.entries if not row.get('goal_id')]
+        self.progress = linked + self.progress
+
+    @property
+    def activities(self):
+        rows = [*self.entries, *self.progress]
+        return [row for _, row in sorted(enumerate(rows), key=lambda pair: pair[1].get('order', pair[0]))]
 
     @classmethod
     def from_dict(cls, data: dict) -> "ScheduleData":
         """允许未来字段扩展"""
         return cls(
             date=data["date"],
-            entries=[{**({'goal_id': row['goal_id']} if row.get('goal_id') else {}),
+            entries=[{**{key: row[key] for key in ('goal_id', 'result', 'order') if key in row},
                       "text": (row["topic"] + "：" + row["text"]
                                if row.get("topic") and row["topic"] != "活动或兴趣"
                                and row["topic"] not in row["text"] else row["text"])}
                      for row in data.get("entries", [])],
             revision=data.get("revision", 1),
             source=data.get("source", "generated"),
+            progress=[dict(row) for row in data.get('progress', [])],
         )
 
 

@@ -72,7 +72,7 @@ class SearchExpansion:
         self.running=True
         try:
             result=await self.chat.complete_memory(self.prompt.read_text('utf-8'),json.dumps({'items':material},ensure_ascii=False),
-                                                   model=model,json_output=True,provider=provider)
+                                                   model=model,json_output=True,provider=provider,allow_reasoning=True)
             value=json.loads(result['text']);items=value['items']
             if not isinstance(items,list):raise ValueError('items must be an array')
             parsed={}

@@ -22,6 +22,7 @@ class SearchExpansionTests(unittest.IsolatedAsyncioTestCase):
         self.record=self.chat.profiles.save(ProfileInput(subject='miko',kind='fact',category='职业',
             title='主业',content='绘本插画师').record())
         async def generate(system,message,**kwargs):
+            self.assertTrue(kwargs['allow_reasoning'])
             return {'text':json.dumps({'items':[{'id':r['id'],'expressions':['稿费够饭钱吗','靠画画养活自己']}
                 for r in json.loads(message)['items']]},ensure_ascii=False)}
         self.chat.complete_memory=AsyncMock(side_effect=generate)

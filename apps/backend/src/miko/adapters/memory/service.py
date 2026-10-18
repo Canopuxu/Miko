@@ -87,16 +87,16 @@ class Memory:
     def documents(self):
         result = {}
         if self.chat.life:
-            for goal in self.chat.life.store.goals.values():
+            for goal in self.chat.life.goal_records():
                 name = 'life-goal:' + goal['id']
                 result[name] = {'name': name, 'track': 'memory', 'description': goal['text'],
                     'content': json.dumps({k: v for k, v in goal.items() if k != 'id'}, ensure_ascii=False),
                     'subject': 'miko', 'peer': '', 'entry_id': name,
                     'row': {'group':'life_goals','source':dict(goal)}}
             for day, row in self.chat.life.store.all().items():
-                if day > date.today().isoformat() or not row.entries:
+                if day > date.today().isoformat() or not row.activities:
                     continue
-                for position, entry in enumerate(row.entries):
+                for position, entry in enumerate(row.activities):
                     name = f'life:{day}:{position}'
                     result[name] = {'name': name, 'track': 'memory', 'description': entry['text'],
                         'content': entry['text'], 'subject': 'miko', 'peer': '', 'entry_id': name,

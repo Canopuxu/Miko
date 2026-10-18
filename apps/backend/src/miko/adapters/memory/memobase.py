@@ -25,7 +25,7 @@ class MemobasePipeline:
     async def summarize(self,sid,payload,model=None):
         usage={};calls=[]
         async def ask(label,system,user,json_output=False):
-            result=await self.chat.complete_memory(system,user,model or self.model,json_output=json_output,
+            result=await self.chat.complete_memory(system,user,model or self.model,json_output=json_output,allow_reasoning=True,
                 **({'provider': self.provider} if self.provider else {}))
             calls.append(label)
             for key,value in result.get('usage',{}).items():
@@ -96,7 +96,7 @@ class MemobasePipeline:
         """Use the original organizer on demand, returning a reviewable proposal."""
         rows = [r for r in self.social.structured.items(subject=subject, category=category, active=True) if r['peer']==peer]
         text = f'topic: {category}\n' + '\n'.join(f'- {r["topic"]}::{r["content"]}' for r in rows)
-        value = await self.chat.complete_memory(organize.get_prompt(8, ''), text, self.model,
+        value = await self.chat.complete_memory(organize.get_prompt(8, ''), text, self.model, allow_reasoning=True,
             **({'provider': self.provider} if self.provider else {}))
         return {'items': parser.parse_string_into_subtopics(value['text']),
                 'revisions': {r['id']:r['revision'] for r in rows}, 'usage': value['usage'],

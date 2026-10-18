@@ -9,22 +9,22 @@ from miko.storage.search import terms
 
 
 DAYTIME = (
-    '白天主要处理手上的本职事务，同一件事情来回做，中间吃饭和休息',
-    '本职事务一直做到晚饭后，吃饭和家务穿插着处理',
-    '半天处理本职事务，另外半天处理买东西、取东西、家务等事情',
-    '主要事务不多，外出办事和来回路上占去大半天',
-    '在家慢慢处理手上的事情，没有明显的结果，时间就这么过去了',
-    '主要处理洗衣、打扫、补充日用品等生活琐事，忙忙停停花去大半天',
-    '今天没有安排本职事务，主要在家休息，起居和吃饭把时间分成零碎的几段',
+    '白天大部分时间被本职事务占用，空闲较少',
+    '主要事务持续到较晚，剩余精力不多',
+    '主要事务占去半天，另外半天可自行安排',
+    '需要处理一些日常事务，时间比较零碎',
+    '在家处理手头的事情，节奏缓慢',
+    '生活杂事占去不少时间，忙忙停停',
+    '今天比较空闲，可以按自己的状态度过',
 )
 LEISURE = (
-    '看连续剧或电影，吃饭、洗澡、刷手机，时间零零碎碎地过去',
-    '在家打游戏、看视频，后来收拾了一会儿房间',
-    '在外面逛街吃饭，买日用品，路上走走停停',
-    '和熟悉的人闲聊、吃饭，聊着聊着过去了一晚上',
-    '听歌，翻了几页小说，之后又拿起手机随便看',
-    '做一会儿自己有兴致的活动，做完之后吃饭洗澡、休息',
-    '做一会儿自己有兴致的活动，做完之后吃饭洗澡、休息',
+    '剩余时间零碎，适合随意放松',
+    '有一段完整的空闲，想做点轻松的事',
+    '有空外出走动，节奏不赶',
+    '有与人相处的兴致，愿意多聊一会儿',
+    '精力偏低，想按自己的节奏休息',
+    '有兴致继续一件自己在意的事',
+    '有兴致尝试或继续自己喜欢的事情',
 )
 
 
@@ -108,14 +108,29 @@ def generation_material(profiles, records, goals, day, rhythm=None, memory_event
     work = [r for r in rows if any(word in r['category'] for word in ('工作', '职业', '学业'))]
     core = [r for r in rows if r['kind'] == 'overview' or r['category'].startswith('生活习惯') or r in work]
     work_terms = set().union(*(terms(r['content']) for r in work)) if work else set()
-    available = [g for g in goals.values() if g['status'] == 'active'
+    available = [dict(g) for g in goals.values() if g['status'] != 'completed'
                  and g.get('start_date', day.isoformat()) <= day.isoformat()]
-    ranked = sorted(available, key=lambda g: len(work_terms & terms(g['text'])), reverse=True)
+    prior = sorted((r for r in records if r['day'] < day.isoformat()), key=lambda r: r['day'], reverse=True)
+    active = [g for g in available if g['status'] == 'active']
+    # Work can already occupy the day. A spare-time project is offered only
+    # when the sampled circumstances leave room for it; selection is not progress.
+    ranked = sorted(active, key=lambda g: len(work_terms & terms(g['text'])), reverse=True)
     selected = ranked[:1] if ranked and work_terms & terms(ranked[0]['text']) else []
-    others = [g for g in available if g not in selected]
-    if '有兴致' in shape['空下来之后'] and others:
-        seed = int(hashlib.sha256(('miko-interest:' + day.isoformat()).encode()).hexdigest(), 16)
-        selected.append(random.Random(seed).choice(others))
+    has_room = (shape.get('空下来之后') in (LEISURE[1], LEISURE[5], LEISURE[6])
+                and shape.get('白天的时间去向') not in DAYTIME[:2])
+    if has_room:
+        remaining = [g for g in active if g not in selected]
+        # Give projects left aside for longer a chance, rather than always
+        # offering the first one or forcing every project into today's plan.
+        remaining.sort(key=lambda g: next((r['day'] for r in prior if r.get('goal_id') == g['id']), g['start_date']))
+        selected += remaining[:1]
+
+    # A candidate is an option, not a scheduled action. Keep one current
+    # project available even on a busy day so recent prose cannot mention a
+    # live project while its identity and state are missing from the input.
+    if not selected and active:
+        selected = [min(active, key=lambda g: next(
+            (r['day'] for r in prior if r.get('goal_id') == g['id']), g['start_date']))]
 
     query = terms(' '.join(shape.values()) + ' ' + ' '.join(g['text'] for g in selected))
     related = [r for r in rows if r not in core and r['category'].startswith(('兴趣与能力', '喜好与厌恶'))
@@ -133,14 +148,17 @@ def generation_material(profiles, records, goals, day, rhythm=None, memory_event
     owner_material += [{name: r[name] for name in ('subject', 'kind', 'category', 'content', 'as_of')}
                       for r in recent]
 
-    prior = [r for r in records if r['day'] < day.isoformat()]
     selected_ids = {g['id'] for g in selected}
-    progress, used = [], set()
+    progress, counts = [], {}
     for row in prior:
         goal_id = row.get('goal_id')
-        if goal_id in selected_ids and goal_id not in used:
-            progress.append({'day': row['day'], 'text': row['text'], 'goal_id': goal_id})
-            used.add(goal_id)
+        if goal_id in selected_ids and counts.get(goal_id, 0) < 3:
+            progress.append({key: row[key] for key in ('day', 'text', 'goal_id', 'result') if key in row})
+            counts[goal_id] = counts.get(goal_id, 0) + 1
+    for goal in selected:
+        latest = next((row for row in prior if row.get('goal_id') == goal['id']), None)
+        goal['current_state'] = (latest.get('result') or latest['text']) if latest else ''
+        goal['done_when'] = goal.get('done_when') or goal['text']
     # The recent prose is background, not a source of obsolete goal IDs/statuses.
     # Generated stories about the real user are not evidence about that person.
     recent_entries = [{'day': r['day'], 'text': r['text']} for r in prior
@@ -148,10 +166,12 @@ def generation_material(profiles, records, goals, day, rhythm=None, memory_event
     ended = [{'text': g['text'], 'status': g['status'],
               **({'completed_date': g['completed_date']} if g.get('completed_date') else {})}
              for g in goals.values() if g['status'] != 'active'][-5:]
-    result = {'日期': day.isoformat(), 'role_material': role_material, '真实用户资料': owner_material,
-            '本次抽样的日子轮廓': shape, '生活目标': selected, '相关事项的最新进展': progress,
-            '既有角色生活记录': recent_entries,
-            '已经告一段落的事项': ended}
+    result = {'既有角色生活记录': recent_entries, '已经告一段落的事项': ended,
+            '日期': day.isoformat(), 'role_material': role_material, '真实用户资料': owner_material,
+            '本次抽样的日子轮廓': shape,
+            '未完成目标总数': len(available),
+            '其他已建立事项': [g['text'] for g in available if g not in selected],
+            '相关事项的最新进展': progress, '生活目标': selected}
     background = conversation_background(profiles, memory_events, day, query)
     if background:
         # Keep recalled context ahead of the current day, not as the final

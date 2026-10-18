@@ -178,9 +178,9 @@ textarea::placeholder { color: #b7ac9e; }
 /* Shared primary navigation and the selected page's secondary list. */
 .page-host { height: 100dvh; }
 .page-host[hidden], .secondary-sidebar[hidden] { display: none; }
-.workspace-frame { display: grid; grid-template-columns: 180px 260px minmax(0, 1fr); height: 100%; }
+.workspace-frame { display: grid; grid-template-columns: 180px 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden; }
 .workspace-frame.sidebar-collapsed { grid-template-columns: 180px minmax(0, 1fr); }
-.primary-sidebar { padding: 28px 14px 18px; background: #f0ede7; border-right: 1px solid #e7e3dc; display: flex; flex-direction: column; min-height: 0; }
+.primary-sidebar { padding: 28px 14px 18px; background: #f0ede7; border-right: 1px solid #e7e3dc; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .primary-sidebar .brand { border: 0; background: transparent; padding: 0 7px; margin: 0 0 42px; font-size: 24px; }
 .primary-sidebar .sidebar-label { margin-left: 12px; }
 .primary-navigation { display: grid; gap: 7px; }
@@ -192,7 +192,8 @@ textarea::placeholder { color: #b7ac9e; }
 .sidebar-toggle:hover { background: #e8e3db; }
 .sidebar-toggle > span:first-child { font-size: 20px; width: 19px; text-align: center; }
 .secondary-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #f6f3ee; border-right: 1px solid #e7e3dc; padding: 26px 16px 16px; }
-.secondary-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.secondary-sidebar > * { min-width: 0; }
+.secondary-header { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .secondary-header h2 { font-size: 13px; font-weight: 600; margin: 0 0 0 8px; color: #82705c; }
 .secondary-header button { border: 0; border-radius: 7px; width: 28px; height: 28px; background: #ebe5dc; color: #8a7966; font-size: 22px; }
 .secondary-sidebar .new-chat { margin: 0 0 16px; }

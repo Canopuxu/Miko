@@ -34,7 +34,7 @@ def reply_context(context):
         'dated_experiences': ('subject', 'subjects', 'day', 'text'),
         'owner_feedback': ('reply', 'feedback'),
         'life_entries': ('day', 'text'),
-        'life_goals': ('text', 'start_date', 'target_date', 'status', 'completed_date'),
+        'life_goals': ('text', 'done_when', 'current_state', 'start_date', 'target_date', 'status', 'completed_date'),
     }
     for group, names in fields.items():
         rows = []
@@ -76,6 +76,7 @@ class Turn:
     system_prompt: str | None = None
     status: str = 'running'
     json_output: bool = False
+    allow_reasoning: bool = False
     memory_query: str | None = None
     memory_key: tuple | None = None
     model: str | None = None
@@ -313,11 +314,12 @@ class ChatService:
                 await self.cancel(turn)
                 await turn.task
 
-    async def complete_memory(self, system, message, model=None, json_output=False, provider=None, image_inputs=None):
+    async def complete_memory(self, system, message, model=None, json_output=False, provider=None, image_inputs=None,
+                              allow_reasoning=False):
         content = [{'type': 'text', 'text': message}, *image_inputs] if image_inputs else message
         turn = Turn(uuid.uuid4().hex, 'memory', message,
                     context=[{'role': 'user', 'content': content}], system_prompt=system, model=model,
-                    json_output=json_output, provider_override=provider)
+                      json_output=json_output, provider_override=provider, allow_reasoning=allow_reasoning)
         self.turns[turn.id] = turn
         turn.task = asyncio.create_task(self.run(turn))
         try:
@@ -373,7 +375,8 @@ class ChatService:
             payload['thinking'] = {'type': 'disabled'}
             payload['max_tokens'] = 2048
         if turn.conversation_id == 'memory':
-            payload['thinking'] = {'type': 'disabled'}
+            if not turn.allow_reasoning:
+                payload['thinking'] = {'type': 'disabled'}
             payload['stream_options'] = {'include_usage': True}
         if turn.history_tools:
             payload['tools'] = turn.history_tools.schemas_for_model

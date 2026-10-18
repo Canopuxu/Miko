@@ -91,7 +91,8 @@ class ProfileToolsTests(unittest.TestCase):
         self.assertNotIn('只返回 JSON 对象', defaults['life'])
         self.assertEqual(self.api.put('/api/profiles/expression', json={
             'web': defaults['web'], 'qq': defaults['qq'], 'life': '生活偏好验证：平日上班，周末休息'}).status_code, 200)
-        self.assertTrue(life_generation_prompt(self.root).startswith('生活偏好验证：平日上班，周末休息\n只返回 JSON 对象：'))
+        self.assertTrue(life_generation_prompt(self.root).startswith('生活偏好验证：平日上班，周末休息\n\n生活目标提供'))
+        self.assertNotIn('生活目标提供', defaults['life'])
         self.assertEqual(life_generation_prompt(self.root).split('只返回 JSON 对象：')[1], original.split('只返回 JSON 对象：')[1])
         self.api.put('/api/profiles/expression', json={'web': defaults['web'], 'qq': '新的表达要求'})
         self.assertEqual(chat_prompts(self.root)[0]['life'], '生活偏好验证：平日上班，周末休息')

@@ -11,14 +11,14 @@ export { goalStatus, type LifeEntry, type LifeEvent, type LifeGoal } from './lif
 function LifeNodeView({data}: NodeProps<LifeNode>) {
   if(data.kind==='date') return <time className="life-branch-date" dateTime={data.label}>
     <strong>{data.label.slice(5).replace('-','/')}</strong><small>{data.label.slice(0,4)}</small></time>;
-  if(data.kind==='root') return <button className="life-branch-root nodrag nopan" onClick={e=>{e.stopPropagation();data.choose?.();}} aria-label="查看全部生活分支">
+  if(data.kind==='root') return <button className="life-branch-root nodrag" onClick={e=>{e.stopPropagation();data.choose?.();}} aria-label="查看全部生活分支">
     {data.label}<Handle type="source" position={Position.Bottom}/></button>;
   if(data.kind==='fork'||data.kind==='bend')return <div className="life-branch-junction" aria-hidden="true">
     <Handle type="target" position={Position.Top} id="in" style={{left:14,top:18}}/>
     {data.kind==='fork'&&<span/>}<Handle type="source" position={Position.Bottom} id="out" style={{left:14,top:18,bottom:'auto'}}/>
   </div>;
   const goal=data.kind==='goal';
-  return <button className={`life-branch-node ${goal?'goal':'activity'} ${data.goal?.status ?? ''} ${data.branch===ordinary?'ordinary':''} ${data.active?'is-selected':''} nodrag nopan`}
+  return <button className={`life-branch-node ${goal?'goal':'activity'} ${data.goal?.status ?? ''} ${data.branch===ordinary?'ordinary':''} ${data.active?'is-selected':''} nodrag`}
     aria-label={goal?`${data.label}${data.goal?' · '+goalStatus[data.goal.status]:''}`:`${data.event?.day??data.day} · ${data.label}`}
     aria-pressed={!!data.active} onClick={e=>{e.stopPropagation();data.choose?.();}}>
     <Handle type="target" position={Position.Top} id="in" style={{left:14,top:18}}/>
@@ -60,7 +60,7 @@ export function LifeTimeline({goals, events, onGoal, onDay, asOf=new Date().toLo
     });
   },[]);
   const graph=useMemo(()=>{
-    const value=buildLifeGraph(goals,events,characterName,asOf,day,query,heights);
+    const value=buildLifeGraph(goals,events,characterName,asOf,day,query,heights,availableWidth);
     const picked=value.nodes.find(node=>node.id===selection);
     value.nodes.forEach(node=>{
       node.data={...node.data,active:node.id===selection,choose:node.id==='root'?clear:()=>setSelection(node.id)};
@@ -70,13 +70,13 @@ export function LifeTimeline({goals, events, onGoal, onDay, asOf=new Date().toLo
     });
     value.edges.forEach(edge=>{if(picked?.data.branch===edge.data?.branch)edge.className+=' active';});
     return {...value,picked};
-  },[goals,events,characterName,asOf,day,query,selection,clear,heights]);
+  },[goals,events,characterName,asOf,day,query,selection,clear,heights,availableWidth]);
   const frameStart=useCallback(()=>{
     if(!flow||graph.empty)return;
-    const zoom=Math.min(1,Math.max(.65,(availableWidth-32)/graph.width));
-    void flow.setViewport({x:Math.max(16,(availableWidth-graph.width*zoom)/2)-graph.left*zoom,y:20,zoom});
-  },[flow,graph.empty,graph.width,graph.left,availableWidth]);
-  // Long histories stay legible; the overview control can still fit the whole map.
+    const zoom=Math.min(1,Math.max(.1,(availableWidth-32)/graph.startWidth));
+    void flow.setViewport({x:Math.max(16,(availableWidth-graph.startWidth*zoom)/2)-graph.left*zoom,y:20,zoom});
+  },[flow,graph.empty,graph.startWidth,graph.left,availableWidth]);
+  // Frame the initial crown; later forks extend the canvas without shrinking history.
   useEffect(()=>{frameStart();},[flow,availableWidth,day,query,goals.length,frameStart]);
   const selected=graph.picked?.data;
   return <section className="life-timeline" aria-label="生活轨迹">
@@ -100,6 +100,7 @@ export function LifeTimeline({goals, events, onGoal, onDay, asOf=new Date().toLo
       </div>}</div>
       {selected && (selected.goal||selected.event) && <div className="life-branch-detail" aria-live="polite">
         {selected?.kind==='goal'?<><span>{selected.label}{selected.goal&&` · ${goalStatus[selected.goal.status]} · ${selected.goal.status==='completed'?'完成于 '+(selected.goal.completed_date??selected.day):'预计 '+selected.goal.target_date}`}</span>
+          {selected.event&&<span>{selected.event.text}</span>}
           {selected.goal&&<button className="text-button" onClick={()=>onGoal(selected.goal!)}>编辑目标</button>}</>:
           selected?.event?<><span>{selected.event.day} · {selected.event.text}</span><button className="text-button" onClick={()=>onDay(selected.event!.day)}>编辑当天</button></>:
           null}

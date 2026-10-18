@@ -129,7 +129,7 @@ class GroupLanguage:
             if path.exists():
                 model = json.loads(path.read_text(encoding='utf-8-sig')).get('model') or None
         result = await self.chat.complete_memory(prompt, json.dumps(payload, ensure_ascii=False),
-            model=model, provider=provider, json_output=True)
+            model=model, provider=provider, json_output=True, allow_reasoning=not selection)
         return json.loads(result['text'])
 
     async def learn(self, key):

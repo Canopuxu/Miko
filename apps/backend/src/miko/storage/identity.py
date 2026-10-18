@@ -4,7 +4,8 @@ import re
 DEFAULT_NAMES = {'miko': 'Miko', 'owner': '橙汁'}
 TEXT_FIELDS = frozenset(('title', 'category', 'topic', 'sub_topic', 'memo', 'content', 'text',
     'keywords', 'automatic', 'manual', 'manual_corrections', 'owner_relationship',
-    'miko_relationship', 'description', 'note', 'web', 'qq', 'qq_base', 'life', 'expressions'))
+    'miko_relationship', 'description', 'note', 'web', 'qq', 'qq_base', 'life', 'expressions',
+    'event', 'result', 'done_when', 'current_state'))
 ORIGINAL_FIELDS = frozenset(('sources', 'source_messages', 'history', 'episodes', 'context'))
 
 
