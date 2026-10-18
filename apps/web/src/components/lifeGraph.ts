@@ -151,3 +151,50 @@ export function buildLifeGraph(goals:LifeGoal[],events:LifeEvent[],name:string,a
   }
   return {nodes,edges,left:0,startWidth:Math.max(400,left+initial*column),width:Math.max(400,left+tracks.length*column),height:y+24,empty:!visible.size&&!milestones.length};
 }
+
+export type LifeLine={id:string; x1:number; y1:number; x2:number; y2:number; branch?:string; planned:boolean};
+
+// A month is a window onto the full history's tracks. Boundary lines continue
+// without creating new goals or reconnecting completed endpoints.
+export function monthLifeGraph(graph:ReturnType<typeof buildLifeGraph>,month:string,width:number) {
+  const nodes=graph.nodes.filter(node=>{
+    const day=node.data.event?.day??node.data.day??(node.data.kind==='date'?node.data.label:'');
+    return day.startsWith(month);
+  });
+  if(!nodes.length)return {nodes:[] as LifeNode[],lines:[] as LifeLine[],height:0,rootX:0,empty:true};
+  const top=Math.min(...nodes.map(node=>node.position.y))-20;
+  const bottom=Math.max(...nodes.map(node=>node.position.y+(node.height??74)))+28;
+  const byId=new Map(graph.nodes.map(node=>[node.id,node]));
+  const lines:LifeLine[]=[];
+  for(const edge of graph.edges){
+    const from=byId.get(edge.source)!,to=byId.get(edge.target)!;
+    if(from.data.kind==='root')continue;
+    const start={x:from.position.x+14,y:from.position.y+18};
+    const end={x:to.position.x+14,y:to.position.y+18};
+    if(end.y<=top||start.y>=bottom||end.y<=start.y)continue;
+    const y1=Math.max(start.y,top),y2=Math.min(end.y,bottom);
+    const at=(y:number)=>start.x+(end.x-start.x)*(y-start.y)/(end.y-start.y);
+    lines.push({id:edge.id,x1:at(y1),y1,x2:at(y2),y2,branch:edge.data?.branch as string|undefined,
+      planned:edge.className?.includes('planned')??false});
+  }
+  const right=Math.max(...nodes.filter(n=>n.data.kind!=='date').map(n=>n.position.x+14),
+    ...lines.flatMap(line=>[line.x1,line.x2]));
+  const columns=Math.max(1,Math.round((right-left-14)/laneWidth)+1);
+  const gutter=width<500?54:70;
+  const column=(width-gutter-8)/columns;
+  const px=(x:number)=>gutter+(x-left-14)/laneWidth*column+14;
+  const py=(y:number)=>y-top+108;
+  const visible=nodes.map(node=>({...node,position:{x:node.data.kind==='date'?0:px(node.position.x+14)-14,y:py(node.position.y)},
+    width:node.data.kind==='date'?gutter-12:node.data.kind==='fork'||node.data.kind==='bend'?28:column-14}));
+  const incoming=[...new Set(lines.filter(line=>line.y1===top).map(line=>px(line.x1)))];
+  const rootX=incoming.length?(Math.min(...incoming)+Math.max(...incoming))/2:width/2;
+  const projected=lines.map(line=>({...line,x1:px(line.x1),y1:py(line.y1),x2:px(line.x2),y2:py(line.y2)}));
+  if(incoming.length){
+    projected.push({id:'month-root',x1:rootX,y1:42,x2:rootX,y2:70,planned:false});
+    for(const [index,x] of incoming.entries()){
+      projected.push({id:'month-crown:'+index,x1:rootX,y1:70,x2:x,y2:70,planned:false},
+        {id:'month-stem:'+index,x1:x,y1:70,x2:x,y2:108,planned:false});
+    }
+  }
+  return {nodes:visible,lines:projected,height:py(bottom),rootX,empty:false};
+}

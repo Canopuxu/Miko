@@ -13,10 +13,36 @@ function load(file) {
   vm.runInNewContext(compiled.outputText, { module, exports: module.exports });
   return module.exports;
 }
-const { buildLifeGraph } = load('components/lifeGraph.ts');
+const { buildLifeGraph, monthLifeGraph } = load('components/lifeGraph.ts');
 const { mockAt } = load('previews/lifeMock.ts');
 const full = mockAt('2026-10-09');
 const graph = buildLifeGraph(full.goals, full.events, 'Miko', '2026-10-09');
+
+test('monthly display keeps cross-month progress and completion without repeating other months',()=>{
+  const goal={id:'cake',text:'做蛋糕',start_date:'2026-09-29',target_date:'2026-10-02',completed_date:'2026-10-02',status:'completed'};
+  const events=[{day:'2026-09-29',text:'试配方',goal_id:'cake'},{day:'2026-09-29',text:'散步'},
+    {day:'2026-10-01',text:'调整面糊',goal_id:'cake'},{day:'2026-10-01',text:'买菜'},
+    {day:'2026-10-02',text:'烤好了',goal_id:'cake'},{day:'2026-10-02',text:'看书'},
+    {day:'2026-10-03',text:'收拾房间'},{day:'2026-10-03',text:'午睡'}];
+  const history=buildLifeGraph([goal],events,'Miko','2026-10-03');
+  const october=monthLifeGraph(history,'2026-10',620);
+  const september=monthLifeGraph(history,'2026-09',620);
+  assert.equal(october.nodes.filter(n=>n.data.kind==='goal').length,1);
+  assert.equal(september.nodes.filter(n=>n.data.kind==='goal').length,0);
+  assert.ok(october.lines.some(line=>line.id.startsWith('month-stem:')));
+  assert.ok(october.nodes.some(n=>n.data.kind==='fork'));
+  assert.ok(!october.lines.some(line=>line.id.startsWith('goal:cake/')));
+  assert.ok(october.nodes.every(n=>!(n.data.event?.day??n.data.day??n.data.label).startsWith('2026-09')));
+});
+
+test('monthly columns use the available width including later branches',()=>{
+  for(const width of [620,960]){
+    const month=monthLifeGraph(graph,'2026-10',width);
+    assert.ok(month.nodes.every(n=>n.position.x>=0&&n.position.x+n.width<=width));
+    assert.ok(month.lines.every(line=>line.x1>=0&&line.x1<=width&&line.x2>=0&&line.x2<=width));
+  }
+  assert.equal(monthLifeGraph(graph,'2025-01',620).empty,true);
+});
 const activities=graph=>graph.nodes.filter(node=>node.data.event);
 const reading=(graph,date)=>activities(graph).filter(node=>node.data.event.day===date)
   .sort((a,b)=>a.position.y-b.position.y||a.position.x-b.position.x);

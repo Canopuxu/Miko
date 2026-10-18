@@ -31,6 +31,7 @@ export function LifePage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [mode, setMode] = useState<'timeline' | 'day'>('timeline');
+  const [timelineMonth,setTimelineMonth]=useState(()=>today().slice(0,7));
   const [goal, setGoal] = useState<LifeGoal | null>(null);
   const [goalDirty, setGoalDirty] = useState(false);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -88,10 +89,10 @@ export function LifePage() {
     });
   }
   async function saveGoal() {
-    if (!data || !goal) return;
+    if (!data || !goal || goal.id) return;
     setBusy(true); setError('');
     try {
-      await request('/api/life/goals' + (goal.id ? '/' + goal.id : ''), goal.id ? 'PUT' : 'POST',
+      await request('/api/life/goals', 'POST',
         {revision: data.revision, text: goal.text, done_when:goal.done_when, target_date: goal.target_date, status: goal.status});
       setGoal(null); setGoalDirty(false); await load(); setNotice('目标已保存');
     } catch (e) { setError(String(e)); }
@@ -99,7 +100,7 @@ export function LifePage() {
   }
   function showDay(value: string) {
     if (busy) return;
-    guard.proceed(()=>{setDay(value);setMode('day');setGoal(null);});
+    guard.proceed(()=>{setDay(value);setTimelineMonth(value.slice(0,7));setMode('day');setGoal(null);});
   }
   async function toggle() {
     if (!data) return;
@@ -141,12 +142,19 @@ export function LifePage() {
         {busy || data?.status.generating ? '处理中…' : '推进今天'}</button></div>
     </header>
     {(error || data?.status.error) && <p className="profile-notice life-page-notice" role="alert">{error || data?.status.error}</p>}
-    {mode === 'timeline' && data && <LifeTimeline goals={data.goals} events={data.trajectory} onGoal={openGoal} onDay={showDay}/>}
+    {mode === 'timeline' && data && <LifeTimeline goals={data.goals} events={data.trajectory} month={timelineMonth} onMonthChange={setTimelineMonth}/>}
     {mode === 'timeline' && !goal && notice && <p className="life-timeline-notice" role="status">{notice}</p>}
     {goal && <aside className="life-goal-editor" aria-label="目标详情">
       <div className="life-record-header"><strong>{goal.id ? '想做的事' : '一个新目标'}</strong>
         <button className="icon-button" aria-label="关闭目标详情" title="关闭" disabled={busy}
           onClick={() => guard.proceed(()=>{setGoal(null);setGoalDirty(false);})}><X size={17}/></button></div>
+      {goal.id?<div className="life-goal-summary">
+        <h2>{goal.text}</h2>
+        <span className={`life-goal-status ${goal.status}`}>{goalStatus[goal.status]}</span>
+        {goal.current_state&&<p>{goal.current_state}</p>}
+        {goal.done_when&&goal.done_when!==goal.text&&<div><h3>完成条件</h3><p>{goal.done_when}</p></div>}
+        <small>开始于 {goal.start_date}<br/>{goal.completed_date?`完成于 ${goal.completed_date}`:`预计完成 ${goal.target_date}`}</small>
+      </div>:<>
       <label>目标<textarea aria-label="目标内容" rows={3} maxLength={240} value={goal.text} disabled={busy}
         onChange={e => {setGoal({...goal, text: e.target.value}); setGoalDirty(true);}}/></label>
       <label>完成条件<textarea aria-label="目标完成条件" rows={2} maxLength={500} value={goal.done_when??''} disabled={busy}
@@ -160,6 +168,7 @@ export function LifePage() {
       <small>开始于 {goal.start_date}{goal.completed_date && ` · 完成于 ${goal.completed_date}`}</small>
       <button className="life-button life-save" disabled={busy || !goalDirty || !goal.text.trim() || !goal.target_date}
         onClick={() => void saveGoal()}><Save size={14}/>保存目标</button>
+      </>}
     </aside>}
     {mode === 'day' && <div className="life-workspace">
       <div className="life-record-header"><span>{data?.record.source === 'generated' ? `${characterName} 的生活记录` : data?.record.source === 'manual' ? '你修正的记录' : '尚未记录'}</span>

@@ -37,8 +37,8 @@
 .life-timeline-filter { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .life-timeline-filter input { min-width: 0; border: 1px solid #e0ded2; border-radius: 8px; background: var(--surface); padding: 8px 12px; color: var(--ink); font-size: 14px; min-height: 36px; }
 .life-timeline-filter input[type='search'] { width: min(360px,100%); flex: 1; }
-.life-branch-container { width: 100%; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
-.life-branch-container .react-flow__handle { opacity: 0; pointer-events: none; width: 1px; height: 1px; border: 0; min-width: 0; min-height: 0; }
+.life-branch-container { width: 100%; min-width: 0; min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; overscroll-behavior-y: contain; }
+.life-branch-container:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; border-radius: 6px; }
 .life-branch-root { pointer-events: auto; width: 100%; height: 34px; border: 0; border-radius: 20px; background: var(--sage); color: #fffdf9; font: 500 16px/1.5 'Segoe UI','Microsoft YaHei',sans-serif; }
 .life-branch-date { display: block; text-align: right; color: #706b62; font-size: 12px; line-height: 1.7; }
 .life-branch-date strong { display: block; font-weight: 500; }.life-branch-date small { font-size: 12px; }
@@ -60,8 +60,8 @@
 .activity.ordinary .life-branch-dot { box-sizing: border-box; background: var(--page); border: 1.5px solid #9aa58f; }
 .life-branch-node.activity.is-selected, .life-branch-node.activity:hover { background: var(--sage-wash); }
 .goal.is-selected .life-branch-dot { box-shadow: 0 0 0 3px var(--sage-wash); }.goal:hover .life-branch-copy > span { color: var(--sage); }
-.life-branch-edge .react-flow__edge-path { stroke: #c8cfc0; stroke-width: 1.2; }.life-branch-edge.active .react-flow__edge-path { stroke:var(--sage); stroke-width:1.8; }
-.life-branch-edge.planned .react-flow__edge-path { stroke:#d5d9ce; stroke-dasharray:4 5; }
+.life-month-line { stroke: #c8cfc0; stroke-width: 1.2; }.life-month-line.active { stroke:var(--sage); stroke-width:1.8; }
+.life-month-line.planned { stroke:#d5d9ce; stroke-dasharray:4 5; }
 .life-branch-junction { position:relative; width:28px; height:36px; }
 .life-branch-junction > span { position:absolute; left:11px; top:15px; width:6px; height:6px; border-radius:50%; background:#9daa90; }
 .life-branch-detail { position: sticky; bottom: 0; z-index: 3; background: var(--page); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #706b62; font-size: 12px; min-height: 42px; padding: 10px 0; border-top: 1px solid var(--line); }.life-branch-detail > span { white-space: pre-wrap; overflow-wrap: anywhere; }.life-branch-detail > button { flex-shrink: 0; }
@@ -70,12 +70,22 @@
 .life-goal-editor label { display: grid; gap: 7px; font-size: 12px; color: #968570; }
 .life-goal-editor textarea, .life-goal-editor input, .life-goal-editor select { width: 100%; box-sizing: border-box; border: 1px solid #e2d8cb; border-radius: 8px; padding: 10px; background: #faf8f3; color: #6f604d; font: inherit; }
 .life-goal-editor small { color: #ab9d8b; font-size: 11px; }
+.life-goal-summary { display: grid; gap: 16px; }
+.life-goal-summary h2 { margin: 0; color: var(--ink); font-size: 17px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.life-goal-summary h3 { margin: 0 0 6px; color: #74796c; font-size: 12px; font-weight: 500; }
+.life-goal-summary p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.life-goal-summary .life-goal-status { font-size: 12px; color: #74796c; }
+.life-goal-summary .life-goal-status.completed { color: var(--sage); }
+.life-goal-summary small { color: #74796c; font-size: 12px; line-height: 1.8; }
 @media (max-width: 760px) { .life-timeline { padding: 20px 18px; } }
 
-.life-canvas { width: 100%; height: 100%; position: relative; }
-.life-canvas-controls { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; z-index: 5; }
-.life-canvas-controls button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); }
-.life-canvas-controls button:hover { background: var(--sage-wash); }
+.life-month-track { width: 100%; position: relative; }
+.life-month-lines { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.life-month-node { position: absolute; min-width: 0; }
+.life-month-root { position: absolute; top: 8px; width: 80px; }
+.life-month-switch { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 0 3px; }
+.life-month-switch .icon-button { width: 32px; height: 36px; border: 0; background: transparent; flex-shrink: 0; }
+.life-month-switch input[type='month'] { width: 148px; min-height: 36px; box-sizing: border-box; padding: 6px 4px; border: 0; background: transparent; text-align: center; font: inherit; font-size: 14px; }
 .life-timeline-filter, .life-branch-detail { flex-shrink: 0; }
 
 .life-navigation { min-height: 0; gap: 16px; }
