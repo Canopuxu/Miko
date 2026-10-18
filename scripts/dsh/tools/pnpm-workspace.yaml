@@ -1,0 +1,9 @@
+nodeLinker: hoisted
+packages: []
+patchedDependencies:
+  '@yao-pkg/pkg@6.21.0': patches/pkg.patch
+supportedArchitectures:
+  cpu:
+  - x64
+  os:
+  - win32

@@ -1,0 +1,7 @@
+{
+  "name": "miko-dsh-build-tools",
+  "private": true,
+  "dependencies": {
+    "@yao-pkg/pkg": "6.21.0"
+  }
+}

@@ -1,0 +1,16 @@
+[
+  "commander",
+  "js-yaml",
+  "node-addon-require-builtin",
+  "@deepseek-ai/cordis",
+  "@deepseek-ai/cordis-plugin-hmr",
+  "@deepseek-ai/cordis-plugin-include",
+  "@deepseek-ai/cordis-plugin-loader",
+  "@deepseek-ai/cordis-plugin-timer",
+  "@deepseek-ai/dsh-app-boot",
+  "@deepseek-ai/dsh-home-paths",
+  "@deepseek-ai/dsh-launch-environment",
+  "@deepseek-ai/dsh-sdk-minimal",
+  "@deepseek-ai/dsh-cmdline",
+  "@deepseek-ai/dsh-http-proxy"
+]

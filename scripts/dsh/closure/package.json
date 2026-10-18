@@ -1,0 +1,38 @@
+{
+  "name": "miko-dsh-runtime-closure",
+  "private": true,
+  "version": "0.1.5-rc.1",
+  "type": "module",
+  "dependencies": {
+    "@deepseek-ai/dsh": "file:./cli",
+    "@deepseek-ai/dsh-sdk-minimal": "0.1.5-rc.1"
+  },
+  "bin": "runtime-bootstrap.mjs",
+  "pkg": {
+    "assets": [
+      "package.json",
+      "*.mjs",
+      "node_modules/**/*.js",
+      "node_modules/**/*.cjs",
+      "node_modules/**/*.mjs",
+      "node_modules/**/*.json",
+      "node_modules/**/*.md",
+      "node_modules/**/*.node",
+      "node_modules/**/*.dll",
+      "node_modules/**/*.yml",
+      "node_modules/**/*.yaml",
+      "node_modules/**/*.wasm",
+      "node_modules/**/*.exe"
+    ],
+    "ignore": [
+      "**/*.map",
+      "**/*.d.ts",
+      "**/*.d.mts",
+      "**/*.d.cts",
+      "node_modules/.pnpm/**",
+      "node_modules/node-pty/prebuilds/darwin-*/**",
+      "node_modules/node-pty/prebuilds/linux-*/**",
+      "node_modules/node-pty/prebuilds/win32-arm64/**"
+    ]
+  }
+}

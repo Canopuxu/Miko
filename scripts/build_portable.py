@@ -24,19 +24,23 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--cache', type=Path, default=REPO.parent / 'MikoLocal/cache/portable-build')
     parser.add_argument('--frida-wheel', type=Path, help='Use the wheel produced by build_frida.py')
+    parser.add_argument('--dsh-wheel', type=Path, help='Use the wheel produced by build_dsh.py')
     args = parser.parse_args()
     output, cache = args.output.resolve(), args.cache.resolve()
-    frida_build = None
-    if args.frida_wheel:
-        args.frida_wheel = args.frida_wheel.resolve()
-        frida_build = json.loads((args.frida_wheel.parent / 'frida-build.json').read_text('utf-8'))
-        with args.frida_wheel.open('rb') as stream:
+    custom_wheels = []
+    requirements = (REPO / 'requirements.lock.txt').read_text('utf-8').splitlines()
+    for name, path in (('frida', args.frida_wheel), ('dsh', args.dsh_wheel)):
+        if path is None:
+            continue
+        path = path.resolve()
+        build = json.loads((path.parent / f'{name}-build.json').read_text('utf-8'))
+        with path.open('rb') as stream:
             wheel_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if frida_build['wheel'] != args.frida_wheel.name or frida_build['wheel_sha256'] != wheel_hash:
-            raise SystemExit('Frida wheel does not match its build provenance.')
-        requirements = (REPO / 'requirements.lock.txt').read_text('utf-8').splitlines()
-        if f"frida=={frida_build['version']}" not in requirements:
-            raise SystemExit('Frida wheel version differs from requirements.lock.txt.')
+        if build['wheel'] != path.name or build['wheel_sha256'] != wheel_hash:
+            raise SystemExit(f'{name} wheel does not match its build provenance.')
+        if f"{build['name']}=={build['version']}" not in requirements:
+            raise SystemExit(f'{name} wheel version differs from requirements.lock.txt.')
+        custom_wheels.append((name, path, build))
     if output.exists():
         raise SystemExit('Output must be a new directory: ' + str(output))
     cache.mkdir(parents=True, exist_ok=True)
@@ -73,17 +77,14 @@ def main():
     site = python / 'Lib/site-packages'
     env = dict(os.environ, PIP_CONFIG_FILE='nul', PIP_INDEX_URL='https://pypi.org/simple',
         PIP_EXTRA_INDEX_URL='', PIP_CACHE_DIR=str(cache / 'pip'), PYTHONPATH='', PYTHONHOME='')
-    requirements_path = REPO / 'requirements.lock.txt'
-    if frida_build:
-        requirements_path = cache / 'requirements-portable-frida.txt'
-        requirements_path.write_text('\n'.join(line for line in requirements if not line.startswith('frida=='))
-                                     + '\n', encoding='utf-8')
+    # Resolve the custom wheels together with SDK dependencies, so pip cannot
+    # pull the full runtime back in through deepseek-harness-sdk.
     run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile',
-        '--target', site, '-r', requirements_path, '-r', REPO / 'requirements-desktop.lock.txt'], env=env)
-    if frida_build:
-        run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile',
-             '--no-deps', '--target', site, args.frida_wheel], env=env)
-        (app / 'config/frida-build.json').write_text(json.dumps(frida_build, indent=2) + '\n', encoding='utf-8')
+        '--target', site, '-r', REPO / 'requirements.lock.txt',
+        '-r', REPO / 'requirements-desktop.lock.txt',
+        *[path for _, path, _ in custom_wheels]], env=env)
+    for name, path, build in custom_wheels:
+        (app / f'config/{name}-build.json').write_text(json.dumps(build, indent=2) + '\n', encoding='utf-8')
     run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile', '--no-deps',
         '--target', site, REPO / 'packages/upstream/memu'], env=env)
     # Setuptools is needed to build wheels, but isn't part of Miko's runtime.
