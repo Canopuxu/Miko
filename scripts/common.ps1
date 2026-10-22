@@ -25,7 +25,11 @@ function Invoke-Miko {
     try {
         $env:PYTHONPATH = ''
         $env:PYTHONHOME = ''
-        & $mikoPython -m miko.cli $Action --local-root $mikoLocalRoot @Arguments
+        if ($Action -eq 'run') {
+            & $mikoPython -X utf8 -m miko.server --local-root $mikoLocalRoot --open-browser @Arguments
+        } else {
+            & $mikoPython -X utf8 -m miko.cli $Action --local-root $mikoLocalRoot @Arguments
+        }
         if ($LASTEXITCODE -ne 0) { throw "Miko $Action failed with exit code $LASTEXITCODE" }
     } finally {
         Restore-MikoEnvironment @{PYTHONPATH=$previousPythonPath; PYTHONHOME=$previousPythonHome}

@@ -4,11 +4,9 @@ import json
 import os
 from pathlib import Path
 import secrets
-import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 import webbrowser
 from urllib.error import URLError
@@ -17,7 +15,7 @@ from urllib.request import Request, build_opener, ProxyHandler
 import psutil
 
 from miko.adapters.dsh.runtime import DshRuntime
-from miko.settings import REPO_ROOT, Settings, write_json
+from miko.settings import Settings, write_json
 
 
 # Local control requests must not follow the user's HTTP proxy configuration.
@@ -40,7 +38,8 @@ def recorded_process(settings: Settings) -> tuple[dict, psutil.Process] | None:
         command = process.cmdline()
         expected_python = settings.python_executable
         if (process.create_time() != record["created"]
-                or Path(process.exe()).resolve() != expected_python.resolve()
+                or (Path(process.exe()).resolve() != expected_python.resolve()
+                    and (not command or Path(command[0]).resolve() != expected_python.resolve()))
                 or "miko.server" not in command
                 or str(settings.local_root) not in command):
             # Migration and PID reuse can leave an unrelated live process here.
@@ -62,8 +61,7 @@ def open_ui(url: str) -> None:
         print(f"Open Miko in your browser: {url}", flush=True)
 
 
-def start(settings: Settings, *, foreground: bool = False, open_browser: bool = False,
-          workbench_pid: int | None = None) -> None:
+def start(settings: Settings, *, open_browser: bool = False) -> None:
     from miko.restore import recover_interrupted_restore
     recover_interrupted_restore(settings)
     previous = recorded_process(settings)
@@ -85,60 +83,17 @@ def start(settings: Settings, *, foreground: bool = False, open_browser: bool = 
     env["TMP"] = str(settings.local_root / "cache/tmp")
     kwargs = {}
     if os.name == "nt":
-        kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP if foreground
-                                   else subprocess.CREATE_NO_WINDOW)
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     with (settings.local_root / "logs/backend.log").open("ab") as log:
         child = subprocess.Popen(
             [str(settings.python_executable), "-X", "utf8", "-m", "miko.server", "--local-root", str(settings.local_root)],
             cwd=settings.workspace, env=env, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if foreground else log,
-            stderr=subprocess.STDOUT if foreground else log, **kwargs,
+            stdout=log, stderr=log, **kwargs,
         )
-    output_thread = None
-    if foreground:
-        def relay_output():
-            with (settings.local_root / "logs/backend.log").open("ab", buffering=0) as output:
-                for line in child.stdout:
-                    output.write(line)
-                    sys.stdout.write(line.decode("utf-8", errors="replace"))
-                    sys.stdout.flush()
-        output_thread = threading.Thread(target=relay_output, daemon=True)
-        output_thread.start()
     record = {"pid": child.pid, "created": psutil.Process(child.pid).create_time(),
               "port": settings.port, "control_token": token}
     write_json(settings.process_file, record)
-    jobs = []
     try:
-        if foreground and os.name == 'nt':
-            from miko.process_job import ChildJob
-            job = ChildJob()
-            jobs.append(job)
-            job.attach(child.pid)
-            # Include children already created before assignment; later ones inherit it.
-            owners = [psutil.Process(child.pid)]
-            if workbench_pid:
-                try:
-                    workbench = psutil.Process(workbench_pid)
-                    script = (REPO_ROOT / 'scripts/workbench.mjs').resolve()
-                    if any(Path(arg).resolve() == script for arg in workbench.cmdline()[1:]):
-                        # PowerShell's workbench and venv Python may have different
-                        # existing job ancestors; Windows needs separate child jobs.
-                        workbench_job = ChildJob()
-                        jobs.append(workbench_job)
-                        workbench_job.attach(workbench.pid)
-                        owners.append(workbench)
-                except psutil.NoSuchProcess:
-                    pass
-            for owner in owners:
-                for process in owner.children(recursive=True):
-                    try:
-                        # Existing descendants can have their own venv/job ancestry.
-                        descendant_job = ChildJob()
-                        jobs.append(descendant_job)
-                        descendant_job.attach(process.pid)
-                    except OSError:
-                        if process.is_running():
-                            raise
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             if child.poll() is not None:
@@ -155,31 +110,9 @@ def start(settings: Settings, *, foreground: bool = False, open_browser: bool = 
             raise RuntimeError("Backend startup timed out; see MikoLocal/logs/backend.log")
         if open_browser:
             open_ui(settings.url)
-        if foreground:
-            print(f"Miko is running at {settings.url}. Press Ctrl+C to stop.", flush=True)
-            # An indefinite Windows process wait delays Python's Ctrl+C handler.
-            while child.poll() is None:
-                time.sleep(.2)
-            code = child.returncode
-            if code:
-                raise RuntimeError(f"Backend exited with code {code}")
     except BaseException:
-        if not foreground:
-            stop(settings)
+        stop(settings)
         raise
-    finally:
-        if foreground:
-            try:
-                stop(settings)
-                output_thread.join(timeout=5)
-                child.stdout.close()
-                # The QQ reconnect runner is independent of the backend process.
-                import asyncio
-                from miko.adapters.qq.managed import ManagedQq
-                asyncio.run(ManagedQq(settings.local_root).disconnect())
-            finally:
-                for job in reversed(jobs):
-                    job.close()
 
 
 def stop(settings: Settings) -> None:
@@ -231,21 +164,14 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("start", "run", "stop", "check", "status"))
+    parser.add_argument("action", choices=("start", "stop", "check", "status"))
     parser.add_argument("--local-root", type=Path, required=True)
-    parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--workbench-pid", type=int)
     args = parser.parse_args()
-    if args.action == "run" and os.name == "nt":
-        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     try:
         settings = Settings.load(args.local_root)
         settings.prepare()
         if args.action == "status":
             print(json.dumps(request(settings.url + "/api/status"), indent=2))
-        elif args.action == "run":
-            start(settings, foreground=True, open_browser=not args.no_browser,
-                  workbench_pid=args.workbench_pid)
         else:
             {"start": start, "stop": stop, "check": check}[args.action](settings)
     except KeyboardInterrupt:

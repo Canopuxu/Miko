@@ -3,7 +3,6 @@ import { BookOpen, ChevronLeft, ChevronRight, MessageCircle, NotebookPen, Sprout
 import { RuntimeStatus } from './RuntimeStatus';
 import mikoAvatar from '../assets/miko-avatar.svg';
 import mikoLogo from '../assets/miko-logo.svg';
-import { workbenchEnabled } from '../features';
 
 export type View = 'chat' | 'qq' | 'profiles' | 'memory' | 'life' | 'review' | 'settings';
 export const views: { id: View; label: string; icon: LucideIcon; title: string }[] = [
@@ -20,20 +19,13 @@ export const NavigationContext = createContext<{
   navigate: (view: View, params?: Record<string, string | undefined>) => void;
   replace: (params: Record<string, string | undefined>) => void;
   search: URLSearchParams;
-  workbench: boolean; toggleWorkbench: () => void;
 } | null>(null);
 
-export function BrandButton() {
-  const navigation = useContext(NavigationContext)!;
-  if (!workbenchEnabled) return <div className="brand" aria-label="Miko">
+function Brand() {
+  return <div className="brand" aria-label="Miko">
     <span className="brand-mark" aria-hidden="true"><img className="brand-logo" src={mikoLogo} alt="" />
       <img className="brand-avatar" src={mikoAvatar} alt="" /></span>
   </div>;
-  return <button className="brand" onClick={navigation.toggleWorkbench}
-    title={navigation.workbench ? '返回 Miko' : '打开 DSH 工作台'} aria-label={navigation.workbench ? '返回 Miko' : '打开 DSH 工作台'}>
-    <span className="brand-mark" aria-hidden="true"><img className="brand-logo" src={mikoLogo} alt="" />
-      <img className="brand-avatar" src={mikoAvatar} alt="" /></span>
-  </button>;
 }
 
 export function AppShell({ view, sidebar, children }: { view: View; sidebar: ReactNode; children: ReactNode }) {
@@ -41,7 +33,7 @@ export function AppShell({ view, sidebar, children }: { view: View; sidebar: Rea
   const current = views.find(item => item.id === view)!;
   return <div className={`workspace-frame ${navigation.expanded ? '' : 'sidebar-collapsed'}`}>
     <aside className="primary-sidebar">
-      <div className="brand-space" aria-hidden="true" />
+      <Brand />
       <nav className="primary-navigation" aria-label="一级导航">
         {views.map(view => <button key={view.id} className={`primary-item ${view.id === navigation.active ? 'selected' : ''}`}
           aria-current={view.id === navigation.active ? 'page' : undefined}
