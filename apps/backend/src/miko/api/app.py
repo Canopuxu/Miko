@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+import mimetypes
 import secrets
 from typing import Callable
 
@@ -88,5 +89,7 @@ def create_app(settings: Settings, control_token: str, request_stop: Callable[[]
     app.include_router(history_router(chat.store))
     web_root = REPO_ROOT / "apps/web/dist"
     if web_root.exists():
+        # Windows registry entries can override Python's built-in SVG type.
+        mimetypes.add_type("image/svg+xml", ".svg")
         app.mount("/", StaticFiles(directory=web_root, html=True), name="miko-web")
     return app

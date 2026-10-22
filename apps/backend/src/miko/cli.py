@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from urllib.error import URLError
 from urllib.request import Request, build_opener, ProxyHandler
@@ -50,7 +52,7 @@ def recorded_process(settings: Settings) -> tuple[dict, psutil.Process] | None:
         return None
 
 
-def start(settings: Settings) -> None:
+def start(settings: Settings, *, foreground: bool = False) -> None:
     from miko.restore import recover_interrupted_restore
     recover_interrupted_restore(settings)
     previous = recorded_process(settings)
@@ -68,13 +70,27 @@ def start(settings: Settings) -> None:
     env.pop("PYTHONHOME", None)
     env["TEMP"] = str(settings.local_root / "cache/tmp")
     env["TMP"] = str(settings.local_root / "cache/tmp")
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP if foreground
+                                   else subprocess.CREATE_NO_WINDOW)
     with (settings.local_root / "logs/backend.log").open("ab") as log:
         child = subprocess.Popen(
             [str(settings.python_executable), "-X", "utf8", "-m", "miko.server", "--local-root", str(settings.local_root)],
             cwd=settings.workspace, env=env, stdin=subprocess.DEVNULL,
-            stdout=log, stderr=log, **kwargs,
+            stdout=subprocess.PIPE if foreground else log,
+            stderr=subprocess.STDOUT if foreground else log, **kwargs,
         )
+    output_thread = None
+    if foreground:
+        def relay_output():
+            with (settings.local_root / "logs/backend.log").open("ab", buffering=0) as output:
+                for line in child.stdout:
+                    output.write(line)
+                    sys.stdout.write(line.decode("utf-8", errors="replace"))
+                    sys.stdout.flush()
+        output_thread = threading.Thread(target=relay_output, daemon=True)
+        output_thread.start()
     record = {"pid": child.pid, "created": psutil.Process(child.pid).create_time(),
               "port": settings.port, "control_token": token}
     write_json(settings.process_file, record)
@@ -87,14 +103,33 @@ def start(settings: Settings) -> None:
                 status = request(settings.url + "/health")
                 if status.get("service") == "miko" and status.get("ready"):
                     print(json.dumps({"url": settings.url, "pid": child.pid, **status}))
-                    return
+                    break
             except (URLError, TimeoutError, ConnectionError):
                 pass
             time.sleep(0.2)
-        raise RuntimeError("Backend startup timed out; see MikoLocal/logs/backend.log")
+        else:
+            raise RuntimeError("Backend startup timed out; see MikoLocal/logs/backend.log")
+        if foreground:
+            print(f"Miko is running at {settings.url}. Press Ctrl+C to stop.", flush=True)
+            # An indefinite Windows process wait delays Python's Ctrl+C handler.
+            while child.poll() is None:
+                time.sleep(.2)
+            code = child.returncode
+            if code:
+                raise RuntimeError(f"Backend exited with code {code}")
     except BaseException:
-        stop(settings)
+        if not foreground:
+            stop(settings)
         raise
+    finally:
+        if foreground:
+            stop(settings)
+            output_thread.join(timeout=5)
+            child.stdout.close()
+            # The QQ reconnect runner is independent of the backend process.
+            import asyncio
+            from miko.adapters.qq.managed import ManagedQq
+            asyncio.run(ManagedQq(settings.local_root).disconnect())
 
 
 def stop(settings: Settings) -> None:
@@ -146,16 +181,22 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("start", "stop", "check", "status"))
+    parser.add_argument("action", choices=("start", "run", "stop", "check", "status"))
     parser.add_argument("--local-root", type=Path, required=True)
     args = parser.parse_args()
+    if args.action == "run" and os.name == "nt":
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     try:
         settings = Settings.load(args.local_root)
         settings.prepare()
         if args.action == "status":
             print(json.dumps(request(settings.url + "/api/status"), indent=2))
+        elif args.action == "run":
+            start(settings, foreground=True)
         else:
             {"start": start, "stop": stop, "check": check}[args.action](settings)
+    except KeyboardInterrupt:
+        pass
     except Exception as error:
         print(f"Miko {args.action} failed: {error}", file=sys.stderr)
         raise SystemExit(1) from error
