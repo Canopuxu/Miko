@@ -43,6 +43,43 @@ test('monthly columns use the available width including later branches',()=>{
   }
   assert.equal(monthLifeGraph(graph,'2025-01',620).empty,true);
 });
+
+test('selection follows one continuous route from the monthly root through forks and stops at the chosen node',()=>{
+  const incoming=new Map(graph.edges.map(edge=>[edge.target,edge]));
+  const selections=[graph.nodes.find(node=>node.data.event&&!node.data.event.goal_id).id,
+    'goal:piano',graph.nodes.find(node=>node.data.event?.goal_id==='drawing').id];
+  for(const selection of selections){
+    const month=monthLifeGraph(graph,'2026-10',960,selection);
+    const path=month.selectionPath;
+    assert.ok(path.length>3);
+    assert.equal(path[0].x1,month.rootX);assert.equal(path[0].y1,42);
+    for(let i=1;i<path.length;i++){
+      assert.equal(path[i].x1,path[i-1].x2,path[i].id);
+      assert.equal(path[i].y1,path[i-1].y2,path[i].id);
+    }
+    const target=month.nodes.find(node=>node.id===selection);
+    assert.equal(path.at(-1).x2,target.position.x+14);
+    assert.equal(path.at(-1).y2,target.position.y+18);
+    const ancestry=[];
+    for(let id=selection;incoming.has(id);){const edge=incoming.get(id);ancestry.unshift(edge.id);id=edge.source;}
+    assert.equal(path.slice(3).map(line=>line.id).join('|'),ancestry.filter(id=>month.lines.some(line=>line.id===id)).join('|'));
+  }
+  assert.equal(monthLifeGraph(graph,'2026-10',960).selectionPath.length,0);
+});
+
+test('a cross-month selection continues from this month’s header along its own incoming track',()=>{
+  const events=['2026-09-30','2026-10-01','2026-10-02'].flatMap(day=>[{day,text:'吃饭'},{day,text:'散步'}]);
+  const history=buildLifeGraph([],events,'Miko','2026-10-02');
+  const target=history.nodes.find(node=>node.data.event?.day==='2026-10-02'&&node.data.event.text==='散步');
+  const month=monthLifeGraph(history,'2026-10',620,target.id);
+  assert.ok(month.selectionPath.length>3);
+  assert.equal(month.selectionPath[2].y2,108);
+  for(let i=1;i<month.selectionPath.length;i++){
+    assert.equal(month.selectionPath[i].x1,month.selectionPath[i-1].x2);
+    assert.equal(month.selectionPath[i].y1,month.selectionPath[i-1].y2);
+  }
+  assert.ok(month.selectionPath.slice(3).every(line=>line.x1===line.x2));
+});
 const activities=graph=>graph.nodes.filter(node=>node.data.event);
 const reading=(graph,date)=>activities(graph).filter(node=>node.data.event.day===date)
   .sort((a,b)=>a.position.y-b.position.y||a.position.x-b.position.x);

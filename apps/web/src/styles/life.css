@@ -60,8 +60,12 @@
 .activity.ordinary .life-branch-dot { box-sizing: border-box; background: var(--page); border: 1.5px solid #9aa58f; }
 .life-branch-node.activity.is-selected, .life-branch-node.activity:hover { background: var(--sage-wash); }
 .goal.is-selected .life-branch-dot { box-shadow: 0 0 0 3px var(--sage-wash); }.goal:hover .life-branch-copy > span { color: var(--sage); }
-.life-month-line { stroke: #c8cfc0; stroke-width: 1.2; }.life-month-line.active { stroke:var(--sage); stroke-width:1.8; }
-.life-month-line.planned { stroke:#d5d9ce; stroke-dasharray:4 5; }
+.life-month-line { stroke: #d1d7ca; stroke-width: 1.3; stroke-linecap: round; }
+.life-month-line.planned { stroke-dasharray:4 5; }
+.life-month-selection-path { fill:none; stroke:var(--sage); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:1; stroke-dashoffset:0; animation:life-path-fill .4s cubic-bezier(.4,0,.2,1) both; }
+@keyframes life-path-fill { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
+.activity.is-selected .life-branch-dot { background:var(--sage); border-color:var(--sage); }
+@media (prefers-reduced-motion: reduce) { .life-month-selection-path { animation:none; } }
 .life-branch-junction { position:relative; width:28px; height:36px; }
 .life-branch-junction > span { position:absolute; left:11px; top:15px; width:6px; height:6px; border-radius:50%; background:#9daa90; }
 .life-branch-detail { position: sticky; bottom: 0; z-index: 3; background: var(--page); display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #706b62; font-size: 12px; min-height: 42px; padding: 10px 0; border-top: 1px solid var(--line); }.life-branch-detail > span { white-space: pre-wrap; overflow-wrap: anywhere; }.life-branch-detail > button { flex-shrink: 0; }

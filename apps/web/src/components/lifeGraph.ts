@@ -156,12 +156,12 @@ export type LifeLine={id:string; x1:number; y1:number; x2:number; y2:number; bra
 
 // A month is a window onto the full history's tracks. Boundary lines continue
 // without creating new goals or reconnecting completed endpoints.
-export function monthLifeGraph(graph:ReturnType<typeof buildLifeGraph>,month:string,width:number) {
+export function monthLifeGraph(graph:ReturnType<typeof buildLifeGraph>,month:string,width:number,selection='') {
   const nodes=graph.nodes.filter(node=>{
     const day=node.data.event?.day??node.data.day??(node.data.kind==='date'?node.data.label:'');
     return day.startsWith(month);
   });
-  if(!nodes.length)return {nodes:[] as LifeNode[],lines:[] as LifeLine[],height:0,rootX:0,empty:true};
+  if(!nodes.length)return {nodes:[] as LifeNode[],lines:[] as LifeLine[],selectionPath:[] as LifeLine[],height:0,rootX:0,empty:true};
   const top=Math.min(...nodes.map(node=>node.position.y))-20;
   const bottom=Math.max(...nodes.map(node=>node.position.y+(node.height??74)))+28;
   const byId=new Map(graph.nodes.map(node=>[node.id,node]));
@@ -189,12 +189,29 @@ export function monthLifeGraph(graph:ReturnType<typeof buildLifeGraph>,month:str
   const incoming=[...new Set(lines.filter(line=>line.y1===top).map(line=>px(line.x1)))];
   const rootX=incoming.length?(Math.min(...incoming)+Math.max(...incoming))/2:width/2;
   const projected=lines.map(line=>({...line,x1:px(line.x1),y1:py(line.y1),x2:px(line.x2),y2:py(line.y2)}));
+  // Follow actual parent links, not the activity's category or borrowed column.
+  const parents=new Map(graph.edges.map(edge=>[edge.target,edge]));
+  const projectedById=new Map(projected.map(line=>[line.id,line]));
+  const selectionPath:LifeLine[]=[];
+  for(let id=selection;parents.has(id);){
+    const edge=parents.get(id)!;
+    const line=projectedById.get(edge.id);
+    if(line)selectionPath.unshift(line);
+    id=edge.source;
+  }
+  if(selectionPath.length){
+    const first=selectionPath[0];
+    selectionPath.unshift(
+      {id:'selected-root',x1:rootX,y1:42,x2:rootX,y2:70,planned:false},
+      {id:'selected-crown',x1:rootX,y1:70,x2:first.x1,y2:70,planned:false},
+      {id:'selected-stem',x1:first.x1,y1:70,x2:first.x1,y2:first.y1,planned:false});
+  }
   if(incoming.length){
-    projected.push({id:'month-root',x1:rootX,y1:42,x2:rootX,y2:70,planned:false});
+    projected.push({id:'month-root',x1:rootX,y1:42,x2:rootX,y2:70,planned:false},
+      {id:'month-crown',x1:Math.min(...incoming),y1:70,x2:Math.max(...incoming),y2:70,planned:false});
     for(const [index,x] of incoming.entries()){
-      projected.push({id:'month-crown:'+index,x1:rootX,y1:70,x2:x,y2:70,planned:false},
-        {id:'month-stem:'+index,x1:x,y1:70,x2:x,y2:108,planned:false});
+      projected.push({id:'month-stem:'+index,x1:x,y1:70,x2:x,y2:108,planned:false});
     }
   }
-  return {nodes:visible,lines:projected,height:py(bottom),rootX,empty:false};
+  return {nodes:visible,lines:projected,selectionPath,height:py(bottom),rootX,empty:false};
 }

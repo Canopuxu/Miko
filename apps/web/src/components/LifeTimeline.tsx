@@ -43,8 +43,8 @@ export function LifeTimeline({goals,events,month:selectedMonth,onMonthChange,asO
     const observer=new ResizeObserver(([entry])=>setWidth(entry.contentRect.width));
     observer.observe(element);return()=>observer.disconnect();
   },[]);
-  const graph=useMemo(()=>monthLifeGraph(buildLifeGraph(goals,events,characterName,asOf,'',query,heights),month,width),
-    [goals,events,characterName,asOf,query,heights,month,width]);
+  const graph=useMemo(()=>monthLifeGraph(buildLifeGraph(goals,events,characterName,asOf,'',query,heights),month,width,selection),
+    [goals,events,characterName,asOf,query,heights,month,width,selection]);
   useLayoutEffect(()=>{
     if(!track.current)return;
     const observer=new ResizeObserver(entries=>{
@@ -65,6 +65,8 @@ export function LifeTimeline({goals,events,month:selectedMonth,onMonthChange,asO
   const selected=graph.nodes.find(node=>node.id===selection)?.data;
   const detail=selected?.kind==='goal'?selected.event?.text||selected.goal?.current_state:selected?.event?.text;
   const showDetail=detail&&(selected?.kind!=='goal'||detail!==selected.label);
+  const path=graph.selectionPath;
+  const pathData=path.length?`M ${path[0].x1} ${path[0].y1} `+path.map(line=>`L ${line.x2} ${line.y2}`).join(' '):'';
   function changeMonth(value:string){if(value){setLocalMonth(value);onMonthChange?.(value);}}
   return <section className="life-timeline" aria-label="生活轨迹" onClick={event=>{
     if(!(event.target as Element).closest('.life-branch-node, .life-branch-detail, input, button'))setSelection('');
@@ -82,7 +84,8 @@ export function LifeTimeline({goals,events,month:selectedMonth,onMonthChange,asO
         <div ref={track} className="life-month-track" style={{height:graph.height}}>
           <svg className="life-month-lines" width="100%" height={graph.height} aria-hidden="true">
             {graph.lines.map(line=><line key={line.id} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-              className={`life-month-line ${line.planned?'planned':''} ${selected?.branch&&selected.branch===line.branch?'active':''}`}/>)}
+              className={`life-month-line ${line.planned?'planned':''}`}/>)}
+            {pathData&&<path key={selection} className="life-month-selection-path" d={pathData} pathLength={1}/>}
           </svg>
           <button className="life-branch-root life-month-root" style={{left:graph.rootX-40}} onClick={()=>setSelection('')}>{characterName}</button>
           {graph.nodes.map(node=><div key={node.id} className="life-month-node"
