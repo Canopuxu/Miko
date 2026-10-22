@@ -10,13 +10,14 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from urllib.error import URLError
 from urllib.request import Request, build_opener, ProxyHandler
 
 import psutil
 
 from miko.adapters.dsh.runtime import DshRuntime
-from miko.settings import Settings, write_json
+from miko.settings import REPO_ROOT, Settings, write_json
 
 
 # Local control requests must not follow the user's HTTP proxy configuration.
@@ -52,7 +53,17 @@ def recorded_process(settings: Settings) -> tuple[dict, psutil.Process] | None:
         return None
 
 
-def start(settings: Settings, *, foreground: bool = False) -> None:
+def open_ui(url: str) -> None:
+    try:
+        opened = webbrowser.open(url)
+    except (OSError, webbrowser.Error):
+        opened = False
+    if not opened:
+        print(f"Open Miko in your browser: {url}", flush=True)
+
+
+def start(settings: Settings, *, foreground: bool = False, open_browser: bool = False,
+          workbench_pid: int | None = None) -> None:
     from miko.restore import recover_interrupted_restore
     recover_interrupted_restore(settings)
     previous = recorded_process(settings)
@@ -60,6 +71,8 @@ def start(settings: Settings, *, foreground: bool = False) -> None:
         record, _ = previous
         status = request(f"http://127.0.0.1:{record['port']}/health")
         print(json.dumps({"already_running": True, "url": f"http://127.0.0.1:{record['port']}", **status}))
+        if open_browser and status.get('ready'):
+            open_ui(f"http://127.0.0.1:{record['port']}")
         return
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", settings.port))
@@ -94,7 +107,38 @@ def start(settings: Settings, *, foreground: bool = False) -> None:
     record = {"pid": child.pid, "created": psutil.Process(child.pid).create_time(),
               "port": settings.port, "control_token": token}
     write_json(settings.process_file, record)
+    jobs = []
     try:
+        if foreground and os.name == 'nt':
+            from miko.process_job import ChildJob
+            job = ChildJob()
+            jobs.append(job)
+            job.attach(child.pid)
+            # Include children already created before assignment; later ones inherit it.
+            owners = [psutil.Process(child.pid)]
+            if workbench_pid:
+                try:
+                    workbench = psutil.Process(workbench_pid)
+                    script = (REPO_ROOT / 'scripts/workbench.mjs').resolve()
+                    if any(Path(arg).resolve() == script for arg in workbench.cmdline()[1:]):
+                        # PowerShell's workbench and venv Python may have different
+                        # existing job ancestors; Windows needs separate child jobs.
+                        workbench_job = ChildJob()
+                        jobs.append(workbench_job)
+                        workbench_job.attach(workbench.pid)
+                        owners.append(workbench)
+                except psutil.NoSuchProcess:
+                    pass
+            for owner in owners:
+                for process in owner.children(recursive=True):
+                    try:
+                        # Existing descendants can have their own venv/job ancestry.
+                        descendant_job = ChildJob()
+                        jobs.append(descendant_job)
+                        descendant_job.attach(process.pid)
+                    except OSError:
+                        if process.is_running():
+                            raise
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             if child.poll() is not None:
@@ -109,6 +153,8 @@ def start(settings: Settings, *, foreground: bool = False) -> None:
             time.sleep(0.2)
         else:
             raise RuntimeError("Backend startup timed out; see MikoLocal/logs/backend.log")
+        if open_browser:
+            open_ui(settings.url)
         if foreground:
             print(f"Miko is running at {settings.url}. Press Ctrl+C to stop.", flush=True)
             # An indefinite Windows process wait delays Python's Ctrl+C handler.
@@ -123,13 +169,17 @@ def start(settings: Settings, *, foreground: bool = False) -> None:
         raise
     finally:
         if foreground:
-            stop(settings)
-            output_thread.join(timeout=5)
-            child.stdout.close()
-            # The QQ reconnect runner is independent of the backend process.
-            import asyncio
-            from miko.adapters.qq.managed import ManagedQq
-            asyncio.run(ManagedQq(settings.local_root).disconnect())
+            try:
+                stop(settings)
+                output_thread.join(timeout=5)
+                child.stdout.close()
+                # The QQ reconnect runner is independent of the backend process.
+                import asyncio
+                from miko.adapters.qq.managed import ManagedQq
+                asyncio.run(ManagedQq(settings.local_root).disconnect())
+            finally:
+                for job in reversed(jobs):
+                    job.close()
 
 
 def stop(settings: Settings) -> None:
@@ -183,6 +233,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("start", "run", "stop", "check", "status"))
     parser.add_argument("--local-root", type=Path, required=True)
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--workbench-pid", type=int)
     args = parser.parse_args()
     if args.action == "run" and os.name == "nt":
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
@@ -192,7 +244,8 @@ def main() -> None:
         if args.action == "status":
             print(json.dumps(request(settings.url + "/api/status"), indent=2))
         elif args.action == "run":
-            start(settings, foreground=True)
+            start(settings, foreground=True, open_browser=not args.no_browser,
+                  workbench_pid=args.workbench_pid)
         else:
             {"start": start, "stop": stop, "check": check}[args.action](settings)
     except KeyboardInterrupt:

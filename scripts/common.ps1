@@ -15,7 +15,7 @@ function Restore-MikoEnvironment {
 }
 
 function Invoke-Miko {
-    param([string]$Action)
+    param([string]$Action, [string[]]$Arguments = @())
     if (-not (Test-Path -LiteralPath $mikoPython)) {
         throw 'Run scripts\setup.ps1 first.'
     }
@@ -25,7 +25,7 @@ function Invoke-Miko {
     try {
         $env:PYTHONPATH = ''
         $env:PYTHONHOME = ''
-        & $mikoPython -m miko.cli $Action --local-root $mikoLocalRoot
+        & $mikoPython -m miko.cli $Action --local-root $mikoLocalRoot @Arguments
         if ($LASTEXITCODE -ne 0) { throw "Miko $Action failed with exit code $LASTEXITCODE" }
     } finally {
         Restore-MikoEnvironment @{PYTHONPATH=$previousPythonPath; PYTHONHOME=$previousPythonHome}

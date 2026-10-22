@@ -6,7 +6,9 @@ try {
             $workbench = & (Join-Path $PSScriptRoot 'start_workbench.ps1') -PassThru
         }
     } catch { Write-Warning "DSH workbench did not start: $_" }
-    Invoke-Miko 'run'
+    $runArguments = @()
+    if ($workbench) { $runArguments = @('--workbench-pid', [string]$workbench.Id) }
+    Invoke-Miko 'run' -Arguments $runArguments
 } finally {
     if ($workbench -and -not $workbench.HasExited) {
         & taskkill.exe /PID $workbench.Id /T /F | Out-Null
