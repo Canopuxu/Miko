@@ -19,7 +19,7 @@ cd Miko
 .\scripts\start.ps1
 ```
 
-首次初始化会安装依赖并创建同级的 `MikoLocal` 目录。启动后打开 http://127.0.0.1:7870 。退出时运行 `.\scripts\stop.ps1`。
+首次初始化会安装依赖并创建同级的 `MikoLocal` 目录。以后启动只需运行 `.\scripts\start.ps1`。服务就绪后会自动用默认浏览器打开 Miko。使用期间保留命令行窗口，退出时在该窗口按 `Ctrl+C`。
 
 ## 首次配置
 
