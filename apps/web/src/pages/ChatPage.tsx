@@ -249,7 +249,6 @@ export function ChatPage() {
               : <button type="submit" className="send-button" disabled={!enabled || !draft.trim()}>发送 <ArrowUp size={16}/></button>}
           </div>
         </form>
-        {generating && <p className="composer-caption" role="status">{characterName} 正在回复你</p>}
       </footer>
     {finding && <ChatSearch source="web" conversationId={selected} onClose={()=>setFinding(false)} navigationDisabled={generating || loading}
       onOpen={item=>guard.proceed(()=>{setFinding(false);navigation.navigate('chat',{conversation:item.conversation_id,message:item.id,new:undefined});})}/>}

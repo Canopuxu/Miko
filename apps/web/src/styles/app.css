@@ -53,7 +53,7 @@ h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .message.user .message-text { color: #787166; }
 .message-note { display: block; color: #aaa095; font-size: 10px; margin-top: 8px; }
 .thinking { color: #b1a292; animation: breathe 1.5s infinite; }
-.composer-area { width: 100%; max-width: 850px; margin: auto; padding: 13px 36px 18px; }
+.composer-area { width: 100%; max-width: 850px; margin: 0 auto; flex-shrink: 0; padding: 13px 36px 18px; }
 .composer { border: 1px solid #ded7cd; border-radius: 17px; background: #fffdfa; padding: 15px 17px 12px; box-shadow: 0 6px 25px #84745408; }
 .composer:focus-within { border-color: #bba58c; box-shadow: 0 0 0 3px #beaa8f0c; }
 textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; line-height: 1.7; color: #494039; font-size: 13px; }
@@ -61,13 +61,13 @@ textarea::placeholder { color: #b7ac9e; }
 .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 7px; }
 .composer-bottom > span { color: #b8afa3; font-size: 10px; }
 .composer-bottom i { padding: 0 6px; font-style: normal; }
+.composer-bottom .send-button { min-width: 104px; flex-shrink: 0; }
 .send-button { border: 0; border-radius: 10px; padding: 9px 13px; background: #82705c; color: #fffdf9; font-size: 11px; }
 .send-button:hover:enabled { background: #6c5b48; }
 .send-button span { margin-left: 9px; }
 .stop-button { background: #eee8df; color: #786552; }
 .stop-button span { margin-left: 0; margin-right: 5px; font-size: 9px; }
 .stop-button:hover:enabled { background: #e4dacc; }
-.composer-caption { text-align: center; font-size: 10px; color: #b7ad9e; margin: 12px 0 0; }
 .error-notice { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: #f7ece5; color: #956d53; border: 1px solid #ead4c5; padding: 10px 13px; border-radius: 10px; font-size: 12px; }
 .error-notice button { border: 0; background: none; color: inherit; font-size: 18px; }
 .boot { text-align: center; padding: 20vh 20px; color: #978775; }

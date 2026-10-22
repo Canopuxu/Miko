@@ -81,8 +81,8 @@ export function ModelFields({value,change,target='provider',kind='chat',catalog,
       <label>API 密钥<input type="password" autoComplete="new-password" value={value.api_key} placeholder={value.has_key?(inherited?'共用聊天密钥；填写可更换':'已保存，留空保留'):'填写密钥'} onChange={event=>change({...value,api_key:event.target.value})}/></label></>}
     <ModelPicker value={value.model} change={model=>change({...value,model})} kind={kind} catalog={source}/>
     {connection&&<div className="settings-model-toolbar"><div className="settings-catalog-status" aria-live="polite">
-      <button type="button" disabled={source.state==='loading'||!value.api_base.trim()||(!value.api_key.trim()&&!value.has_key)} onClick={source.refresh}><RefreshCw size={14} className={source.state==='loading'?'spinning':''}/>刷新模型列表</button>
-      {(source.state==='loading'||source.state==='error')&&<span className={source.state==='error'?'error':''}>{source.state==='loading'?'正在获取模型列表…':source.error}</span>}
+      <button type="button" aria-busy={source.state==='loading'} disabled={source.state==='loading'||!value.api_base.trim()||(!value.api_key.trim()&&!value.has_key)} onClick={source.refresh}><RefreshCw size={14} className={source.state==='loading'?'spinning':''}/>刷新模型列表</button>
+      {source.state==='error'&&<span className="error">{source.error}</span>}
     </div>{testAction}</div>}
   </div>;
 }

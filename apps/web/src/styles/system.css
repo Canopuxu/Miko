@@ -84,7 +84,8 @@ input, textarea, select { accent-color: var(--sage); }
 .composer-area { padding: 12px 36px 16px; border-top: 1px solid #efeee6; }
 .composer { background: var(--surface); border-color: #dfe2d4; border-radius: 15px; box-shadow: 0 4px 20px #5f725905; }
 .composer textarea { color: var(--ink); font-size: 14px; }.composer textarea::placeholder { color: #b0a897; }
-.composer-bottom { align-items: center; }.composer-bottom > span { font-size: 10px; color: #a49c8c; }.composer-caption { color: #b0a997; }
+.composer textarea:focus-visible { outline: none; }
+.composer-bottom { align-items: center; }.composer-bottom > span { font-size: 10px; color: #a49c8c; }
 .profile-filters label, .life-navigation label { display: grid; gap: 7px; font-size: 11px; color: #8c8678; }
 .secondary-sidebar .profile-filters { grid-template-columns: 1fr; }
 .memory-panel button.text-button { border: 0; background: transparent; color: var(--sage); padding: 4px; font-size: 11px; }
